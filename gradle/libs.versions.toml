@@ -1,0 +1,28 @@
+[versions]
+kafka = "4.2.0"
+jackson = "2.21.3"
+slf4j = "2.0.18"
+junit-jupiter = "6.0.3"
+
+# Phase 2: Flink PTF/UDAF artifact (ptf/ subproject). Compile-time only;
+# the runtime is provided by whichever Flink the JAR is deployed onto
+# (cp-flink:2.1.1-cp1-java21 on Minikube, managed version on CCAF).
+flink = "2.1.1"
+t-digest = "3.3"
+shadow = "9.4.1"
+
+[libraries]
+kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+# Phase 2 — Flink table API + percentile sketch for PTF/UDAF JAR.
+flink-table-api-java = { module = "org.apache.flink:flink-table-api-java", version.ref = "flink" }
+flink-table-common   = { module = "org.apache.flink:flink-table-common",   version.ref = "flink" }
+t-digest             = { module = "com.tdunning:t-digest",                 version.ref = "t-digest" }
+
+[plugins]
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }

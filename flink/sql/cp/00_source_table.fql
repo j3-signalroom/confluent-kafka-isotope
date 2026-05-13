@@ -1,0 +1,42 @@
+-- =====================================================================
+-- Source table — Confluent Platform Flink (CMF on Minikube)
+--
+-- Apply via the Flink SQL Client against the CP Flink session cluster:
+--   make flink-up                              # bring up the cluster
+--   kubectl exec -n confluent -it <jobmanager-pod> -- \
+--       sql-client.sh -f /path/to/00_source_table.sql
+--
+-- After this file is applied, the shared/ DDL files are environment-agnostic
+-- and can be applied verbatim.
+--
+-- Adapt `'topic' = 'iso-topic'` to whichever topic(s) your producers write to.
+-- For a multi-topic pipeline, repeat this CREATE TABLE per topic (rename the
+-- table per topic, e.g. `isotope_raw_topic_a`) and have shared/05_isotope_view
+-- UNION ALL them together.
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS isotope_raw (
+    -- We don't decode the message value here — the isotope lives in headers,
+    -- and reports only need scalar header columns. Treat the value as raw
+    -- bytes so this table works for any value format (Avro/JSON/raw).
+    `value`         BYTES,
+
+    -- Standard Kafka metadata, exposed as virtual columns for the reports.
+    `headers`       MAP<STRING, BYTES> METADATA FROM 'headers'   VIRTUAL,
+    `event_time`    TIMESTAMP_LTZ(3)   METADATA FROM 'timestamp' VIRTUAL,
+    `kafka_topic`   STRING             METADATA FROM 'topic'     VIRTUAL,
+    `kafka_partition` INT              METADATA FROM 'partition' VIRTUAL,
+    `kafka_offset`  BIGINT             METADATA FROM 'offset'    VIRTUAL,
+
+    -- 5s watermark allowance: well under the 60s allowance typical
+    -- of building-LAN ingest paths, but tight enough that latency reports
+    -- close quickly in dev.
+    WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
+) WITH (
+    'connector'                     = 'kafka',
+    'topic'                         = 'iso-topic',
+    'properties.bootstrap.servers'  = 'kafka:9071',
+    'properties.group.id'           = 'isotope-flink-reports',
+    'scan.startup.mode'             = 'earliest-offset',
+    'value.format'                  = 'raw'
+);

@@ -1,0 +1,46 @@
+-- =====================================================================
+-- Latency-percentiles report — closes the "no portable percentiles in
+-- pure SQL" gap from Phase 1's 10_latency_report.sql. Uses the
+-- LATENCY_PERCENTILES UDAF (T-Digest sketch) to compute p50 / p95 / p99
+-- per (origin_service, this_topic) per 1-minute tumbling window.
+--
+-- Depends on:
+--   - the `isotope` view (shared/05_isotope_view.sql)
+--   - the LATENCY_PERCENTILES function (cp/01_register_functions.sql or
+--     cc/01_register_functions.sql)
+--
+-- Sketch accuracy: T-Digest with compression=100 gives ~few-% error at
+-- p99 with bounded memory (a few KB per accumulator key). Increase the
+-- compression parameter inside LatencyPercentilesUDAF.java if you need
+-- tighter tails at the cost of memory.
+-- =====================================================================
+
+CREATE VIEW IF NOT EXISTS latency_percentiles_1m AS
+SELECT
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_topic`,
+    LATENCY_PERCENTILES(`latency_ms`) AS `pcts`
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_topic`;
+
+-- Convenience view that flattens the ROW result for direct SELECT use:
+--   SELECT * FROM latency_percentiles_flat_1m;
+CREATE VIEW IF NOT EXISTS latency_percentiles_flat_1m AS
+SELECT
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_topic`,
+    `pcts`.`p50_ms`,
+    `pcts`.`p95_ms`,
+    `pcts`.`p99_ms`,
+    `pcts`.`sample_count`
+FROM latency_percentiles_1m;

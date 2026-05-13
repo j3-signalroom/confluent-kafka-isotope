@@ -1,0 +1,14 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Port Forward Flink TaskManager",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/port-forward-taskmanager.sh",
+            "presentation": {
+                "reveal": "silent",
+                "panel": "dedicated"
+            }
+        }
+    ]
+}

@@ -1,0 +1,37 @@
+-- =====================================================================
+-- Typed view of the isotope-tagged stream
+--
+-- Decodes the six scalar reporting headers written by
+-- IsotopeProducerInterceptor into properly-typed columns and computes a
+-- per-record latency (broker-arrival time minus origin timestamp).
+--
+-- Depends on:
+--   - isotope_raw, which provides the columns `headers`, `event_time`,
+--     `kafka_topic`. Both cp/00_source_table.sql and cc/00_source_table.sql
+--     create that shape under the name `isotope_raw`.
+--
+-- All downstream reports read from this view, so they are identical across
+-- CCAF and CP Flink.
+-- =====================================================================
+
+CREATE VIEW IF NOT EXISTS isotope AS
+SELECT
+    CAST(`headers`['x-isotope-trace-id']                          AS STRING) AS trace_id,
+    CAST(CAST(`headers`['x-isotope-origin-ts']      AS STRING)    AS BIGINT) AS origin_ts_ms,
+    CAST(`headers`['x-isotope-origin-service']                    AS STRING) AS origin_service,
+    CAST(`headers`['x-isotope-this-service']                      AS STRING) AS this_service,
+    CAST(`headers`['x-isotope-this-topic']                        AS STRING) AS this_topic,
+    CAST(CAST(`headers`['x-isotope-hop-count']      AS STRING)    AS INT)    AS hop_count,
+    `event_time`,
+    -- Latency from origin to this hop, in milliseconds.
+    -- TIMESTAMPDIFF is portable across CCAF and CP Flink and preserves
+    -- millisecond precision when both operands are TIMESTAMP_LTZ(3).
+    TIMESTAMPDIFF(
+        MILLISECOND,
+        TO_TIMESTAMP_LTZ(
+            CAST(CAST(`headers`['x-isotope-origin-ts'] AS STRING) AS BIGINT),
+            3),
+        `event_time`
+    ) AS latency_ms
+FROM isotope_raw
+WHERE `headers`['x-isotope-trace-id'] IS NOT NULL;

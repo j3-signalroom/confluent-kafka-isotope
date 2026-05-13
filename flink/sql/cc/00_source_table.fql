@@ -1,0 +1,31 @@
+-- =====================================================================
+-- Source table — Confluent Cloud for Apache Flink (CCAF)
+--
+-- On CCAF, topics in the bound Kafka cluster are auto-registered as Flink
+-- tables. You do not normally write a CREATE TABLE for an existing topic —
+-- the table appears with the topic's name. This file documents the table
+-- shape CCAF will materialize for an isotope-producing topic, and creates
+-- an aliased view (`isotope_raw`) so the shared/ DDL works verbatim across
+-- CC and CP.
+--
+-- Apply via the Confluent CLI or Cloud Console SQL workspace:
+--   confluent flink statement create --sql-file flink/sql/cc/00_source_table.sql
+--
+-- If the topic CCAF auto-registered has a different name, change the inner
+-- SELECT below to match (e.g. `FROM "my-topic"`).
+-- =====================================================================
+
+-- A view rather than a table — the underlying topic is already a CCAF table.
+-- This indirection lets us keep shared/ files identical across environments.
+CREATE VIEW isotope_raw AS
+SELECT
+    `$rowtime`      AS `event_time`,        -- CCAF exposes broker timestamp as $rowtime
+    `headers`       AS `headers`,
+    `value`         AS `value`,
+    `$topic`        AS `kafka_topic`,
+    `$partition`    AS `kafka_partition`,
+    `$offset`       AS `kafka_offset`
+FROM `iso-topic`;
+-- ^^^^ replace `iso-topic` with whichever topic your producers write to.
+--      For multi-topic pipelines, do `... FROM topic_a UNION ALL ... FROM topic_b`
+--      or define one view per topic and UNION ALL them in shared/05_isotope_view.sql.

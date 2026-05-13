@@ -1,0 +1,163 @@
+apiVersion: platform.confluent.io/v1beta1
+kind: KRaftController
+metadata:
+  name: kraftcontroller
+  namespace: confluent
+spec:
+  dataVolumeCapacity: 10G
+  image:
+    application: docker.io/confluentinc/cp-server:8.1.0
+    init: confluentinc/confluent-init-container:3.1.0
+  replicas: 1
+  # Removed metricsClient — circular dependency: C3 isn't up when KRaftController initializes
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: Kafka
+metadata:
+  name: kafka
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-server:8.1.0
+    init: confluentinc/confluent-init-container:3.1.0
+  dataVolumeCapacity: 100Gi
+  configOverrides:
+    server:
+      # Single-broker dev: override all internal topic replication factors to 1
+      - offsets.topic.replication.factor=1
+      - transaction.state.log.replication.factor=1
+      - transaction.state.log.min.isr=1
+      - confluent.license.topic.replication.factor=1
+      - confluent.metadata.topic.replication.factor=1
+      - confluent.balancer.topic.replication.factor=1
+  listeners:
+    external:
+      externalAccess:
+        type: nodePort
+        nodePort:
+          # Advertised host for the external listener. 'localhost' is paired
+          # with `kubectl port-forward` (see scripts/port-forward-kafka.sh) so
+          # the advertised address matches whatever the client reaches after
+          # forwarding, avoiding any dependency on a stable $(minikube ip).
+          host: localhost
+          nodePortOffset: 30092
+  dependencies:
+    kRaftController:
+      clusterRef:
+        name: kraftcontroller
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: SchemaRegistry
+metadata:
+  name: schemaregistry
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-schema-registry:8.1.0
+    init: confluentinc/confluent-init-container:3.1.0
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: Connect
+metadata:
+  name: connect
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-server-connect:8.1.0
+    init: confluentinc/confluent-init-container:3.1.0
+  configOverrides:
+    server:
+      # Single-broker dev: Connect internal topics must use rf=1
+      - config.storage.replication.factor=1
+      - offset.storage.replication.factor=1
+      - status.storage.replication.factor=1
+  dependencies:
+    kafka:
+      bootstrapEndpoint: kafka:9071
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: KsqlDB
+metadata:
+  name: ksqldb
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-ksqldb-server:8.1.0
+    init: confluentinc/confluent-init-container:3.1.0
+  dataVolumeCapacity: 10Gi
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaRestProxy
+metadata:
+  name: kafkarestproxy
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-kafka-rest:8.1.0
+    init: confluentinc/confluent-init-container:3.1.0
+  dependencies:
+    schemaRegistry:
+      url: http://schemaregistry.confluent.svc.cluster.local:8081
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ControlCenter
+metadata:
+  name: controlcenter
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-enterprise-control-center-next-gen:2.2.0
+    init: confluentinc/confluent-init-container:3.1.0
+  dataVolumeCapacity: 10Gi
+  dependencies:
+    schemaRegistry:
+      url: http://schemaregistry.confluent.svc.cluster.local:8081
+    ksqldb:
+    - name: ksqldb
+      url: http://ksqldb.confluent.svc.cluster.local:8088
+    connect:
+    - name: connect
+      url: http://connect.confluent.svc.cluster.local:8083
+    kafka:
+      # bootstrapEndpoint must NOT have an http:// prefix — it's host:port only
+      bootstrapEndpoint: kafka:9071
+    # Required by next-gen CFK operator validation even though Prometheus/Alertmanager
+    # are self-hosted sidecars — the operator will not schedule the pod without these
+    prometheusClient:
+      url: http://controlcenter.confluent.svc.cluster.local:9090
+    alertManagerClient:
+      url: http://controlcenter.confluent.svc.cluster.local:9093
+  configOverrides:
+    server:
+      # Single-broker dev: C3 internal topics must use rf=1
+      - confluent.controlcenter.internal.topics.replication=1
+      - confluent.controlcenter.command.topic.replication=1
+      - confluent.metrics.topic.replication=1
+      - confluent.monitoring.interceptor.topic.replication=1
+      # CMF integration: enables the Flink tab in C3 next-gen 2.2.
+      # confluent.controlcenter.cmf.enable=true activates the Flink UI.
+      # confluent.controlcenter.cmf.url points to the CMF service.
+      # Note: C3 2.2 hardcodes localhost:8080 regardless of cmf.url — run:
+      #   make cmf-proxy-inject
+      # to inject a socat sidecar that proxies localhost:8080 → cmf-service:80.
+      - confluent.controlcenter.cmf.enable=true
+      - confluent.controlcenter.cmf.url=http://cmf-service.confluent.svc.cluster.local:80
+  # NOTE: cp-enterprise-control-center-next-gen:2.2.0 ignores
+  # confluent.controlcenter.flink.rest.endpoint and hardcodes localhost:8080
+  # as its CMF target. CFK's ControlCenter CRD does not support podTemplate.sidecars,
+  # so a socat proxy sidecar must be injected manually after deployment:
+  #   make cmf-proxy-inject
+  # This pauses CFK reconciliation and patches the StatefulSet directly.
+  services:
+    prometheus:
+      image: confluentinc/cp-enterprise-prometheus:2.2.0
+      pvc:
+        dataVolumeCapacity: 10Gi
+    alertmanager:
+      image: confluentinc/cp-enterprise-alertmanager:2.2.0

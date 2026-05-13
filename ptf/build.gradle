@@ -1,0 +1,41 @@
+plugins {
+    id 'java-library'
+    alias(libs.plugins.shadow)
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Flink table API is provided at runtime by the Flink runtime/SQL Client.
+    // Compile against it, but never bundle it into the shaded jar.
+    compileOnly libs.flink.table.api.java
+    compileOnly libs.flink.table.common
+
+    // T-Digest is what we actually need bundled — it's not part of Flink.
+    implementation libs.t.digest
+
+    testImplementation libs.flink.table.api.java
+    testImplementation libs.flink.table.common
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly   libs.junit.platform.launcher
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// The shadow jar is what gets uploaded to CCAF / CMF — it bundles t-digest
+// but excludes the (provided-by-Flink) flink-table-* dependencies.
+shadowJar {
+    archiveBaseName.set('isotope-flink-udf')
+    archiveClassifier.set('')
+    mergeServiceFiles()
+}

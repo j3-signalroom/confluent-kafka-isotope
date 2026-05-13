@@ -1,0 +1,38 @@
+-- =====================================================================
+-- Topology report — per-minute counts of records written by each
+-- (producer_service → topic) edge.
+--
+-- This is the producer-side view of the pipeline: which service is
+-- writing to which topic, and at what rate. Two important caveats:
+--
+--   1. This shows *produce* edges only. To recover the full graph
+--      (which downstream service consumed each topic), you also need
+--      to instrument the consumer side and union both streams. Today
+--      the consumer interceptor is a no-op for tracing, so that
+--      consumer-side stream doesn't exist yet.
+--
+--   2. `this_service` and `this_topic` are the most-recent hop's
+--      identity at the time the record was produced. For a record on
+--      topic-BC produced by svc-B, `this_service = 'svc-B'` and
+--      `this_topic = 'topic-BC'`; the upstream origin is still visible
+--      via `origin_service`.
+-- =====================================================================
+
+CREATE VIEW IF NOT EXISTS topology_report_1m AS
+SELECT
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_service`     AS producer_service,
+    `this_topic`       AS topic,
+    COUNT(*)                  AS records,
+    COUNT(DISTINCT trace_id)  AS distinct_traces
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_service`,
+    `this_topic`;

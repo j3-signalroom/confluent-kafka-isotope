@@ -1,0 +1,33 @@
+-- =====================================================================
+-- Latency report — per-hop latency from origin, aggregated by origin
+-- service and current hop topic, in 1-minute tumbling windows.
+--
+-- "Latency" here is `broker_ts_at_this_hop - origin_ts`. It's the
+-- end-of-pipeline latency only for the terminal hop; for intermediate
+-- hops it's the partial latency up to that point.
+--
+-- p50/p95 are deliberately omitted from this first cut: standard Flink
+-- SQL does not have a portable approx-percentile aggregate that works
+-- on both CCAF and CP Flink. AVG/MIN/MAX give the shape of the
+-- distribution; layer in a T-Digest UDAF later if percentiles matter.
+-- =====================================================================
+
+CREATE VIEW IF NOT EXISTS latency_report_1m AS
+SELECT
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_topic`,
+    COUNT(*)                  AS sample_count,
+    COUNT(DISTINCT trace_id)  AS distinct_traces,
+    AVG(latency_ms)           AS avg_latency_ms,
+    MIN(latency_ms)           AS min_latency_ms,
+    MAX(latency_ms)           AS max_latency_ms
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_topic`;

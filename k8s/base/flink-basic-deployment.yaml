@@ -1,0 +1,75 @@
+# Confluent FlinkDeployment CR — managed by the Confluent Flink Kubernetes Operator.
+# Image and version are injected at deploy-time by `make flink-deploy` via envsubst.
+#
+# This is a SESSION CLUSTER (no job.jarURI), meaning it runs continuously and accepts
+# job submissions via the Flink REST API / Flink UI. Good for development / exploration.
+#
+# For a production APPLICATION CLUSTER (one job per cluster), add a `job:` section.
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: flink-basic
+  namespace: confluent
+spec:
+  image: ${FLINK_IMAGE}
+  flinkVersion: ${FLINK_VERSION}
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "2"
+    # Dev-friendly: sized for Minikube
+    jobmanager.memory.process.size: "2048m"
+    taskmanager.memory.process.size: "2048m"
+    # Remote debugging: JDWP agent on TaskManager (suspend=n so processing starts immediately)
+    env.java.opts.taskmanager: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
+    # Increase heartbeat timeout to avoid TaskManager death while paused at breakpoints
+    heartbeat.timeout: "300000"
+    # Custom config key — read by FlinkJob to resolve Kafka bootstrap servers.
+    # CFK Kafka exposes port 9071 (internal listener), not 9092.
+    kafka.bootstrap.servers: "kafka:9071"
+  serviceAccount: flink
+  podTemplate:
+    spec:
+      initContainers:
+        # The CP Flink base image does not ship the Kafka SQL connector.
+        # Two init containers populate an emptyDir with the stock lib JARs
+        # plus the connector, then the main container mounts it at /opt/flink/lib.
+        #
+        # 1) Copy stock Flink lib JARs (the Flink image has no curl/wget).
+        - name: copy-stock-lib
+          image: ${FLINK_IMAGE}
+          command: ["sh", "-c", "cp /opt/flink/lib/*.jar /flink-lib/"]
+          volumeMounts:
+            - name: flink-lib
+              mountPath: /flink-lib
+        # 2) Download the Kafka SQL connector (curlimages/curl is tiny).
+        - name: fetch-kafka-connector
+          image: curlimages/curl:8.13.0
+          command:
+            - sh
+            - -c
+            - |
+              curl -fSL -o /flink-lib/flink-sql-connector-kafka-4.0.1-2.0.jar \
+                https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/4.0.1-2.0/flink-sql-connector-kafka-4.0.1-2.0.jar
+          volumeMounts:
+            - name: flink-lib
+              mountPath: /flink-lib
+      containers:
+        - name: flink-main-container
+          volumeMounts:
+            - name: flink-lib
+              mountPath: /opt/flink/lib
+      volumes:
+        - name: flink-lib
+          emptyDir: {}
+  jobManager:
+    resource:
+      memory: "2048m"
+      cpu: 0.5
+    replicas: 1
+  taskManager:
+    resource:
+      memory: "2048m"
+      cpu: 0.5
+    replicas: 1
+  # No `job:` section = session cluster mode.
+  # Submit jobs via:  make flink-ui  → Submit Job in the Flink UI
+  # Or via REST:      curl http://localhost:8081/jars/upload ...

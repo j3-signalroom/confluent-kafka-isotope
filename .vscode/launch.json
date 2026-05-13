@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Attach to Flink TaskManager",
+            "request": "attach",
+            "hostName": "localhost",
+            "port": 5005,
+            "projectName": "app",
+            "sourcePaths": [
+                "${workspaceFolder}/examples/app/src/main/java"
+            ],
+            "preLaunchTask": "Port Forward Flink TaskManager"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+-- =====================================================================
+-- Coverage report — count of distinct trace IDs seen at each topic in
+-- 1-minute tumbling windows.
+--
+-- Read this as a funnel: if your pipeline is
+--   origin → topic-AB → topic-BC → topic-CD
+-- you'd expect roughly the same distinct-trace count at each topic
+-- within a given window. A drop between topic-AB and topic-BC says
+-- some traces never made it past the AB→BC stage.
+--
+-- This is a coarse coverage signal — drift inside the same window is
+-- noise (a trace produced at 59.9s may not be consumed until 60.1s,
+-- which puts it in a different bucket). For dispatchable alerts you'd
+-- want a session-window join keyed on trace_id, with a configurable
+-- lateness allowance. That's a Phase 2 PTF, not a Phase 1 SQL report.
+-- =====================================================================
+
+CREATE VIEW IF NOT EXISTS coverage_report_1m AS
+SELECT
+    `window_start`,
+    `window_end`,
+    `this_topic`,
+    `origin_service`,
+    COUNT(DISTINCT trace_id)  AS distinct_traces,
+    COUNT(*)                  AS records
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `this_topic`,
+    `origin_service`;

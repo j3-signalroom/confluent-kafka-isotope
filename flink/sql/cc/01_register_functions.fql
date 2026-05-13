@@ -1,0 +1,32 @@
+-- =====================================================================
+-- Register Phase 2 functions — Confluent Cloud for Apache Flink (CCAF)
+--
+-- Prereqs:
+--   ./gradlew :ptf:shadowJar
+--   # → ptf/build/libs/isotope-flink-udf.jar
+--
+-- CCAF requires the JAR to be uploaded as a "Flink artifact" first,
+-- *then* the SQL CREATE FUNCTION can reference it. The upload is done
+-- via the Confluent CLI, not via SQL. From a shell with `confluent`
+-- logged in:
+--
+--   ARTIFACT_ID=$(confluent flink artifact create isotope-flink-udf \
+--       --cloud AWS --region us-east-1 \
+--       --environment <env-id> \
+--       --artifact-file ptf/build/libs/isotope-flink-udf.jar \
+--       --output json | jq -r '.id')
+--
+-- Then run this file via:
+--   confluent flink statement create register-functions \
+--       --sql-file flink/sql/cc/01_register_functions.sql
+--
+-- Replace <ARTIFACT_ID> below with the value the upload returned.
+-- =====================================================================
+
+CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
+    AS 'com.life360.kafka.isotope.flink.LatencyPercentilesUDAF'
+    USING JAR 'confluent-artifact://<ARTIFACT_ID>';
+
+CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
+    AS 'com.life360.kafka.isotope.flink.StuckTracePTF'
+    USING JAR 'confluent-artifact://<ARTIFACT_ID>';

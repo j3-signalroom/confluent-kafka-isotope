@@ -1,0 +1,26 @@
+-- =====================================================================
+-- Register Phase 2 functions — Confluent Platform Flink (CMF on Minikube)
+--
+-- Prereqs:
+--   ./gradlew :ptf:shadowJar
+--   # → ptf/build/libs/isotope-flink-udf.jar
+--
+-- The SQL Client needs the JAR on its classpath. Two options on CMF:
+--   a) Mount the JAR into the Flink JM/TM containers and reference it
+--      via USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar' below.
+--   b) Add the JAR to the SQL Client session at startup:
+--        sql-client.sh -j /path/to/isotope-flink-udf.jar -f 01_register_functions.sql
+--      and drop the USING JAR clause.
+--
+-- The version-coupling story: this JAR was compiled against Apache Flink
+-- 2.1.1 (matches confluentinc/cp-flink:2.1.1-cp1-java21). If you upgrade
+-- the cluster's Flink version, rebuild the JAR.
+-- =====================================================================
+
+CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
+    AS 'com.life360.kafka.isotope.flink.LatencyPercentilesUDAF'
+    USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';
+
+CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
+    AS 'com.life360.kafka.isotope.flink.StuckTracePTF'
+    USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';

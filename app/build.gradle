@@ -1,0 +1,57 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+sourceSets {
+    integrationTest {
+        java.srcDir 'src/integrationTest/java'
+        resources.srcDir 'src/integrationTest/resources'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    integrationTestImplementation.extendsFrom testImplementation
+    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
+dependencies {
+    implementation libs.kafka.clients
+    implementation libs.jackson.databind
+    implementation libs.slf4j.api
+    runtimeOnly    libs.slf4j.simple
+
+    testImplementation libs.kafka.clients
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly   libs.junit.platform.launcher
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+application {
+    mainClass = 'com.life360.kafka.isotope.App'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Runs integration tests against a live Kafka broker (default localhost:30092).'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter tasks.named('test')
+    systemProperty 'kafka.bootstrap',
+        project.findProperty('kafkaBootstrap') ?: 'localhost:30092'
+}

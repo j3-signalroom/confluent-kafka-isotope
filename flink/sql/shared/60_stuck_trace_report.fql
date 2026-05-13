@@ -1,0 +1,39 @@
+-- =====================================================================
+-- Stuck-trace report — fires an alert for any trace that has not had a
+-- new hop within `staleness_seconds` of its last-observed hop, measured
+-- in event time.
+--
+-- Depends on:
+--   - the `isotope` view (shared/05_isotope_view.sql)
+--   - the STUCK_TRACE_PTF function (cp/01_register_functions.sql or
+--     cc/01_register_functions.sql)
+--
+-- The PTF maintains per-trace_id state and event-time timers, so this
+-- view is a streaming alert source — each row represents one stuck
+-- episode. Re-arming is automatic: if a previously-stuck trace receives
+-- a fresh hop, the PTF re-installs its state and timer, and a future
+-- stall on the same trace will fire a new alert.
+--
+-- Tuning `staleness_seconds`:
+--   - Set to 2-3× the expected longest legitimate hop interval for your
+--     pipeline. Building-LAN flows typically run sub-second, so 60s is
+--     comfortable.
+--   - On CCAF / CP Flink, this is a *pipeline-state* operator — its
+--     memory grows with the count of distinct trace_ids currently
+--     in-flight. For deterministic memory, also configure a state TTL
+--     on the PTF via @StateHint(ttl = ...) — see the PTF source.
+-- =====================================================================
+
+CREATE VIEW IF NOT EXISTS stuck_trace_alerts AS
+SELECT
+    `trace_id`,
+    `origin_service`,
+    `last_service`,
+    `last_topic`,
+    `last_hop_count`,
+    `last_seen_ts_ms`,
+    `stuck_for_ms`
+FROM STUCK_TRACE_PTF(
+    `r`                  => TABLE isotope PARTITION BY `trace_id`,
+    `staleness_seconds`  => CAST(60 AS BIGINT)
+);
