@@ -2,6 +2,7 @@ package com.life360.kafka.isotope;
 
 import java.util.List;
 
+import com.life360.kafka.isotope.proto.DemoEvent;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -22,16 +23,16 @@ class ConsumerInterceptorIT {
             try {
                 IsotopeContext.clear();
 
-                try (KafkaProducer<byte[], byte[]> producer =
+                try (KafkaProducer<byte[], DemoEvent> producer =
                          IsotopeTestHarness.producer("svc-A")) {
-                    producer.send(new ProducerRecord<>(topic, "k".getBytes(), "v".getBytes()))
-                            .get();
+                    DemoEvent event = IsotopeTestHarness.newDemoEvent("svc-A", "v");
+                    producer.send(new ProducerRecord<>(topic, "k".getBytes(), event)).get();
                 }
 
-                try (KafkaConsumer<byte[], byte[]> consumer =
+                try (KafkaConsumer<byte[], DemoEvent> consumer =
                          IsotopeTestHarness.consumer("grp-" + topic)) {
                     consumer.subscribe(List.of(topic));
-                    ConsumerRecords<byte[], byte[]> records =
+                    ConsumerRecords<byte[], DemoEvent> records =
                         consumer.poll(IsotopeTestHarness.POLL_TIMEOUT);
                     assertEquals(1, records.count());
 
@@ -39,7 +40,7 @@ class ConsumerInterceptorIT {
                     // so before adoptFromRecord the thread-local is unset.
                     assertNull(IsotopeContext.current());
 
-                    ConsumerRecord<byte[], byte[]> rec = records.iterator().next();
+                    ConsumerRecord<byte[], DemoEvent> rec = records.iterator().next();
                     Isotope adopted = IsotopeContext.adoptFromRecord(rec);
 
                     assertNotNull(adopted);
@@ -66,16 +67,16 @@ class ConsumerInterceptorIT {
             try {
                 IsotopeContext.set(Isotope.newTrace("stale"));
 
-                try (KafkaProducer<byte[], byte[]> producer =
+                try (KafkaProducer<byte[], DemoEvent> producer =
                          IsotopeTestHarness.bareProducer()) {
-                    producer.send(new ProducerRecord<>(topic, "k".getBytes(), "v".getBytes()))
-                            .get();
+                    DemoEvent event = IsotopeTestHarness.newDemoEvent("untagged-producer", "v");
+                    producer.send(new ProducerRecord<>(topic, "k".getBytes(), event)).get();
                 }
 
-                try (KafkaConsumer<byte[], byte[]> consumer =
+                try (KafkaConsumer<byte[], DemoEvent> consumer =
                          IsotopeTestHarness.bareConsumer("grp-" + topic)) {
                     consumer.subscribe(List.of(topic));
-                    ConsumerRecords<byte[], byte[]> records =
+                    ConsumerRecords<byte[], DemoEvent> records =
                         consumer.poll(IsotopeTestHarness.POLL_TIMEOUT);
                     assertEquals(1, records.count());
 
