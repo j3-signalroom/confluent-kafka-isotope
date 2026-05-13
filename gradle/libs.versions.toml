@@ -11,6 +11,16 @@ flink = "2.1.1"
 t-digest = "3.3"
 shadow = "9.4.1"
 
+# Protobuf message-value format for Kafka topics, via Confluent Schema
+# Registry. The Confluent client version is matched to the SR deployed by
+# k8s/base/confluent-platform-c3++.yaml (cp-server:8.1.0). protoc is pinned
+# to the 3.x line because kafka-protobuf-serializer 8.1.0 pulls
+# protobuf-java 3.25.x transitively — keeping protoc and runtime on the
+# same major avoids generated-vs-runtime ABI surprises.
+confluent       = "8.1.0"
+protoc          = "3.25.5"
+protobuf-plugin = "0.9.4"
+
 [libraries]
 kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
@@ -24,5 +34,11 @@ flink-table-api-java = { module = "org.apache.flink:flink-table-api-java", versi
 flink-table-common   = { module = "org.apache.flink:flink-table-common",   version.ref = "flink" }
 t-digest             = { module = "com.tdunning:t-digest",                 version.ref = "t-digest" }
 
+# Protobuf topic-value format.
+kafka-protobuf-serializer = { module = "io.confluent:kafka-protobuf-serializer", version.ref = "confluent" }
+protobuf-java             = { module = "com.google.protobuf:protobuf-java",       version.ref = "protoc" }
+protoc                    = { module = "com.google.protobuf:protoc",              version.ref = "protoc" }
+
 [plugins]
-shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
+shadow   = { id = "com.gradleup.shadow",  version.ref = "shadow" }
+protobuf = { id = "com.google.protobuf",  version.ref = "protobuf-plugin" }

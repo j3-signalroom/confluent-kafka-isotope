@@ -12,11 +12,18 @@ mechanism must work against both **Confluent Cloud for Apache Flink**
 **Confluent Platform for Apache Flink** (full DataStream + Table API).
 Three decisions follow from that: tagging happens in the Kafka
 **producer/consumer interceptors** (the one extension point both runtimes
-share via the broker), the on-wire format is **JSON in record headers**
-(so Flink SQL can read the scalar fields with `CAST(headers[…] AS STRING)`
+share via the broker), the on-wire **header** format is **JSON** (so
+Flink SQL can read the scalar fields with `CAST(headers[…] AS STRING)`
 and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`,
 `StuckTracePTF`) ship as a single JAR that registers identically on
 either runtime.
+
+Message **values** on the demo topics are **SR-framed Protobuf**
+(`com.life360.kafka.isotope.proto.DemoEvent`) — the standard
+Confluent value format. The interceptors and reports are agnostic to
+value format because the isotope rides in headers; the Protobuf choice
+just gives the integration tests and any downstream Flink query a typed
+payload to work with.
 
 ## How the isotope is carried
 
@@ -42,6 +49,7 @@ the trace ID and origin survive the hop.
 
 ```
 app/                                    isotope JVM library + tests
+  src/main/proto/                       DemoEvent.proto (Protobuf message value)
   src/main/java/com/life360/kafka/isotope/
     Isotope.java                        POJO + JSON codec + Hop + fromHeaders()
     IsotopeContext.java                 ThreadLocal + adoptFromRecord()
@@ -49,7 +57,9 @@ app/                                    isotope JVM library + tests
                                         reporting headers on send()
     IsotopeConsumerInterceptor.java     batch-aware logging; no auto-propagation
   src/test/java/.../                    IsotopeCodecTest (no broker needed)
-  src/integrationTest/java/.../         live-broker tests (need Minikube CP)
+  src/integrationTest/java/.../         live-broker tests; produce/consume
+                                        DemoEvent via SR-framed Protobuf
+                                        (need Minikube CP + SR port-forwarded)
 ptf/                                    Phase 2 — Flink PTF + UDAF shadow JAR
   src/main/java/com/life360/kafka/isotope/flink/
     LatencyPercentilesUDAF.java         T-Digest p50/p95/p99 aggregate
@@ -77,7 +87,7 @@ Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ```bash
 make minikube-start         # one-time
 make cp-up                  # CFK Operator + Kafka/SR/Connect/ksqlDB/C3
-make kafka-pf-up            # port-forward CFK NodePort listeners to localhost:30092
+make kafka-pf-up            # port-forward Kafka (localhost:30092) + SR (localhost:8081)
 ./gradlew :app:integrationTest
 make kafka-pf-down          # when done
 ```

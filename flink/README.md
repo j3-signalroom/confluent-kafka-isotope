@@ -48,6 +48,17 @@ decodes — `CAST(headers['x-isotope-…'] AS STRING)` with one more cast to
 `BIGINT`/`INT` for the numeric ones. No UDF, no JSON-array unnesting, works
 identically on both Flink flavors.
 
+### Message value format
+
+The demo topics carry **SR-framed Protobuf** values
+(`com.life360.kafka.isotope.proto.DemoEvent`). The Phase 1 reports
+declare `'value.format' = 'raw'` in their source DDL because they only
+read headers — Flink doesn't need to decode the value at all. If you
+want to project value fields too, switch the source DDL to
+`'value.format' = 'protobuf-confluent'` (CCAF) or
+`'value.format' = 'protobuf'` with `'value.protobuf.schema-registry.url'`
+(CP) and add the column projections to `00_source_table.fql`.
+
 ## Deploying on CP Flink (Minikube)
 
 ```bash

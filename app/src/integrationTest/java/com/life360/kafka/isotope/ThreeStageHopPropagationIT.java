@@ -2,6 +2,7 @@ package com.life360.kafka.isotope;
 
 import java.util.List;
 
+import com.life360.kafka.isotope.proto.DemoEvent;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -40,16 +41,17 @@ class ThreeStageHopPropagationIT {
                 IsotopeContext.clear();
 
                 // Stage 1: svc-A produces to topic-AB.
-                try (KafkaProducer<byte[], byte[]> prodA = IsotopeTestHarness.producer("svc-A")) {
-                    prodA.send(new ProducerRecord<>(topicAB, "k".getBytes(), "v".getBytes())).get();
+                try (KafkaProducer<byte[], DemoEvent> prodA = IsotopeTestHarness.producer("svc-A")) {
+                    DemoEvent eventA = IsotopeTestHarness.newDemoEvent("svc-A", "stage-1");
+                    prodA.send(new ProducerRecord<>(topicAB, "k".getBytes(), eventA)).get();
                 }
 
                 // Stage 2: svc-B consumes topic-AB, adopts the isotope, produces to topic-BC.
-                ConsumerRecord<byte[], byte[]> recAtB;
-                try (KafkaConsumer<byte[], byte[]> consB =
+                ConsumerRecord<byte[], DemoEvent> recAtB;
+                try (KafkaConsumer<byte[], DemoEvent> consB =
                          IsotopeTestHarness.consumer("grp-B-" + topicAB)) {
                     consB.subscribe(List.of(topicAB));
-                    ConsumerRecords<byte[], byte[]> batch = consB.poll(IsotopeTestHarness.POLL_TIMEOUT);
+                    ConsumerRecords<byte[], DemoEvent> batch = consB.poll(IsotopeTestHarness.POLL_TIMEOUT);
                     assertEquals(1, batch.count(),
                         "svc-B should see exactly the one record svc-A produced");
                     recAtB = batch.iterator().next();
@@ -61,21 +63,22 @@ class ThreeStageHopPropagationIT {
                 assertEquals(1, isoAtB.hops().size(), "after stage 1, only one hop should exist");
                 byte[] traceId = isoAtB.traceId();
 
-                try (KafkaProducer<byte[], byte[]> prodB = IsotopeTestHarness.producer("svc-B")) {
-                    prodB.send(new ProducerRecord<>(topicBC, "k".getBytes(), "v".getBytes())).get();
+                try (KafkaProducer<byte[], DemoEvent> prodB = IsotopeTestHarness.producer("svc-B")) {
+                    DemoEvent eventB = IsotopeTestHarness.newDemoEvent("svc-B", "stage-2");
+                    prodB.send(new ProducerRecord<>(topicBC, "k".getBytes(), eventB)).get();
                 }
                 IsotopeContext.clear();
 
                 // Stage 3: svc-C consumes topic-BC and inspects the isotope.
                 Isotope isoAtC;
-                try (KafkaConsumer<byte[], byte[]> consC =
+                try (KafkaConsumer<byte[], DemoEvent> consC =
                          IsotopeTestHarness.consumer("grp-C-" + topicBC)) {
                     consC.subscribe(List.of(topicBC));
-                    ConsumerRecords<byte[], byte[]> batch = consC.poll(IsotopeTestHarness.POLL_TIMEOUT);
+                    ConsumerRecords<byte[], DemoEvent> batch = consC.poll(IsotopeTestHarness.POLL_TIMEOUT);
                     assertEquals(1, batch.count(),
                         "svc-C should see exactly the one record svc-B produced");
 
-                    ConsumerRecord<byte[], byte[]> recAtC = batch.iterator().next();
+                    ConsumerRecord<byte[], DemoEvent> recAtC = batch.iterator().next();
                     Headers hs = recAtC.headers();
                     Header h = hs.lastHeader(Isotope.HEADER_KEY);
                     assertNotNull(h);

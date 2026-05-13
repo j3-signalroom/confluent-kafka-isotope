@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# Port-forward the CFK-managed Kafka external listener Services to localhost
-# so JUnit integration tests on the host can reach the broker.
+# Port-forward the CFK-managed Kafka external listener Services AND the
+# Schema Registry service to localhost so JUnit integration tests on the
+# host can reach the broker and SR.
 #
-# Paired with `spec.listeners.external.externalAccess.type: nodePort` on the
-# Kafka CR (host: localhost, nodePortOffset: 30092). CFK creates one Service
-# per broker plus one bootstrap Service, each of type NodePort. We forward
-# each NodePort to the matching localhost port so the broker's advertised
-# listener (`localhost:<port>`) resolves correctly after the first metadata
+# Kafka: paired with `spec.listeners.external.externalAccess.type: nodePort`
+# on the Kafka CR (host: localhost, nodePortOffset: 30092). CFK creates one
+# Service per broker plus one bootstrap Service. We forward each NodePort to
+# the matching localhost port so the broker's advertised listener
+# (`localhost:<port>`) resolves correctly after the first metadata
 # round-trip.
+#
+# Schema Registry: deployed in-cluster on port 8081 by the CFK
+# SchemaRegistry CR. We port-forward svc/schemaregistry to localhost:8081
+# so KafkaProtobuf{Ser,Deser}ializer (which needs SR at
+# `schema.registry.url`) works from the host.
 #
 # Usage:
 #   scripts/port-forward-kafka.sh             # start in background
@@ -15,6 +21,8 @@
 set -euo pipefail
 
 NAMESPACE=confluent
+SR_PORT=8081
+SR_SVC=schemaregistry
 PID_DIR=/tmp/isotope-kafka-pf
 TIMEOUT=30
 
@@ -98,6 +106,32 @@ for svc in "${SERVICES[@]}"; do
     echo "✔ ${svc} ready on localhost:${PORT}"
 done
 
+# Schema Registry forward — a plain ClusterIP service, not NodePort.
+if kubectl get svc -n "${NAMESPACE}" "${SR_SVC}" >/dev/null 2>&1; then
+    lsof -iTCP:"${SR_PORT}" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
+    sleep 0.2
+    echo "→ Port-forwarding ${SR_PORT} → svc/${SR_SVC}:${SR_PORT} ..."
+    nohup kubectl port-forward -n "${NAMESPACE}" "svc/${SR_SVC}" "${SR_PORT}:${SR_PORT}" \
+        >/dev/null 2>&1 &
+    disown
+    echo $! > "${PID_DIR}/${SR_SVC}.pid"
+
+    elapsed=0
+    while ! lsof -iTCP:"${SR_PORT}" -sTCP:LISTEN -t >/dev/null 2>&1; do
+        if [ "${elapsed}" -ge "${TIMEOUT}" ]; then
+            echo "✘ Timed out waiting for ${SR_SVC} port ${SR_PORT}." >&2
+            stop_all
+            exit 1
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "✔ ${SR_SVC} ready on localhost:${SR_PORT}"
+else
+    echo "→ svc/${SR_SVC} not found in '${NAMESPACE}' — skipping SR forward."
+fi
+
 echo ""
 echo "Bootstrap server: localhost:30092"
+echo "Schema Registry:  http://localhost:${SR_PORT}"
 echo "Stop with: scripts/port-forward-kafka.sh --stop"

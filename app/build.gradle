@@ -1,9 +1,12 @@
 plugins {
     id 'application'
+    alias(libs.plugins.protobuf)
 }
 
 repositories {
     mavenCentral()
+    // kafka-protobuf-serializer + its transitive Confluent deps live here.
+    maven { url 'https://packages.confluent.io/maven/' }
 }
 
 sourceSets {
@@ -24,11 +27,22 @@ dependencies {
     implementation libs.kafka.clients
     implementation libs.jackson.databind
     implementation libs.slf4j.api
+    implementation libs.protobuf.java
     runtimeOnly    libs.slf4j.simple
 
     testImplementation libs.kafka.clients
     testImplementation libs.junit.jupiter
     testRuntimeOnly   libs.junit.platform.launcher
+
+    // SR-framed Protobuf serializer/deserializer. Only the integration
+    // tests use it today — production code never sees DemoEvent.
+    integrationTestImplementation libs.kafka.protobuf.serializer
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:${libs.versions.protoc.get()}"
+    }
 }
 
 java {
@@ -54,4 +68,6 @@ tasks.register('integrationTest', Test) {
     shouldRunAfter tasks.named('test')
     systemProperty 'kafka.bootstrap',
         project.findProperty('kafkaBootstrap') ?: 'localhost:30092'
+    systemProperty 'schema.registry.url',
+        project.findProperty('schemaRegistryUrl') ?: 'http://localhost:8081'
 }

@@ -2,6 +2,7 @@ package com.life360.kafka.isotope;
 
 import java.util.List;
 
+import com.life360.kafka.isotope.proto.DemoEvent;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -26,21 +27,25 @@ class ProducerInterceptorIT {
                 IsotopeContext.clear();
                 long beforeSend = System.currentTimeMillis();
 
-                try (KafkaProducer<byte[], byte[]> producer =
+                try (KafkaProducer<byte[], DemoEvent> producer =
                          IsotopeTestHarness.producer("origin-service")) {
-                    producer.send(new ProducerRecord<>(topic, "key".getBytes(), "value".getBytes()))
-                            .get();
+                    DemoEvent event = IsotopeTestHarness.newDemoEvent("origin-service", "hello");
+                    producer.send(new ProducerRecord<>(topic, "key".getBytes(), event)).get();
                 }
 
-                try (KafkaConsumer<byte[], byte[]> consumer =
+                try (KafkaConsumer<byte[], DemoEvent> consumer =
                          IsotopeTestHarness.bareConsumer("grp-" + topic)) {
                     consumer.subscribe(List.of(topic));
-                    ConsumerRecords<byte[], byte[]> records =
+                    ConsumerRecords<byte[], DemoEvent> records =
                         consumer.poll(IsotopeTestHarness.POLL_TIMEOUT);
                     assertEquals(1, records.count(),
                         "expected exactly one record from " + topic);
 
-                    ConsumerRecord<byte[], byte[]> rec = records.iterator().next();
+                    ConsumerRecord<byte[], DemoEvent> rec = records.iterator().next();
+                    DemoEvent decoded = rec.value();
+                    assertNotNull(decoded, "Protobuf-decoded value must not be null");
+                    assertEquals("origin-service", decoded.getSource());
+                    assertEquals("hello",          decoded.getPayload());
                     Headers hs = rec.headers();
                     Header h = hs.lastHeader(Isotope.HEADER_KEY);
                     assertNotNull(h, "record must carry the " + Isotope.HEADER_KEY + " header");
