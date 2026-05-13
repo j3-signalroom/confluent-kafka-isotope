@@ -6,11 +6,17 @@ multi-topic pipeline. Apache Flink will eventually consume the tagged records
 and report on what the isotopes reveal: end-to-end latency, hop topology,
 drop/duplication rates, and pipeline coverage.
 
-The design constraint is that the same isotope mechanism must work against
-both **Confluent Cloud for Apache Flink** (SQL-only, no custom operators) and
-**Confluent Platform for Apache Flink** (full DataStream/Table API). To keep
-this portable, all tagging happens in the Kafka *client* interceptors, and
-the Flink side is plain SQL over a CBOR-encoded record header.
+A **portability requirement** runs through this project: the same isotope
+mechanism must work against both **Confluent Cloud for Apache Flink**
+(managed; restricted to Table API SQL + uploaded UDF/PTF JARs) and
+**Confluent Platform for Apache Flink** (full DataStream + Table API).
+Three decisions follow from that: tagging happens in the Kafka
+**producer/consumer interceptors** (the one extension point both runtimes
+share via the broker), the on-wire format is **JSON in record headers**
+(so Flink SQL can read the scalar fields with `CAST(headers[…] AS STRING)`
+and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`,
+`StuckTracePTF`) ship as a single JAR that registers identically on
+either runtime.
 
 ## How the isotope is carried
 
@@ -94,7 +100,3 @@ The integration tests cover:
 | Flink SQL reporting (CC + CP) | Phase 1 — four reports written; awaiting first deploy |
 | Demo pipeline (Stage1/2/3 services) | Not yet implemented; the ITs play the role of the demo for now |
 | PTF stuck-trace + UDAF percentiles | Phase 2 — JAR builds, UDAF unit-tested, two SQL reports written; PTF awaits first live-cluster run for end-to-end verification |
-
-## License
-
-See `LICENSE.md`.
