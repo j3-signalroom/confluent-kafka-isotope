@@ -2,9 +2,9 @@
 
 An example of using Kafka **consumer and producer interceptors** to tag every
 message with a tracer — an *isotope* — that carries through every hop of a
-multi-topic pipeline. Apache Flink will eventually consume the tagged records
-and report on what the isotopes reveal: end-to-end latency, hop topology,
-drop/duplication rates, and pipeline coverage.
+multi-topic pipeline. Apache Flink consumes the tagged records and reports on
+what the isotopes reveal: end-to-end latency, hop topology, drop/duplication
+rates, and pipeline coverage.
 
 A **portability requirement** runs through this project: the same isotope
 mechanism must work against both **Confluent Cloud for Apache Flink**
@@ -19,11 +19,10 @@ and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`,
 either runtime.
 
 Message **values** on the demo topics are **SR-framed Protobuf**
-(`com.life360.kafka.isotope.proto.DemoEvent`) — the standard
-Confluent value format. The interceptors and reports are agnostic to
-value format because the isotope rides in headers; the Protobuf choice
-just gives the integration tests and any downstream Flink query a typed
-payload to work with.
+(`com.life360.kafka.isotope.proto.DemoEvent`) — the standard Confluent
+value format. The interceptors and reports are agnostic to value format
+because the isotope rides in headers; the Protobuf choice just gives the
+integration tests and the demo CLI a typed payload to work with.
 
 ## How the isotope is carried
 
@@ -48,7 +47,7 @@ the trace ID and origin survive the hop.
 ## Repo layout
 
 ```
-app/                                    isotope JVM library + tests
+app/                                    isotope JVM library + demo CLI + tests
   src/main/proto/                       DemoEvent.proto (Protobuf message value)
   src/main/java/com/life360/kafka/isotope/
     Isotope.java                        POJO + JSON codec + Hop + fromHeaders()
@@ -56,6 +55,7 @@ app/                                    isotope JVM library + tests
     IsotopeProducerInterceptor.java     stamps/appends x-isotope + 6 scalar
                                         reporting headers on send()
     IsotopeConsumerInterceptor.java     batch-aware logging; no auto-propagation
+    App.java                            demo CLI — send / hop / sink modes
   src/test/java/.../                    IsotopeCodecTest (no broker needed)
   src/integrationTest/java/.../         live-broker tests; produce/consume
                                         DemoEvent via SR-framed Protobuf
@@ -76,37 +76,183 @@ Makefile                                cp-up / flink-up / kafka-pf-up / ...
 
 ## Running
 
-### Unit tests (no broker needed)
+### 1. Unit tests (no broker, instant)
 
 ```bash
-./gradlew :app:test
+./gradlew test                       # both subprojects
+# or scoped:
+./gradlew :app:test                  # IsotopeCodecTest        — JSON roundtrip, hop eviction, header size
+./gradlew :ptf:test                  # LatencyPercentilesUDAFTest — T-Digest accumulator semantics
 ```
 
-### Integration tests (live Kafka via Minikube)
+### 2. Demo CLI — see one trace propagate live
+
+The fastest way to watch the isotope mechanic. Requires the cluster to be up
+and the Kafka + SR forwards running (see step 3 below for the bring-up
+commands). The CLI has three modes:
+
+| Mode | Args | What it does |
+|---|---|---|
+| `send` | `<topic> <service> <payload>` | Produces one isotope-tagged `DemoEvent` to `<topic>`, then exits. Auto-creates the topic. |
+| `hop`  | `<in-topic> <out-topic> <service>` | Consumes records from `<in-topic>`, adopts the isotope into thread-local, re-produces the same `DemoEvent` to `<out-topic>` as `<service>` (which appends a new hop). Runs until Ctrl-C. |
+| `sink` | `<topic>` | Subscribes to `<topic>` and pretty-prints the full isotope trail for every arriving record. Runs until Ctrl-C. |
+
+**A 3-stage chain in four terminals:**
 
 ```bash
-make minikube-start         # one-time
-make cp-up                  # CFK Operator + Kafka/SR/Connect/ksqlDB/C3
-make kafka-pf-up            # port-forward Kafka (localhost:30092) + SR (localhost:8081)
-./gradlew :app:integrationTest
-make kafka-pf-down          # when done
+# Terminal A — terminal sink (will print the full 3-hop trail)
+./gradlew :app:run --args="sink iso-final" -q
+
+# Terminal B — middle stage: iso-mid → iso-final as svc-C
+./gradlew :app:run --args="hop iso-mid iso-final svc-C" -q
+
+# Terminal C — first stage: iso-start → iso-mid as svc-B
+./gradlew :app:run --args="hop iso-start iso-mid svc-B" -q
+
+# Terminal D — kick the chain off (run repeatedly to send more)
+./gradlew :app:run --args="send iso-start svc-A 'hello world'" -q
+```
+
+Terminal A's output for each record shows the same `trace_id` across all
+three hops, `origin = svc-A` (never reassigned), and `hops[]` listing
+`svc-A → svc-B → svc-C` in order with per-hop timestamps. Override
+endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're
+not on the default Minikube layout.
+
+### 3. Integration tests (live Kafka via Minikube)
+
+Bring up the local Confluent Platform stack and port-forward Kafka + SR:
+
+```bash
+make minikube-start                  # one-time
+make cp-up                           # CFK Operator + Kafka/SR/Connect/ksqlDB/C3 (~5 min)
+make kafka-pf-up                     # localhost:30092 → Kafka, localhost:8081 → Schema Registry
+```
+
+Then run the suite:
+
+```bash
+./gradlew :app:integrationTest                                          # all 5 tests
+./gradlew :app:integrationTest --tests '*ProducerInterceptorIT'         # just one
+```
+
+Override the endpoints if needed:
+
+```bash
+./gradlew :app:integrationTest \
+    -PkafkaBootstrap=localhost:30092 \
+    -PschemaRegistryUrl=http://localhost:8081
+```
+
+Tear down forwards when done:
+
+```bash
+make kafka-pf-down
 ```
 
 The integration tests cover:
 
 | Test | What it verifies |
 |---|---|
-| `BrokerSmokeIT` | AdminClient can create/list/delete a topic via the NodePort path |
-| `ProducerInterceptorIT` | A bare consumer sees the `x-isotope` header with the expected origin/hop |
-| `ConsumerInterceptorIT` | `adoptFromRecord` extracts isotope into thread-local; clears for untagged records |
-| `ThreeStageHopPropagationIT` | `svc-A → topic-AB → svc-B → topic-BC → svc-C` produces a 2-hop trace with stable trace ID |
+| `BrokerSmokeIT` | AdminClient can create/list/delete a topic via the NodePort port-forward |
+| `ProducerInterceptorIT` | A bare consumer sees the `x-isotope` JSON header + all 6 scalar reporting headers with the expected origin/hop values, and the Protobuf round-trip preserves `DemoEvent.source` / `payload` |
+| `ConsumerInterceptorIT` | `IsotopeContext.adoptFromRecord` extracts isotope into thread-local on tagged records; clears the thread-local for untagged records |
+| `ThreeStageHopPropagationIT` | `svc-A → topic-AB → svc-B → topic-BC → svc-C` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `svc-A`, this = `svc-B`, hop count = 2) at the terminal |
+
+### 4. Flink SQL reports on Minikube
+
+The four Phase-1 reports plus the two Phase-2 (PTF / UDAF) reports run
+against a Flink session cluster managed by the Confluent Flink Kubernetes
+Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see
+**[flink/README.md](flink/README.md)** for that side; this section is the
+local-Minikube path.
+
+**Bring up Flink:**
+
+```bash
+make flink-up                # cert-manager → CFK Flink Operator → CMF → session cluster
+                             # (~5 min the first time)
+```
+
+**Deploy the reports** — builds the PTF/UDAF shadow JAR if missing,
+streams it into the JobManager pod, then applies all FQL files
+(`cp/00_source_table.fql`, `cp/01_register_functions.fql`, and every
+`shared/*.fql` report) as one SQL Client session so cross-file view
+references resolve:
+
+```bash
+make flink-reports-up
+```
+
+The source table reads every `iso-*` topic the demo CLI creates
+([flink/sql/cp/00_source_table.fql](flink/sql/cp/00_source_table.fql)
+uses `topic-pattern = 'iso-.*'`).
+
+**Query interactively** — opens a Flink SQL Client inside the
+JobManager pod:
+
+```bash
+make flink-sql
+# Flink SQL> SELECT * FROM latency_report_1m;
+# Flink SQL> SELECT * FROM topology_report_1m;
+# Flink SQL> SELECT * FROM hop_distribution_1m;
+# Flink SQL> SELECT * FROM coverage_report_1m;
+# Flink SQL> SELECT * FROM stuck_trace_alerts;                       -- Phase 2 PTF
+# Flink SQL> SELECT * FROM latency_percentiles_flat_1m;              -- Phase 2 UDAF
+```
+
+Each `SELECT` against a continuous view starts a streaming job —
+visible in the Flink UI:
+
+```bash
+make flink-ui                # opens http://localhost:8081 in your browser
+```
+
+**Drive traffic** in another terminal while the queries are running:
+
+```bash
+./gradlew :app:run --args="send iso-start svc-A 'hello'" -q
+# or the full 3-stage chain from § 2 above
+```
+
+You should see report rows update as records flow.
+
+**Teardown** — drops the registered tables / views / functions:
+
+```bash
+make flink-reports-down
+```
+
+#### Known caveat (Phase 2 PTF API)
+
+`STUCK_TRACE_PTF` invokes the Flink 2.1.1 PTF API, which is still
+evolving. The first live deploy surfaced two real PTF-side fixes that
+are now in the code (correct `ArgumentTrait` enum, named `r` table
+arg). Further PTF API mismatches may still surface on first run —
+the algorithm is small (~30 lines in
+[ptf/src/.../StuckTracePTF.java](ptf/src/main/java/com/life360/kafka/isotope/flink/StuckTracePTF.java)),
+so fixes are annotation-level rather than design-level. The Phase-1
+reports (`latency_report_1m`, `topology_report_1m`, etc.) and the
+Phase-2 UDAF (`LATENCY_PERCENTILES`) don't go through the PTF path
+and aren't subject to this caveat.
+
+### Recommended path the first time through
+
+1. `./gradlew test` — proves the codec + UDAF logic without any cluster.
+2. `make cp-up && make kafka-pf-up && ./gradlew :app:integrationTest` —
+   proves the broker + SR + interceptor + Protobuf path end-to-end.
+3. The 3-stage demo CLI walkthrough above — visually shows the trace
+   accumulating hops.
+4. `make flink-up && make flink-reports-up && make flink-sql` — reports
+   populate as you drive traffic via the demo CLI (see § 4).
 
 ## Status
 
 | Piece | Status |
 |---|---|
-| Kafka interceptors + JSON codec | Implemented; unit tests passing |
-| Live-broker integration tests | Written; awaiting first cluster run |
-| Flink SQL reporting (CC + CP) | Phase 1 — four reports written; awaiting first deploy |
-| Demo pipeline (Stage1/2/3 services) | Not yet implemented; the ITs play the role of the demo for now |
-| PTF stuck-trace + UDAF percentiles | Phase 2 — JAR builds, UDAF unit-tested, two SQL reports written; PTF awaits first live-cluster run for end-to-end verification |
+| Kafka interceptors + JSON codec | Implemented; 6 unit tests passing |
+| Live-broker integration tests | All 5 tests passing against Minikube CP (Kafka 4.x + SR 8.1.0) |
+| Demo CLI (`send` / `hop` / `sink`) | Implemented and exercised |
+| Flink SQL reporting (CC + CP) — Phase 1 | 4 reports written; `make flink-reports-up` wires them onto the Minikube cluster in one session |
+| PTF stuck-trace + UDAF percentiles — Phase 2 | Shadow JAR builds (89 KB); UDAF unit-tested (5 tests); 2 SQL reports written; PTF API verified end-to-end against Flink 2.1.1 still in progress (see § 4 caveat) |
+| Protobuf message values | Implemented via SR; integration tests round-trip `DemoEvent` |

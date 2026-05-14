@@ -466,6 +466,24 @@ flink-delete: ## Delete the Flink session cluster (safe to run even if cluster i
 		&& echo "✔ Flink cluster '$(FLINK_CLUSTER_NAME)' deleted." \
 		|| echo "→ Flink cluster not found or API server unreachable, skipping."
 
+.PHONY: flink-reports-up
+flink-reports-up: ## Build PTF/UDAF JAR, upload to JM pod, register source + reports (Phase 1 + 2)
+	@$(mkfile_dir)scripts/deploy-flink-reports.sh up
+
+.PHONY: flink-reports-down
+flink-reports-down: ## Drop the registered reports / views / functions (safe to run repeatedly)
+	@$(mkfile_dir)scripts/deploy-flink-reports.sh down
+
+.PHONY: flink-sql
+flink-sql: ## Open an interactive Flink SQL Client inside the JobManager pod
+	@JM_POD=$$(kubectl get pods -n $(NAMESPACE) -l component=jobmanager \
+		--no-headers -o custom-columns=":metadata.name" 2>/dev/null | head -1); \
+	if [ -z "$$JM_POD" ]; then \
+		echo "✘ No Flink JobManager pod found. Run 'make flink-up' first."; exit 1; \
+	fi; \
+	echo "→ Opening SQL Client in $$JM_POD (Ctrl-D to exit) ..."; \
+	kubectl exec -n $(NAMESPACE) -it $$JM_POD -- /opt/flink/bin/sql-client.sh
+
 # ------------------------------------------------------------------------------
 # Phase 7: Confluent Manager for Apache Flink (CMF)
 # ------------------------------------------------------------------------------

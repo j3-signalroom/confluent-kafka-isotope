@@ -9,10 +9,11 @@
 -- After this file is applied, the shared/ DDL files are environment-agnostic
 -- and can be applied verbatim.
 --
--- Adapt `'topic' = 'iso-topic'` to whichever topic(s) your producers write to.
--- For a multi-topic pipeline, repeat this CREATE TABLE per topic (rename the
--- table per topic, e.g. `isotope_raw_topic_a`) and have shared/05_isotope_view
--- UNION ALL them together.
+-- Reads every topic matching `topic-pattern` below — defaults to `iso-.*`
+-- which captures everything the demo CLI creates (iso-start, iso-mid,
+-- iso-final). Adjust the pattern, or switch to `'topic' = '<name>'`, for
+-- your real pipeline. The Flink Kafka source connector handles broker
+-- topic discovery and adds new topics dynamically as they appear.
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS isotope_raw (
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS isotope_raw (
     WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
 ) WITH (
     'connector'                     = 'kafka',
-    'topic'                         = 'iso-topic',
+    'topic-pattern'                 = 'iso-.*',
     'properties.bootstrap.servers'  = 'kafka:9071',
     'properties.group.id'           = 'isotope-flink-reports',
     'scan.startup.mode'             = 'earliest-offset',

@@ -1,0 +1,23 @@
+-- =====================================================================
+-- Teardown — drops everything `make flink-reports-up` created, in
+-- reverse-dependency order. Safe to run repeatedly; uses IF EXISTS.
+--
+-- Applied via `make flink-reports-down`.
+-- =====================================================================
+
+-- Reports (depend on the isotope view)
+DROP VIEW     IF EXISTS latency_percentiles_flat_1m;
+DROP VIEW     IF EXISTS latency_percentiles_1m;
+DROP VIEW     IF EXISTS stuck_trace_alerts;
+DROP VIEW     IF EXISTS coverage_report_1m;
+DROP VIEW     IF EXISTS hop_distribution_1m;
+DROP VIEW     IF EXISTS topology_report_1m;
+DROP VIEW     IF EXISTS latency_report_1m;
+
+-- View → table
+DROP VIEW     IF EXISTS isotope;
+DROP TABLE    IF EXISTS isotope_raw;
+
+-- Functions (no dependents after the views above are gone)
+DROP FUNCTION IF EXISTS STUCK_TRACE_PTF;
+DROP FUNCTION IF EXISTS LATENCY_PERCENTILES;
