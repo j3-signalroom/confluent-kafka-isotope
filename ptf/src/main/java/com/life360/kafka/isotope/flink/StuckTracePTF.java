@@ -71,7 +71,9 @@ public class StuckTracePTF extends ProcessTableFunction<StuckTraceAlert> {
     public void eval(
             Context ctx,
             @StateHint(name = STATE_NAME) TraceState state,
-            @ArgumentHint({ArgumentTrait.SET_SEMANTIC_TABLE, ArgumentTrait.REQUIRE_ON_TIME})
+            @ArgumentHint(
+                value = {ArgumentTrait.SET_SEMANTIC_TABLE, ArgumentTrait.REQUIRE_ON_TIME},
+                name  = "r")
                 Row input,
             @ArgumentHint(name = "staleness_seconds") Long stalenessSeconds) {
 

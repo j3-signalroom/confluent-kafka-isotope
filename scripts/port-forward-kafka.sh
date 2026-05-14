@@ -46,15 +46,23 @@ if [ "${1:-}" = "--stop" ]; then
     exit 0
 fi
 
-# Find the Services CFK created for the external listener. Naming convention:
-# 'kafka-<broker-id>-external' for per-broker, 'kafka-bootstrap' or
-# 'kafka-external-bootstrap' for the bootstrap. We match anything in the
-# namespace whose name contains 'kafka' and 'external' OR is the bootstrap.
-mapfile -t SERVICES < <(
+# Find the Services CFK created for the external listener. Across CFK
+# versions we've seen two name shapes:
+#   - kafka-bootstrap-np / kafka-<id>-np                  (current)
+#   - kafka-bootstrap / kafka-<id>-external               (older)
+# Match every NodePort Service whose name starts with 'kafka-' — that's
+# both the bootstrap and per-broker entries, regardless of suffix.
+#
+# Avoid `mapfile` so this works on macOS's shipped bash 3.2 (mapfile is a
+# bash-4+ builtin).
+SERVICES=()
+while IFS= read -r svc; do
+    [ -n "${svc}" ] && SERVICES+=("${svc}")
+done < <(
     kubectl get svc -n "${NAMESPACE}" -o json 2>/dev/null \
         | jq -r '.items[]
                  | select(.spec.type == "NodePort")
-                 | select(.metadata.name | test("^kafka.*(external|bootstrap)"))
+                 | select(.metadata.name | test("^kafka-"))
                  | .metadata.name'
 )
 
@@ -68,42 +76,47 @@ fi
 mkdir -p "${PID_DIR}"
 
 for svc in "${SERVICES[@]}"; do
-    # The external port on each Service is the NodePort itself (CFK exposes
-    # it as the Service's port). Forward localhost:<nodeport> → svc:<nodeport>.
-    PORT=$(kubectl get svc -n "${NAMESPACE}" "${svc}" \
+    # The CFK external Service exposes a NodePort (what the broker advertises
+    # as 'host:nodePort') backed by an in-cluster port (what kubectl actually
+    # needs to forward to). Map them: localhost:<nodePort> → svc:<port>.
+    NODE_PORT=$(kubectl get svc -n "${NAMESPACE}" "${svc}" \
         -o jsonpath='{.spec.ports[?(@.name=="external")].nodePort}' 2>/dev/null)
-    if [ -z "${PORT}" ]; then
-        # Fall back to the first port if the listener isn't named 'external'.
-        PORT=$(kubectl get svc -n "${NAMESPACE}" "${svc}" \
+    SVC_PORT=$(kubectl get svc -n "${NAMESPACE}" "${svc}" \
+        -o jsonpath='{.spec.ports[?(@.name=="external")].port}' 2>/dev/null)
+    if [ -z "${NODE_PORT}" ] || [ -z "${SVC_PORT}" ]; then
+        # Fall back to the first declared port if the listener isn't named 'external'.
+        NODE_PORT=$(kubectl get svc -n "${NAMESPACE}" "${svc}" \
             -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null)
+        SVC_PORT=$(kubectl get svc -n "${NAMESPACE}" "${svc}" \
+            -o jsonpath='{.spec.ports[0].port}' 2>/dev/null)
     fi
-    if [ -z "${PORT}" ]; then
-        echo "→ Skipping ${svc}: could not determine NodePort." >&2
+    if [ -z "${NODE_PORT}" ] || [ -z "${SVC_PORT}" ]; then
+        echo "→ Skipping ${svc}: could not determine NodePort/Port pair." >&2
         continue
     fi
 
     # Kill anything already on this port (e.g. stale forward).
-    lsof -iTCP:"${PORT}" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
+    lsof -iTCP:"${NODE_PORT}" -sTCP:LISTEN -t 2>/dev/null | xargs kill 2>/dev/null || true
     sleep 0.2
 
-    echo "→ Port-forwarding ${PORT} → svc/${svc}:${PORT} ..."
-    nohup kubectl port-forward -n "${NAMESPACE}" "svc/${svc}" "${PORT}:${PORT}" \
+    echo "→ Port-forwarding localhost:${NODE_PORT} → svc/${svc}:${SVC_PORT} ..."
+    nohup kubectl port-forward -n "${NAMESPACE}" "svc/${svc}" "${NODE_PORT}:${SVC_PORT}" \
         >/dev/null 2>&1 &
     disown
     echo $! > "${PID_DIR}/${svc}.pid"
 
     # Wait for the port to be listening.
     elapsed=0
-    while ! lsof -iTCP:"${PORT}" -sTCP:LISTEN -t >/dev/null 2>&1; do
+    while ! lsof -iTCP:"${NODE_PORT}" -sTCP:LISTEN -t >/dev/null 2>&1; do
         if [ "${elapsed}" -ge "${TIMEOUT}" ]; then
-            echo "✘ Timed out waiting for ${svc} port ${PORT}." >&2
+            echo "✘ Timed out waiting for ${svc} port ${NODE_PORT}." >&2
             stop_all
             exit 1
         fi
         sleep 1
         elapsed=$((elapsed + 1))
     done
-    echo "✔ ${svc} ready on localhost:${PORT}"
+    echo "✔ ${svc} ready on localhost:${NODE_PORT}"
 done
 
 # Schema Registry forward — a plain ClusterIP service, not NodePort.
