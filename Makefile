@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (c) 2026 Life360, Inc. All rights reserved.
+# Copyright (c) 2026 Jeffrey Jonathan Jennings
 #
 # @author Jeffrey Jonathan Jennings (J3)
 #
