@@ -54,7 +54,7 @@ java {
 }
 
 application {
-    mainClass = 'com.life360.kafka.isotope.App'
+    mainClass = 'ai.signalroom.kafka.isotope.App'
 }
 
 // Hush Kafka client + Confluent serde INFO/WARN chatter so the demo CLI

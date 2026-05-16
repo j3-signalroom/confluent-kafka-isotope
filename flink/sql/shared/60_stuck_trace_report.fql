@@ -1,39 +1,53 @@
 -- =====================================================================
+-- ⚠ CCAF-only. This file is NOT applied by `make flink-reports-up` on
+-- the local Minikube CP Flink cluster. The PTF call below uses the
+-- Confluent Cloud Flink (CCAF) `name => TABLE foo PARTITION BY col`
+-- syntax which Apache Flink 2.1.1's parser rejects (parse error:
+-- "PARTITION" not expected after `=>`). The Java PTF itself, the
+-- function registration, and this view are valid as written; they
+-- will deploy on CCAF as-is when you point the deployer at it.
+-- =====================================================================
 -- Stuck-trace report — fires an alert for any trace that has not had a
 -- new hop within `staleness_seconds` of its last-observed hop, measured
 -- in event time.
 --
 -- Depends on:
---   - the `isotope` view (shared/05_isotope_view.sql)
---   - the STUCK_TRACE_PTF function (cp/01_register_functions.sql or
---     cc/01_register_functions.sql)
+--   - the `isotope` view (shared/05_isotope_view.fql)
+--   - the STUCK_TRACE_PTF function (cp/01_register_functions.fql or
+--     cc/01_register_functions.fql)
 --
 -- The PTF maintains per-trace_id state and event-time timers, so this
 -- view is a streaming alert source — each row represents one stuck
--- episode. Re-arming is automatic: if a previously-stuck trace receives
--- a fresh hop, the PTF re-installs its state and timer, and a future
--- stall on the same trace will fire a new alert.
+-- episode.
 --
--- Tuning `staleness_seconds`:
---   - Set to 2-3× the expected longest legitimate hop interval for your
---     pipeline. Building-LAN flows typically run sub-second, so 60s is
---     comfortable.
---   - On CCAF / CP Flink, this is a *pipeline-state* operator — its
---     memory grows with the count of distinct trace_ids currently
---     in-flight. For deterministic memory, also configure a state TTL
---     on the PTF via @StateHint(ttl = ...) — see the PTF source.
+-- Call syntax notes (per the Confluent PTF docs):
+--   - All args MUST be named — Flink's parser rejects PARTITION BY when
+--     it falls into expression context (named-arg + parenthesized
+--     subquery), but accepts the bare `TABLE x PARTITION BY col` form
+--     after `argname =>`.
+--   - No backticks around identifiers in the named-arg position.
+--   - `uid` is an implicit framework arg that pins state identity
+--     across query restarts; bump the version suffix when the PTF
+--     state schema changes incompatibly.
 -- =====================================================================
 
 CREATE VIEW IF NOT EXISTS stuck_trace_alerts AS
 SELECT
-    `trace_id`,
-    `origin_service`,
-    `last_service`,
-    `last_topic`,
-    `last_hop_count`,
-    `last_seen_ts_ms`,
-    `stuck_for_ms`
+    trace_id,
+    origin_service,
+    last_service,
+    last_topic,
+    last_hop_count,
+    last_seen_ts_ms,
+    stuck_for_ms
 FROM STUCK_TRACE_PTF(
-    `r`                  => TABLE isotope PARTITION BY `trace_id`,
-    `staleness_seconds`  => CAST(60 AS BIGINT)
+    input   => TABLE isotope PARTITION BY trace_id,
+    on_time => DESCRIPTOR(event_time),
+    uid     => 'stuck-trace-v1'
 );
+-- NOTE: the 60s staleness threshold is hard-coded inside the PTF source
+-- (StuckTracePTF.STALENESS). Flink 2.1.1's PTF framework rejects extra
+-- user-declared scalar args when the implicit on_time / uid args are
+-- present; once that's resolved (or by mid-flight Flink version bump),
+-- restore `staleness_seconds => CAST(... AS BIGINT)` here and the
+-- matching parameter in StuckTracePTF.eval().

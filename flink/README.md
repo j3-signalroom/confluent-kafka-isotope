@@ -51,7 +51,7 @@ identically on both Flink flavors.
 ### Message value format
 
 The demo topics carry **SR-framed Protobuf** values
-(`com.life360.kafka.isotope.proto.DemoEvent`). The Phase 1 reports
+(`ai.signalroom.kafka.isotope.proto.DemoEvent`). The Phase 1 reports
 declare `'value.format' = 'raw'` in their source DDL because they only
 read headers — Flink doesn't need to decode the value at all. If you
 want to project value fields too, switch the source DDL to
@@ -128,8 +128,8 @@ The shadow JAR bundles `com.tdunning:t-digest:3.3` (the only non-Flink
 runtime dependency). The Flink table-api jars are `compileOnly` because
 they're provided by the Flink runtime.
 
-The JAR is compiled against Apache Flink 2.1.1, matching
-`confluentinc/cp-flink:2.1.1-cp1-java21` (the Minikube image). CCAF
+The JAR is compiled against Apache Flink 2.1.2, matching
+`confluentinc/cp-flink:2.1.2-cp1-java21` (the Minikube image). CCAF
 runs a managed Flink version, but accepts JARs compiled against 2.x.
 
 ### Deploying on CP Flink (Minikube)
@@ -182,7 +182,7 @@ confluent flink statement create register-functions \
   topic. For multi-topic pipelines, either set `topic-pattern` (CP only)
   or define one source table per topic and `UNION ALL` them in
   `05_isotope_view.fql`.
-- **PTF API binding.** `StuckTracePTF` uses the Flink 2.1.1 PTF API
+- **PTF API binding.** `StuckTracePTF` uses the Flink 2.1.x PTF API
   (`@StateHint`-parameter state, `ctx.timeContext(Long.class)` for
   event-time timers). If you upgrade to a newer Flink, re-verify the
   annotations against the target version's `ProcessTableFunction`

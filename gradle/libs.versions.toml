@@ -6,19 +6,19 @@ junit-jupiter = "6.0.3"
 
 # Phase 2: Flink PTF/UDAF artifact (ptf/ subproject). Compile-time only;
 # the runtime is provided by whichever Flink the JAR is deployed onto
-# (cp-flink:2.1.1-cp1-java21 on Minikube, managed version on CCAF).
-flink = "2.1.1"
+# (cp-flink:2.1.2-cp1-java21 on Minikube, managed version on CCAF).
+flink = "2.1.2"
 t-digest = "3.3"
 shadow = "9.4.1"
 
 # Protobuf message-value format for Kafka topics, via Confluent Schema
 # Registry. The Confluent client version is matched to the SR deployed by
-# k8s/base/confluent-platform-c3++.yaml (cp-server:8.1.0). protoc is pinned
-# to the 3.x line because kafka-protobuf-serializer 8.1.0 pulls
-# protobuf-java 3.25.x transitively — keeping protoc and runtime on the
-# same major avoids generated-vs-runtime ABI surprises.
-confluent       = "8.1.0"
-protoc          = "3.25.5"
+# k8s/base/confluent-platform-c3++.yaml (cp-server:8.2.0). protoc is pinned
+# to match the protobuf-java runtime that kafka-protobuf-serializer 8.2.0
+# pulls transitively (protobuf-java 4.32.1) — keeping protoc and runtime on
+# the same major avoids generated-vs-runtime ABI surprises.
+confluent       = "8.2.0"
+protoc          = "4.32.1"
 protobuf-plugin = "0.9.4"
 
 [libraries]
