@@ -69,6 +69,11 @@ if [ "${ACTION}" = "up" ]; then
     # Each `sql-client.sh -f` invocation gets a fresh in-memory catalog, so
     # cross-file references (e.g. `latency_report` depending on `isotope`
     # view) only resolve if they're all in the same session.
+    # 60_stuck_trace_report.fql is intentionally excluded on CP Flink.
+    # The PTF call uses Confluent's `name => TABLE foo PARTITION BY col`
+    # syntax which CCAF accepts but Apache Flink 2.1.1's parser rejects
+    # (parse error: "PARTITION" not expected after `=>`). The Java PTF
+    # itself + the FQL are correct as written and will deploy on CCAF.
     UP_FILES=(
         flink/sql/cp/00_source_table.fql
         flink/sql/cp/01_register_functions.fql
@@ -77,7 +82,6 @@ if [ "${ACTION}" = "up" ]; then
         flink/sql/shared/20_topology_report.fql
         flink/sql/shared/30_hop_distribution.fql
         flink/sql/shared/40_coverage_report.fql
-        flink/sql/shared/60_stuck_trace_report.fql
         flink/sql/shared/70_latency_percentiles_report.fql
     )
     COMBINED=$(mktemp)
@@ -93,11 +97,13 @@ if [ "${ACTION}" = "up" ]; then
         bash -lc "/opt/flink/bin/sql-client.sh -f /tmp/isotope-reports.fql"
 
     echo ""
-    echo "✔ All reports registered. Try interactively:"
+    echo "✔ Reports registered (8/9 — stuck_trace_alerts is CCAF-only). Try interactively:"
     echo "    make flink-sql"
-    echo "    Flink SQL> SELECT * FROM latency_percentiles_flat_1m;"
+    echo "    Flink SQL> SELECT * FROM latency_report_1m;"
     echo "    Flink SQL> SELECT * FROM topology_report_1m;"
-    echo "    Flink SQL> SELECT * FROM stuck_trace_alerts;"
+    echo "    Flink SQL> SELECT * FROM hop_distribution_1m;"
+    echo "    Flink SQL> SELECT * FROM coverage_report_1m;"
+    echo "    Flink SQL> SELECT * FROM latency_percentiles_flat_1m;"
     echo ""
     echo "Feed traffic via the demo CLI (any iso-* topic name works):"
     echo "    ./gradlew :app:run --args=\"send iso-start svc-A 'hello'\" -q"

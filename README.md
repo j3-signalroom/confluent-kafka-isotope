@@ -19,7 +19,7 @@ and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`,
 either runtime.
 
 Message **values** on the demo topics are **SR-framed Protobuf**
-(`com.life360.kafka.isotope.proto.DemoEvent`) — the standard Confluent
+(`ai.signalroom.kafka.isotope.proto.DemoEvent`) — the standard Confluent
 value format. The interceptors and reports are agnostic to value format
 because the isotope rides in headers; the Protobuf choice just gives the
 integration tests and the demo CLI a typed payload to work with.
@@ -28,8 +28,13 @@ integration tests and the demo CLI a typed payload to work with.
 
 - **Header `x-isotope`** (JSON bytes) carries the full hop history,
   forwarded by every hop:
-  - `t` — 16-byte random trace ID, stable for the life of the trace
-  - `o` — origin timestamp (ms)
+  - `t` — 16-byte **UUIDv7** trace ID (RFC 9562): 48-bit ms timestamp in
+    the high bits + 74 bits random. Stable for the life of the trace,
+    and lexicographic byte order matches creation order — sort trace
+    IDs and you get chronological order for free.
+  - `o` — origin timestamp (ms) — same value as the timestamp embedded
+    in the UUIDv7 trace ID; kept as its own field for typed access from
+    Flink SQL without needing to decode the UUID bytes.
   - `s` — origin service name (set once, never reassigned)
   - `h` — ordered list of hops, each `{s: service, t: topic, m: tsMs}`
   - `x` — `true` if the hop list exceeded `MAX_HOPS = 32` and the oldest
@@ -49,8 +54,9 @@ the trace ID and origin survive the hop.
 ```
 app/                                    isotope JVM library + demo CLI + tests
   src/main/proto/                       DemoEvent.proto (Protobuf message value)
-  src/main/java/com/life360/kafka/isotope/
+  src/main/java/ai/signalroom/kafka/isotope/
     Isotope.java                        POJO + JSON codec + Hop + fromHeaders()
+                                        + UUIDv7 helpers (uuidV7Bytes / uuidV7String)
     IsotopeContext.java                 ThreadLocal + adoptFromRecord()
     IsotopeProducerInterceptor.java     stamps/appends x-isotope + 6 scalar
                                         reporting headers on send()
@@ -61,7 +67,7 @@ app/                                    isotope JVM library + demo CLI + tests
                                         DemoEvent via SR-framed Protobuf
                                         (need Minikube CP + SR port-forwarded)
 ptf/                                    Phase 2 — Flink PTF + UDAF shadow JAR
-  src/main/java/com/life360/kafka/isotope/flink/
+  src/main/java/ai/signalroom/kafka/isotope/flink/
     LatencyPercentilesUDAF.java         T-Digest p50/p95/p99 aggregate
     StuckTracePTF.java                  per-trace state + event-time timer
     Percentiles.java, StuckTraceAlert.java  return-type DTOs
@@ -70,7 +76,7 @@ flink/sql/                              Flink SQL reports — identical on
                                         CCAF and CP Flink except source DDL
   cp/, cc/, shared/                     per-environment source + shared reports
 k8s/base/                               CFK Kafka/SR/Connect/ksqlDB/C3 manifests
-scripts/                                port-forward helpers, dump_cc_topic.py
+scripts/                                port-forward helpers, deploy-flink-reports.sh
 Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ```
 
@@ -81,7 +87,7 @@ Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ```bash
 ./gradlew test                       # both subprojects
 # or scoped:
-./gradlew :app:test                  # IsotopeCodecTest        — JSON roundtrip, hop eviction, header size
+./gradlew :app:test                  # IsotopeCodecTest        — JSON roundtrip, hop eviction, header size, UUIDv7 properties (10 tests)
 ./gradlew :ptf:test                  # LatencyPercentilesUDAFTest — T-Digest accumulator semantics
 ```
 
@@ -197,8 +203,9 @@ make flink-sql
 # Flink SQL> SELECT * FROM topology_report_1m;
 # Flink SQL> SELECT * FROM hop_distribution_1m;
 # Flink SQL> SELECT * FROM coverage_report_1m;
-# Flink SQL> SELECT * FROM stuck_trace_alerts;                       -- Phase 2 PTF
 # Flink SQL> SELECT * FROM latency_percentiles_flat_1m;              -- Phase 2 UDAF
+# NOTE: `stuck_trace_alerts` (Phase 2 PTF) is not deployed on the
+#       Minikube cluster — see the caveat below.
 ```
 
 Each `SELECT` against a continuous view starts a streaming job —
@@ -223,18 +230,38 @@ You should see report rows update as records flow.
 make flink-reports-down
 ```
 
-#### Known caveat (Phase 2 PTF API)
+#### Known caveat: `STUCK_TRACE_PTF` does not deploy on this Flink image
 
-`STUCK_TRACE_PTF` invokes the Flink 2.1.1 PTF API, which is still
-evolving. The first live deploy surfaced two real PTF-side fixes that
-are now in the code (correct `ArgumentTrait` enum, named `r` table
-arg). Further PTF API mismatches may still surface on first run —
-the algorithm is small (~30 lines in
-[ptf/src/.../StuckTracePTF.java](ptf/src/main/java/com/life360/kafka/isotope/flink/StuckTracePTF.java)),
-so fixes are annotation-level rather than design-level. The Phase-1
-reports (`latency_report_1m`, `topology_report_1m`, etc.) and the
-Phase-2 UDAF (`LATENCY_PERCENTILES`) don't go through the PTF path
-and aren't subject to this caveat.
+PTFs in Confluent Flink are an **Early Access Program** feature, and
+their SQL call syntax is in flux. The stuck-trace PTF view uses the
+Confluent-documented form —
+`input => TABLE isotope PARTITION BY trace_id, on_time => DESCRIPTOR(...)`
+— which **the parser shipped in `confluentinc/cp-flink:2.1.1-cp1-java21`
+rejects** with `Encountered "PARTITION" at line N, column M`. We
+confirmed this by walking four syntactic variants (named-arg + bare
+TABLE, named-arg + parenthesised subquery, positional + named hybrid,
+all-named); all hit the same grammar gate or its Calcite
+`ClassCastException` downstream.
+
+What I'm **not** sure about: whether the parser in this image is
+genuinely behind CCAF's, whether there's an opt-in flag for the EAP
+grammar, or whether the docs run ahead of any current Flink build.
+The Confluent EAP-feature page says this syntax works on CCAF; we
+haven't verified that directly on a CCAF cluster.
+
+What this means in practice:
+- `make flink-reports-up` applies **8 of 9** reports successfully on
+  Minikube; `60_stuck_trace_report.fql` is intentionally skipped by the
+  deploy script and carries a banner comment explaining why.
+- The PTF Java code in
+  [ptf/src/.../StuckTracePTF.java](ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StuckTracePTF.java)
+  matches the canonical Confluent
+  [InactivityAlert example](https://docs.confluent.io/cloud/current/flink/how-to-guides/create-process-table-function.html#example-inactivity-alert-ptf-with-timers)
+  structurally, so the JAR should be portable when the parser side
+  catches up (or against CCAF directly).
+- The UDAF (`LATENCY_PERCENTILES`) is unaffected — UDAFs don't use
+  PTF-call syntax, and `latency_percentiles_flat_1m` deploys fine
+  on Minikube.
 
 ### Recommended path the first time through
 
@@ -250,9 +277,10 @@ and aren't subject to this caveat.
 
 | Piece | Status |
 |---|---|
-| Kafka interceptors + JSON codec | Implemented; 6 unit tests passing |
-| Live-broker integration tests | All 5 tests passing against Minikube CP (Kafka 4.x + SR 8.1.0) |
-| Demo CLI (`send` / `hop` / `sink`) | Implemented and exercised |
-| Flink SQL reporting (CC + CP) — Phase 1 | 4 reports written; `make flink-reports-up` wires them onto the Minikube cluster in one session |
-| PTF stuck-trace + UDAF percentiles — Phase 2 | Shadow JAR builds (89 KB); UDAF unit-tested (5 tests); 2 SQL reports written; PTF API verified end-to-end against Flink 2.1.1 still in progress (see § 4 caveat) |
-| Protobuf message values | Implemented via SR; integration tests round-trip `DemoEvent` |
+| Kafka interceptors + JSON codec | Implemented; 10 unit tests passing (codec roundtrip, hop eviction, header size, UUIDv7 version/variant/order properties) |
+| Live-broker integration tests | All 5 tests passing against Minikube CP (Kafka 4.x + SR 8.2.0) |
+| Demo CLI (`send` / `hop` / `sink`) | Implemented and exercised end-to-end |
+| Protobuf message values via SR | Implemented; integration tests round-trip `DemoEvent` |
+| Flink SQL reports — Phase 1 (4 reports) | `make flink-reports-up` deploys all 4 (`latency_report_1m`, `topology_report_1m`, `hop_distribution_1m`, `coverage_report_1m`) on Minikube |
+| Flink UDAF — Phase 2 (`LATENCY_PERCENTILES`) | Shadow JAR builds (89 KB), UDAF unit-tested (5 tests), deploys + queries on Minikube via `latency_percentiles_flat_1m` |
+| Flink PTF — Phase 2 (`STUCK_TRACE_PTF`) | Java code complete and unit-compileable; SQL call deferred — Apache Flink 2.1.1's parser rejects the documented EAP PTF call syntax (see § 4 caveat). JAR + FQL ready for CCAF when validated there. |

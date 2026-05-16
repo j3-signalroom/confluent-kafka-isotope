@@ -24,9 +24,9 @@
 -- =====================================================================
 
 CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
-    AS 'com.life360.kafka.isotope.flink.LatencyPercentilesUDAF'
+    AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesUDAF'
     USING JAR 'confluent-artifact://<ARTIFACT_ID>';
 
 CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
-    AS 'com.life360.kafka.isotope.flink.StuckTracePTF'
+    AS 'ai.signalroom.kafka.isotope.flink.StuckTracePTF'
     USING JAR 'confluent-artifact://<ARTIFACT_ID>';

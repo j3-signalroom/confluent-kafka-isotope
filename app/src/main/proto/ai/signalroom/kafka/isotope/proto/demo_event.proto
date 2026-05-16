@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package ai.signalroom.kafka.isotope.proto;
+
+option java_package = "ai.signalroom.kafka.isotope.proto";
+option java_multiple_files = true;
+option java_outer_classname = "DemoEventProto";
+
+// Minimal payload used by the demo pipeline / integration tests.
+//
+// The isotope tracer rides in record headers (x-isotope + the six scalar
+// x-isotope-* headers), so the message *value* schema is independent of
+// the tracer. DemoEvent only exists so the integration tests have a
+// realistic SR-framed Protobuf payload to send through the chain — the
+// Flink reports today read headers only and never touch this value.
+message DemoEvent {
+    // Stable per-event identity. Distinct from the isotope trace ID — a
+    // single trace can fan out to multiple downstream events that all
+    // share an origin but have unique event_ids.
+    string event_id = 1;
+
+    // Producer service name, mirrored from the producer's isotope
+    // configuration. Useful when a consumer wants to filter without
+    // parsing headers.
+    string source = 2;
+
+    // Wall-clock millis at which the event was constructed (not the same
+    // as Kafka's broker-assigned record timestamp).
+    int64 created_at_ms = 3;
+
+    // Free-form payload string for tests / examples.
+    string payload = 4;
+}

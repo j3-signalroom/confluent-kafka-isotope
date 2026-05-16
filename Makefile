@@ -14,7 +14,7 @@
 #   4. Confluent Platform components in KRaft mode (Kafka, Schema Registry,
 #      Connect, ksqlDB, REST Proxy, Control Center)
 #   5. Control Center browser access via port-forwarding
-#   6. Apache Flink 2.1.1 (cert-manager, Confluent Flink Kubernetes Operator
+#   6. Apache Flink 2.1.2 (cert-manager, Confluent Flink Kubernetes Operator
 #      1.130, session cluster deployment, Flink UI)
 #   7. Confluent Manager for Apache Flink (CMF) 2.1
 #   8. Flink JAR build (Gradle shadow JAR) and REST API job submission
@@ -37,14 +37,14 @@ MINIKUBE_NODE_ARCH := arm64
 endif
 
 # CMF manages Flink via confluentinc/cp-flink images — not the open-source flink image
-FLINK_IMAGE         ?= confluentinc/cp-flink:2.1.1-cp1-java21$(if $(filter arm64,$(MINIKUBE_NODE_ARCH)),-arm64,)
-FLINK_OPERATOR_VER  ?= 1.130.0
+FLINK_IMAGE         ?= confluentinc/cp-flink:2.1.2-cp1-java21$(if $(filter arm64,$(MINIKUBE_NODE_ARCH)),-arm64,)
+FLINK_OPERATOR_VER  ?= 1.130.3
 FLINK_VERSION       ?= v2_1
 FLINK_CLUSTER_NAME  ?= flink-basic
 FLINK_MANIFEST      ?= k8s/base/flink-basic-deployment.yaml
 FLINK_RBAC_MANIFEST ?= k8s/base/flink-rbac.yaml
 CERT_MANAGER_VER    ?= v1.18.2
-CMF_VER             ?= 2.1.0
+CMF_VER             ?= 2.1.3
 CMF_ENV_NAME        ?= dev-local
 
 # Ports for port-forwarding to local machine (Control Center, CMF, Flink UI)
@@ -587,35 +587,6 @@ cmf-proxy-remove: ## Remove the cmf-proxy sidecar and resume CFK reconciliation 
 		echo "✔ cmf-proxy removed. CFK will reconcile and restart controlcenter-0."; \
 	fi
 
-# ------------------------------------------------------------------------------
-# External CC topic capture
-#
-# Dumps records from any Confluent Cloud topic into sample_data/<topic>.csv (or
-# .jsonl). CC_CONFIG points at a librdkafka client.properties for whichever CC
-# environment owns the topic. Defaults to Avro key/value; override with
-# KEY_FORMAT / VALUE_FORMAT for json or string keys.
-# ------------------------------------------------------------------------------
-.PHONY: dump-cc-topic
-dump-cc-topic: ## Dump up to MAX_RECORDS (default 1M) from a CC topic to sample_data/<topic>.csv (CC_CONFIG, TOPIC required; KEY_FORMAT/VALUE_FORMAT default to avro)
-	@if [ -z "$(CC_CONFIG)" ]; then \
-		echo "✖ CC_CONFIG=<path/to/client.properties> is required"; \
-		echo "  e.g. make dump-cc-topic CC_CONFIG=~/.confluent/cloud.properties \\"; \
-		echo "                          TOPIC=my_source_topic"; \
-		exit 2; \
-	fi
-	@if [ -z "$(TOPIC)" ]; then \
-		echo "✖ TOPIC=<name> is required"; \
-		exit 2; \
-	fi
-	@echo "→ Dumping $(TOPIC) → $(if $(OUTPUT),$(OUTPUT),sample_data/$(TOPIC).csv) (max $(or $(MAX_RECORDS),1000000) records)..."
-	@python3 $(mkfile_dir)scripts/dump_cc_topic.py \
-		--config "$(CC_CONFIG)" \
-		--topic "$(TOPIC)" \
-		--key-format $(or $(KEY_FORMAT),avro) \
-		--value-format $(or $(VALUE_FORMAT),avro) \
-		--max-records $(or $(MAX_RECORDS),1000000) \
-		$(if $(OUTPUT),--output "$(OUTPUT)")
-	@echo "✔ Dump complete."
 
 # ------------------------------------------------------------------------------
 # Composite workflows
