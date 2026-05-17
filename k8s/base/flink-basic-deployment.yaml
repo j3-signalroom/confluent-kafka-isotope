@@ -52,6 +52,30 @@ spec:
           volumeMounts:
             - name: flink-lib
               mountPath: /flink-lib
+        # 3) Download the Flink Protobuf SQL format + the protobuf-java
+        # runtime it depends on. The isotope-report-*-1m sink tables
+        # declared by flink/sql/cp/05_report_sinks.fql use
+        # 'value.format' = 'protobuf', which requires the format SPI
+        # (flink-protobuf) + a Message runtime (protobuf-java).
+        # flink-protobuf-2.1.2 was compiled against protobuf-java 3.21.7
+        # and calls API removed in 4.x (Descriptors$FileDescriptor.getSyntax),
+        # so we install 3.21.7 here AND generate the report .proto-emitted
+        # classes (bundled into isotope-flink-udf.jar) with protoc 3.21.7
+        # so they're ABI-compatible with this runtime. See
+        # gradle/libs.versions.toml `protoc-flink = "3.21.7"`.
+        - name: fetch-flink-protobuf
+          image: curlimages/curl:8.13.0
+          command:
+            - sh
+            - -c
+            - |
+              curl -fSL -o /flink-lib/flink-protobuf-2.1.2.jar \
+                https://repo1.maven.org/maven2/org/apache/flink/flink-protobuf/2.1.2/flink-protobuf-2.1.2.jar
+              curl -fSL -o /flink-lib/protobuf-java-3.21.7.jar \
+                https://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/3.21.7/protobuf-java-3.21.7.jar
+          volumeMounts:
+            - name: flink-lib
+              mountPath: /flink-lib
       containers:
         - name: flink-main-container
           volumeMounts:

@@ -1,6 +1,7 @@
 plugins {
     id 'java-library'
     alias(libs.plugins.shadow)
+    alias(libs.plugins.protobuf)
 }
 
 repositories {
@@ -12,12 +13,29 @@ dependencies {
     // Compile against it, but never bundle it into the shaded jar.
     compileOnly libs.flink.table.api.java
     compileOnly libs.flink.table.common
+    // Flink's protobuf SQL format. Compile-only because the format jar
+    // is installed into /opt/flink/lib via an init container; this
+    // dependency exists so the report .proto-generated classes compile
+    // and so any future ITs against the format can find it.
+    compileOnly libs.flink.protobuf
 
     // T-Digest is what we actually need bundled — it's not part of Flink.
     implementation libs.t.digest
 
+    // Generated proto messages need protobuf-java at runtime. flink-protobuf
+    // 2.1.2 was built against protobuf-java 3.21.7 and calls API removed in
+    // 4.x (Descriptors$FileDescriptor.getSyntax()) — so we generate :ptf's
+    // message classes with protoc 3.21.7 and compile them against the
+    // matching protobuf-java. The runtime jar is installed into
+    // /opt/flink/lib by the init container in
+    // k8s/base/flink-basic-deployment.yaml; declaring it compileOnly here
+    // keeps the generated classes compiling without bloating the shaded jar.
+    compileOnly libs.flinkprotobuf.java
+
     testImplementation libs.flink.table.api.java
     testImplementation libs.flink.table.common
+    testImplementation libs.flink.protobuf
+    testImplementation libs.flinkprotobuf.java
     testImplementation libs.junit.jupiter
     testRuntimeOnly   libs.junit.platform.launcher
 }
@@ -28,12 +46,27 @@ java {
     }
 }
 
+protobuf {
+    // Use the Flink-aligned protoc version (3.21.7) so the report message
+    // classes generated under build/generated/source/proto/main/java/...
+    // are compatible with flink-protobuf-2.1.2's protobuf-java runtime in
+    // /opt/flink/lib. Generating with protoc 4.x emits code that calls
+    // protobuf-java 4.x-only API (FileDescriptor.getEdition / removal of
+    // getSyntax) which dies at first use against the older runtime.
+    protoc {
+        artifact = "com.google.protobuf:protoc:${libs.versions.flinkprotobuf.get()}"
+    }
+}
+
 tasks.named('test') {
     useJUnitPlatform()
 }
 
 // The shadow jar is what gets uploaded to CCAF / CMF — it bundles t-digest
-// but excludes the (provided-by-Flink) flink-table-* dependencies.
+// AND the report .proto-generated classes (so Flink's protobuf format can
+// resolve protobuf.message-class-name=ai.signalroom.kafka.isotope.proto.reports.*),
+// but excludes the (provided-by-Flink) flink-table-* and flink-protobuf
+// dependencies.
 shadowJar {
     archiveBaseName.set('isotope-flink-udf')
     archiveClassifier.set('')

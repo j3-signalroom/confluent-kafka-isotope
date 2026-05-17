@@ -1,9 +1,48 @@
 # Flink SQL reports
 
-Four reports that read the isotope-tagged stream and surface what's flowing
-where, how fast, and how reliably. The SQL is identical between Confluent
-Cloud for Apache Flink (CCAF) and Confluent Platform Flink (CP Flink on
-Minikube) — only the source-table DDL differs.
+Five reports total, deployed across **two Flink paths**:
+
+| Reports | Path | Format | Where the SQL lives |
+|---|---|---|---|
+| `latency_report_1m`, `topology_report_1m`, `hop_distribution_1m`, `coverage_report_1m` | **CMF Statements** (canonical) | SR-Protobuf (auto-registered as `proto-registry` format; Control Center renders natively) | `flink/sql/cmf/` |
+| `latency_percentiles_flat_1m` | **cp-flink session cluster** (UDAF-only) | Apache Flink's open-source `protobuf` format (raw Protobuf, no SR magic byte) | `flink/sql/cp/` + `flink/sql/shared/70_*.fql` |
+
+The split exists because **CMF disallows user-defined functions** in
+Statements ([features-support](https://docs.confluent.io/platform/current/flink/jobs/sql-statements/features-support.html)),
+and the percentiles report depends on a custom T-Digest UDAF. The 4
+pure-SQL reports migrate cleanly to CMF; the percentiles report stays
+on the session cluster where UDAFs work.
+
+> **Why isn't everything CMF?** Two reasons. (1) CMF disallows UDAFs
+> in Statements — the percentiles report's `LATENCY_PERCENTILES`
+> T-Digest aggregate can't run there. (2) CMF's compute-pool image
+> (`confluentinc/cp-flink-sql`) is currently published only for Flink
+> 1.19 — Confluent has not yet shipped a 2.x build of cp-flink-sql.
+> The session cluster runs Flink 2.1.2; CMF reports run Flink 1.19.
+> They're isolated (different pods, different JVMs, only share Kafka
+> + SR), so the mismatch is ergonomic, not load-bearing.
+
+## CMF path (canonical)
+
+`make cmf-reports-up` creates a CMF `KafkaCatalog` (wraps SR), a
+`KafkaDatabase` (wraps Kafka), a `ComputePool`, then submits 4
+Statements per report (one DDL `CREATE TABLE`, one streaming
+`INSERT INTO`). CMF auto-creates each `isotope-report-*-1m` Kafka
+topic and auto-registers a Protobuf schema for the `*-value` subject.
+The 4 DDL Statements use `'value.format' = 'proto-registry'`; the
+INSERTs decode `x-isotope-*` headers via a CTE (CMF doesn't support
+`CREATE VIEW` so we can't have a shared `isotope` view).
+
+## Session-cluster path (hybrid only)
+
+`make flink-reports-up` is now scoped to **just the latency-percentiles
+report**. It still uses Apache Flink's open-source `protobuf` format
+(no SR magic byte) and the `LatencyPercentilesUDAF` shadow JAR. The
+wire schema for that one report lives in
+[ptf/src/main/proto/.../reports.proto](src/main/proto/ai/signalroom/kafka/isotope/proto/reports/reports.proto)
+and is compiled into `isotope-flink-udf.jar`. Control Center can't
+deserialize that topic without the `.proto`; query via `make flink-sql`
+or `kafkacat | protoc --decode`.
 
 ## Layout
 
@@ -12,22 +51,40 @@ flink/sql/
   cp/
     00_source_table.fql              # CREATE TABLE with 'connector' = 'kafka'
     01_register_functions.fql        # Phase 2 — CREATE FUNCTION … USING JAR
+    05_report_sinks.fql              # CREATE TABLE for each isotope-report-*-1m Kafka sink (Flink protobuf, no SR)
+    99_teardown.fql                  # DROP TABLE/VIEW/FUNCTION (companion to flink-reports-down)
   cc/
     00_source_table.fql              # CREATE VIEW over CCAF's auto-registered topic
     01_register_functions.fql        # Phase 2 — confluent-artifact:// JAR reference
   shared/
     05_isotope_view.fql              # typed view; decodes header scalars
-    10_latency_report.fql            # avg/min/max latency by origin × topic
-    20_topology_report.fql           # produce-edge counts per minute
-    30_hop_distribution.fql          # hop-count buckets per topic per minute
-    40_coverage_report.fql           # distinct traces per topic per minute
+    10_latency_report.fql            # INSERT INTO: avg/min/max latency by origin × topic
+    20_topology_report.fql           # INSERT INTO: produce-edge counts per minute
+    30_hop_distribution.fql          # INSERT INTO: hop-count buckets per topic per minute
+    40_coverage_report.fql           # INSERT INTO: distinct traces per topic per minute
     60_stuck_trace_report.fql        # Phase 2 — stuck-trace alerts via STUCK_TRACE_PTF
-    70_latency_percentiles_report.fql # Phase 2 — p50/p95/p99 via LATENCY_PERCENTILES UDAF
+    70_latency_percentiles_report.fql # Phase 2 — INSERT INTO: p50/p95/p99 via LATENCY_PERCENTILES UDAF
+
+ptf/src/main/proto/
+  ai/signalroom/kafka/isotope/proto/reports/
+    reports.proto                    # 5 messages: one per sink. Compiled into
+                                     # isotope-flink-udf.jar via the protobuf
+                                     # Gradle plugin in ptf/build.gradle.
 ```
 
-The `shared/` files don't reference `'connector'` or any environment-specific
-configs — they work against the `isotope_raw` table/view that each `00_…` file
-creates.
+`window_start` / `window_end` are emitted as `BIGINT` epoch millis on
+the wire (not `TIMESTAMP_LTZ`) because Flink's protobuf format maps
+`google.protobuf.Timestamp` to a nested `ROW(seconds, nanos)` rather
+than to a Flink `TIMESTAMP` — we sidestep the impedance mismatch by
+declaring `BIGINT` columns and `CAST(window_start AS BIGINT)`-ing
+inside the INSERT statements. Consumers can rehydrate with
+`TO_TIMESTAMP_LTZ(window_start, 3)`.
+
+The `shared/` `INSERT INTO` files don't reference `'connector'` or any
+environment-specific configs — they target the table names declared by
+`cp/05_report_sinks.fql` (on CP) or by CCAF's managed topic catalog
+(on CCAF), and they read from the `isotope` view declared by
+`shared/05_isotope_view.fql`, which in turn reads from `isotope_raw`.
 
 ## How the reports read the isotope
 

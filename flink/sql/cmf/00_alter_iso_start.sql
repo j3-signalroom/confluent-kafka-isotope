@@ -1,0 +1,11 @@
+-- CMF auto-exposes Kafka topics as Flink tables and derives their schema
+-- from Schema Registry, but headers ride as Kafka record metadata, not in
+-- the value schema. CMF tables don't include headers by default. We add
+-- a `headers` METADATA VIRTUAL column via ALTER TABLE so the report
+-- INSERTs can read x-isotope-* headers the same way the legacy
+-- cp-flink-session reports did.
+--
+-- Run once per source topic that the reports read from. If you add new
+-- producer topics (iso-mid, iso-final, …), ALTER them similarly and
+-- UNION them in the INSERT statements.
+ALTER TABLE `iso-start` ADD `headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL;

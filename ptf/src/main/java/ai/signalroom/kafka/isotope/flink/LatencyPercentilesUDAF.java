@@ -2,7 +2,9 @@ package ai.signalroom.kafka.isotope.flink;
 
 import com.tdunning.math.stats.MergingDigest;
 import org.apache.flink.table.annotation.DataTypeHint;
+import org.apache.flink.table.annotation.FunctionHint;
 import org.apache.flink.table.functions.AggregateFunction;
+import org.apache.flink.types.Row;
 
 /**
  * Streaming p50/p95/p99 over latency_ms, computed via a T-Digest sketch.
@@ -21,9 +23,21 @@ import org.apache.flink.table.functions.AggregateFunction;
  * memory (default compression = 100 → a few KB per accumulator), accurate
  * tail percentiles, and merge semantics that play well with parallel
  * accumulators.
+ *
+ * Why we return {@code Row} (not a POJO): Flink 2.1.2 tightened structured-
+ * type extraction. Declaring a POJO output forced the planner to derive a
+ * STRUCTURED logical type, and downstream codegen (specifically, the
+ * sink-write path used by {@code INSERT INTO}) emits a cast of the POJO
+ * to {@code Row} which fails at Janino-compile time. Returning {@code Row}
+ * with an explicit {@code @FunctionHint(output = @DataTypeHint("ROW<...>"))}
+ * declares the logical type AND the conversion class consistently, so
+ * codegen on every path (interactive SELECT and sink INSERT) is happy.
+ * See {@link Percentiles} for the POJO retained for test readability.
  */
+@FunctionHint(output = @DataTypeHint(
+    "ROW<p50_ms DOUBLE, p95_ms DOUBLE, p99_ms DOUBLE, sample_count BIGINT>"))
 public class LatencyPercentilesUDAF
-        extends AggregateFunction<Percentiles, LatencyPercentilesUDAF.TDigestAccumulator> {
+        extends AggregateFunction<Row, LatencyPercentilesUDAF.TDigestAccumulator> {
 
     /** Compression parameter for T-Digest. 100 gives ~5% error at p99, ~few KB per accumulator. */
     private static final double COMPRESSION = 100.0;
@@ -79,15 +93,15 @@ public class LatencyPercentilesUDAF
     }
 
     @Override
-    public Percentiles getValue(TDigestAccumulator acc) {
+    public Row getValue(TDigestAccumulator acc) {
         if (acc.sampleCount == 0L) {
-            return new Percentiles(null, null, null, 0L);
+            return new Percentiles(null, null, null, 0L).toRow();
         }
         return new Percentiles(
             acc.digest.quantile(0.50),
             acc.digest.quantile(0.95),
             acc.digest.quantile(0.99),
             acc.sampleCount
-        );
+        ).toRow();
     }
 }

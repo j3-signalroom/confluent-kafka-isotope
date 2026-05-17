@@ -1,0 +1,52 @@
+-- =====================================================================
+-- Report sink tables — Confluent Platform Flink (cp-flink session cluster)
+--
+-- Scope: this file is now scoped to the latency-percentiles report
+-- only. The other 4 reports (latency, topology, hop_distribution,
+-- coverage) moved to CMF as canonical SR-Protobuf-framed reports — see
+-- scripts/deploy-cmf-reports.sh and flink/sql/cmf/.
+--
+-- The latency-percentiles report stays on the cp-flink session cluster
+-- because its T-Digest UDAF (`LATENCY_PERCENTILES`) requires a user-
+-- defined function, which CMF Statements disallow. It uses Apache
+-- Flink's open-source `protobuf` SQL format:
+--   https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/protobuf/
+--
+-- That's raw Protobuf — no Confluent Schema Registry magic-byte+id
+-- header. Consumers need the .proto schema out-of-band (see
+-- ptf/src/main/proto/.../reports/reports.proto, message
+-- LatencyPercentilesFlatReport). Control Center renders this topic as
+-- gibberish; query via `make flink-sql` instead.
+--
+-- The 'flink-protobuf' format SPI is installed into /opt/flink/lib by
+-- an init container in k8s/base/flink-basic-deployment.yaml; the
+-- generated proto classes ship inside isotope-flink-udf.jar (passed to
+-- sql-client via `-j`).
+--
+-- Window times: BIGINT epoch millis on the wire (Flink's protobuf
+-- format maps google.protobuf.Timestamp to a nested ROW(seconds,
+-- nanos), so we sidestep it). Consumers rehydrate via
+-- TO_TIMESTAMP_LTZ(window_start, 3).
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS latency_percentiles_flat_1m (
+    `window_start`    BIGINT,
+    `window_end`      BIGINT,
+    `origin_service`  STRING,
+    `this_topic`      STRING,
+    `p50_ms`          DOUBLE,
+    `p95_ms`          DOUBLE,
+    `p99_ms`          DOUBLE,
+    `sample_count`    BIGINT
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'isotope-report-latency-percentiles-1m',
+    'properties.bootstrap.servers' = 'kafka:9071',
+    'value.format'                 = 'protobuf',
+    'value.protobuf.message-class-name'
+        = 'ai.signalroom.kafka.isotope.proto.reports.LatencyPercentilesFlatReport',
+    'sink.partitioner'             = 'fixed',
+    -- Source-side options for ad-hoc `SELECT * FROM …` queries.
+    'scan.startup.mode'            = 'earliest-offset',
+    'properties.group.id'          = 'isotope-report-reader'
+);

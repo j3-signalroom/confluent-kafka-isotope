@@ -1,0 +1,15 @@
+{
+  "apiVersion": "cmf.confluent.io/v1",
+  "kind": "KafkaDatabase",
+  "metadata": {
+    "name": "iso-db"
+  },
+  "spec": {
+    "kafkaCluster": {
+      "connectionConfig": {
+        "bootstrap.servers": "kafka:9071"
+      }
+    },
+    "ddlEnvironments": ["dev-local"]
+  }
+}
