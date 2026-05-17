@@ -180,22 +180,68 @@ make flink-up                # cert-manager → CFK Flink Operator → CMF → s
                              # (~5 min the first time)
 ```
 
-**Deploy the reports** — builds the PTF/UDAF shadow JAR if missing,
-streams it into the JobManager pod, then applies all FQL files
-(`cp/00_source_table.fql`, `cp/01_register_functions.fql`, and every
-`shared/*.fql` report) as one SQL Client session so cross-file view
-references resolve:
+**Deploy the reports** — there are now **two deployment paths**,
+because CMF supports SR-Protobuf natively but disallows user-defined
+functions (and the percentiles report uses a T-Digest UDAF):
+
+| Reports | Path | Where it lives |
+|---|---|---|
+| `latency`, `topology`, `hop_distribution`, `coverage` | **CMF Statements** (canonical) | Each its own Application-mode Flink cluster; SR-Protobuf auto-registered; Control Center renders natively |
+| `latency_percentiles_flat` | **cp-flink session cluster** (UDAF-only) | Shares the open-source FlinkDeployment; uses Apache Flink's `protobuf` format (no SR magic byte) |
 
 ```bash
-make flink-reports-up
+make cmf-reports-up                 # 4 reports on CMF (SR-Protobuf)
+make flink-reports-up               # latency_percentiles only on cp-flink session
 ```
 
-The source table reads every `iso-*` topic the demo CLI creates
-([flink/sql/cp/00_source_table.fql](flink/sql/cp/00_source_table.fql)
-uses `topic-pattern = 'iso-.*'`).
+`cmf-reports-up` creates a CMF KafkaCatalog (wrapping SR), a
+KafkaDatabase (wrapping Kafka), a ComputePool, then `ALTER TABLE
+iso-start ADD headers METADATA …` (so the auto-exposed source has the
+`x-isotope-*` headers), and finally submits 4×(DDL, INSERT INTO)
+Statements. CMF auto-creates each `isotope-report-*-1m` Kafka topic
+and registers a Protobuf schema in SR for the `*-value` subject.
+**Control Center deserializes those topics natively** — no .proto
+schemas in the repo, no hand-installed format jars, no version
+juggling.
+
+`flink-reports-up` is now scoped to the **latency_percentiles report
+only**. It still uses Apache Flink's open-source `protobuf` format
+(no SR magic byte) on the `isotope-report-latency-percentiles-1m`
+topic, with the `LatencyPercentilesUDAF` T-Digest aggregate from
+[ptf/src/main/java/.../LatencyPercentilesUDAF.java](ptf/src/main/java/ai/signalroom/kafka/isotope/flink/LatencyPercentilesUDAF.java).
+Control Center can't decode that topic without an out-of-band `.proto`
+([ptf/src/main/proto/…/reports.proto](ptf/src/main/proto/ai/signalroom/kafka/isotope/proto/reports/reports.proto)).
+The downstream demo topics (`iso-start`, etc.) still use SR-Protobuf
+via the Java app; that's unchanged.
+
+##### Why the split?
+
+CMF 2.3.1 has a clean docs-supported flow for SR-Protobuf — but it
+**disallows UDFs in Statements** ([features-support page](https://docs.confluent.io/platform/current/flink/jobs/sql-statements/features-support.html)).
+The 4 portable reports (pure SQL aggregates) migrate cleanly. The
+percentiles report depends on a custom T-Digest UDAF and stays on
+the session cluster where UDFs work. Two paths is the honest answer
+on this stack.
+
+##### Version note
+
+CMF's compute pool runs the `confluentinc/cp-flink-sql:1.19-cp8-arm64`
+image — Confluent has not yet published a 2.x build of the
+`cp-flink-sql` image (which bundles `ce-flink-sql-job.jar` for CMF
+Statement execution). The cp-flink session cluster runs Flink 2.1.2.
+Two Flink versions in the same project. They're isolated (different
+pods, different JVMs, only share Kafka + SR), so the mismatch is
+ergonomic, not load-bearing.
+
+**Results persist in Kafka, not in the SQL Client session.** The
+streaming `INSERT INTO` jobs run on the Flink session cluster
+indefinitely, accumulating one row per closed window per group into
+their sink topic. Closing your SQL Client session does not stop them
+— use `make flink-reports-down` for that.
 
 **Query interactively** — opens a Flink SQL Client inside the
-JobManager pod:
+JobManager pod. If `flink-reports-up` has already run, the sink table
+DDL is auto-loaded so `SELECT *` works out of the box:
 
 ```bash
 make flink-sql
@@ -208,8 +254,14 @@ make flink-sql
 #       Minikube cluster — see the caveat below.
 ```
 
-Each `SELECT` against a continuous view starts a streaming job —
-visible in the Flink UI:
+Each `SELECT` here is a *read-only* tail of the sink topic — it
+doesn't start an aggregation job, just streams whatever the
+already-running INSERTs have produced. Closed-window rows accumulate
+over time, so a fresh `SELECT *` shows the full history (until the
+topic's retention policy kicks in).
+
+The Flink UI shows the 5 long-lived INSERT jobs (one per report) plus
+any ad-hoc SELECTs you start:
 
 ```bash
 make flink-ui                # opens http://localhost:8081 in your browser
@@ -224,7 +276,10 @@ make flink-ui                # opens http://localhost:8081 in your browser
 
 You should see report rows update as records flow.
 
-**Teardown** — drops the registered tables / views / functions:
+**Teardown** — cancels the running INSERT INTO jobs via the Flink
+REST API, drops the catalog tables / views / functions, **and deletes
+the `isotope-report-*-1m` Kafka topics** (all historical report data
+is lost):
 
 ```bash
 make flink-reports-down

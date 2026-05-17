@@ -26,7 +26,7 @@ class LatencyPercentilesUDAFTest {
         LatencyPercentilesUDAF udaf = new LatencyPercentilesUDAF();
         LatencyPercentilesUDAF.TDigestAccumulator acc = udaf.createAccumulator();
 
-        Percentiles p = udaf.getValue(acc);
+        Percentiles p = Percentiles.fromRow(udaf.getValue(acc));
         assertNotNull(p);
         assertEquals(0L, p.sample_count);
         assertNull(p.p50_ms);
@@ -44,7 +44,7 @@ class LatencyPercentilesUDAFTest {
             udaf.accumulate(acc, i);
         }
 
-        Percentiles p = udaf.getValue(acc);
+        Percentiles p = Percentiles.fromRow(udaf.getValue(acc));
         assertEquals(1000L, p.sample_count);
         // T-Digest with compression=100 gives ~few-% error; check rough bounds.
         assertTrue(Math.abs(p.p50_ms - 500.0) < 20.0,
@@ -73,8 +73,8 @@ class LatencyPercentilesUDAFTest {
         LatencyPercentilesUDAF.TDigestAccumulator merged = udaf.createAccumulator();
         udaf.merge(merged, List.of(a, b));
 
-        Percentiles refP    = udaf.getValue(ref);
-        Percentiles mergedP = udaf.getValue(merged);
+        Percentiles refP    = Percentiles.fromRow(udaf.getValue(ref));
+        Percentiles mergedP = Percentiles.fromRow(udaf.getValue(merged));
 
         assertEquals(refP.sample_count, mergedP.sample_count);
         // Mergeability: percentile estimates should be close (not identical;
@@ -90,11 +90,11 @@ class LatencyPercentilesUDAFTest {
         LatencyPercentilesUDAF udaf = new LatencyPercentilesUDAF();
         LatencyPercentilesUDAF.TDigestAccumulator acc = udaf.createAccumulator();
         for (long i = 0; i < 100; i++) udaf.accumulate(acc, i);
-        assertEquals(100L, udaf.getValue(acc).sample_count);
+        assertEquals(100L, Percentiles.fromRow(udaf.getValue(acc)).sample_count);
 
         udaf.resetAccumulator(acc);
-        assertEquals(0L, udaf.getValue(acc).sample_count);
-        assertNull(udaf.getValue(acc).p50_ms);
+        assertEquals(0L, Percentiles.fromRow(udaf.getValue(acc)).sample_count);
+        assertNull(Percentiles.fromRow(udaf.getValue(acc)).p50_ms);
     }
 
     @Test
@@ -104,6 +104,6 @@ class LatencyPercentilesUDAFTest {
         udaf.accumulate(acc, 100L);
         udaf.accumulate(acc, null);
         udaf.accumulate(acc, 200L);
-        assertEquals(2L, udaf.getValue(acc).sample_count);
+        assertEquals(2L, Percentiles.fromRow(udaf.getValue(acc)).sample_count);
     }
 }

@@ -44,7 +44,7 @@ FLINK_CLUSTER_NAME  ?= flink-basic
 FLINK_MANIFEST      ?= k8s/base/flink-basic-deployment.yaml
 FLINK_RBAC_MANIFEST ?= k8s/base/flink-rbac.yaml
 CERT_MANAGER_VER    ?= v1.18.2
-CMF_VER             ?= 2.1.3
+CMF_VER             ?= 2.3.1
 CMF_ENV_NAME        ?= dev-local
 
 # Ports for port-forwarding to local machine (Control Center, CMF, Flink UI)
@@ -475,14 +475,24 @@ flink-reports-down: ## Drop the registered reports / views / functions (safe to 
 	@$(mkfile_dir)scripts/deploy-flink-reports.sh down
 
 .PHONY: flink-sql
-flink-sql: ## Open an interactive Flink SQL Client inside the JobManager pod
+flink-sql: ## Open an interactive Flink SQL Client inside the JobManager pod (auto-loads sink DDL if 'flink-reports-up' has run)
 	@JM_POD=$$(kubectl get pods -n $(NAMESPACE) -l component=jobmanager \
 		--no-headers -o custom-columns=":metadata.name" 2>/dev/null | head -1); \
 	if [ -z "$$JM_POD" ]; then \
 		echo "✘ No Flink JobManager pod found. Run 'make flink-up' first."; exit 1; \
 	fi; \
-	echo "→ Opening SQL Client in $$JM_POD (Ctrl-D to exit) ..."; \
-	kubectl exec -n $(NAMESPACE) -it $$JM_POD -- /opt/flink/bin/sql-client.sh
+	JAR_PATH=/opt/flink/lib/isotope-flink-udf.jar; \
+	JAR_ARG=""; \
+	if kubectl exec -n $(NAMESPACE) $$JM_POD -- test -f $$JAR_PATH 2>/dev/null; then \
+		JAR_ARG="-j $$JAR_PATH"; \
+	fi; \
+	if kubectl exec -n $(NAMESPACE) $$JM_POD -- test -f /tmp/isotope-report-sinks.fql 2>/dev/null; then \
+		echo "→ Opening SQL Client in $$JM_POD (loading /tmp/isotope-report-sinks.fql $$JAR_ARG; Ctrl-D to exit) ..."; \
+		kubectl exec -n $(NAMESPACE) -it $$JM_POD -- /opt/flink/bin/sql-client.sh $$JAR_ARG -i /tmp/isotope-report-sinks.fql; \
+	else \
+		echo "→ Opening SQL Client in $$JM_POD (no sink DDL found — run 'make flink-reports-up' to register report tables; Ctrl-D to exit) ..."; \
+		kubectl exec -n $(NAMESPACE) -it $$JM_POD -- /opt/flink/bin/sql-client.sh $$JAR_ARG; \
+	fi
 
 # ------------------------------------------------------------------------------
 # Phase 7: Confluent Manager for Apache Flink (CMF)
@@ -546,6 +556,23 @@ cmf-uninstall: ## Uninstall CMF (safe to run even if not installed)
 	@helm uninstall cmf -n $(NAMESPACE) --wait 2>/dev/null \
 		&& echo "✔ CMF removed." \
 		|| echo "→ cmf not installed, skipping."
+
+.PHONY: cmf-reports-up
+cmf-reports-up: ## Deploy the 4 CMF-managed report Statements (canonical SR-Protobuf path)
+	@$(mkfile_dir)scripts/deploy-cmf-reports.sh up
+
+.PHONY: cmf-reports-down
+cmf-reports-down: ## Tear down CMF report Statements, delete sink topics + SR subjects (keeps pool/catalog/db)
+	@$(mkfile_dir)scripts/deploy-cmf-reports.sh down
+
+.PHONY: cmf-resources-down
+cmf-resources-down: ## Remove CMF compute pool / database / catalog (run AFTER cmf-reports-down)
+	@kubectl port-forward -n $(NAMESPACE) svc/cmf-service 18080:80 >/dev/null 2>&1 & \
+	PF=$$!; sleep 2; \
+	curl -sS -o /dev/null -w "  pool        → %{http_code}\n" -X DELETE http://localhost:18080/cmf/api/v1/environments/$(CMF_ENV_NAME)/compute-pools/iso-pool; \
+	curl -sS -o /dev/null -w "  database    → %{http_code}\n" -X DELETE http://localhost:18080/cmf/api/v1/catalogs/kafka/iso-cat/databases/iso-db; \
+	curl -sS -o /dev/null -w "  catalog     → %{http_code}\n" -X DELETE http://localhost:18080/cmf/api/v1/catalogs/kafka/iso-cat; \
+	kill $$PF 2>/dev/null; true
 
 .PHONY: cmf-proxy-logs
 cmf-proxy-logs: ## Show logs from the cmf-proxy sidecar in the C3 pod (debug Flink tab connectivity)

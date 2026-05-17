@@ -1,0 +1,14 @@
+{
+  "apiVersion": "cmf.confluent.io/v1",
+  "kind": "KafkaCatalog",
+  "metadata": {
+    "name": "iso-cat"
+  },
+  "spec": {
+    "srInstance": {
+      "connectionConfig": {
+        "schema.registry.url": "http://schemaregistry.confluent.svc.cluster.local:8081"
+      }
+    }
+  }
+}

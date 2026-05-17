@@ -31,6 +31,12 @@ spec:
       - confluent.license.topic.replication.factor=1
       - confluent.metadata.topic.replication.factor=1
       - confluent.balancer.topic.replication.factor=1
+      # Raise broker-allowed transaction timeout so Flink Kafka EOS sinks
+      # (which default to a 1h producer transaction timeout) succeed
+      # InitProducerId. The broker default (15m) is below Flink's
+      # default and CMF doesn't expose per-table or per-statement
+      # options to lower Flink's side.
+      - transaction.max.timeout.ms=3600000
   listeners:
     external:
       externalAccess:
