@@ -25,17 +25,23 @@ NAMESPACE=confluent
 JAR_HOST_PATH=ptf/build/libs/isotope-flink-udf.jar
 JAR_POD_PATH=/opt/flink/lib/isotope-flink-udf.jar
 
-# Sink topics — only the latency-percentiles report stays on the
-# session cluster (UDAF-only; CMF disallows UDFs). The other 4 reports
-# moved to CMF; see scripts/deploy-cmf-reports.sh. If we still deployed
-# them here too, both paths would write to the same topics and conflict.
+# Sink topics — all 5 reports run on this session cluster, all written
+# as SR-framed Avro (auto-registered on first write).
 SINK_TOPICS=(
+    isotope-report-latency-1m
+    isotope-report-topology-1m
+    isotope-report-hop-distribution-1m
+    isotope-report-coverage-1m
     isotope-report-latency-percentiles-1m
 )
 
-# Pipeline names — must match the `SET 'pipeline.name'` values in
-# shared/70_*.fql so we can find and cancel the job.
+# Pipeline names — must match the `SET 'pipeline.name'` values in each
+# shared/{10,20,30,40,70}_*.fql so we can find and cancel the jobs.
 JOB_NAMES=(
+    isotope-report-latency-1m
+    isotope-report-topology-1m
+    isotope-report-hop-distribution-1m
+    isotope-report-coverage-1m
     isotope-report-latency-percentiles-1m
 )
 
@@ -158,20 +164,18 @@ if [ "${ACTION}" = "up" ]; then
     # `isotope`, and the sink table) only resolve if they're all in the
     # same session.
     #
-    # Reports 10/20/30/40 (latency, topology, hop_distribution, coverage)
-    # have moved to CMF — see scripts/deploy-cmf-reports.sh. Only the
-    # percentiles report (70_*) stays here, because CMF disallows UDFs
-    # and the percentiles report depends on the LATENCY_PERCENTILES
-    # T-Digest UDAF. 60_stuck_trace_report.fql is also excluded (PTF
-    # syntax not supported by Apache Flink 2.1.x's parser).
-    #
-    # The source table, register-functions DDL, and the latency-percentiles
-    # sink table are still required by the percentiles INSERT.
+    # All 5 reports run on the session cluster. 60_stuck_trace_report.fql
+    # is excluded — its PTF call syntax isn't supported by Apache
+    # Flink 2.1.x's parser (see flink/README.md for the long caveat).
     UP_FILES=(
         flink/sql/cp/00_source_table.fql
         flink/sql/cp/01_register_functions.fql
         flink/sql/shared/05_isotope_view.fql
         flink/sql/cp/05_report_sinks.fql
+        flink/sql/shared/10_latency_report.fql
+        flink/sql/shared/20_topology_report.fql
+        flink/sql/shared/30_hop_distribution.fql
+        flink/sql/shared/40_coverage_report.fql
         flink/sql/shared/70_latency_percentiles_report.fql
     )
 
@@ -371,6 +375,19 @@ else
         delete_topic "${topic}"
     done
 
+    # Avro+SR auto-registers each sink's schema in SR under
+    # `<topic>-value`. Topic deletion alone doesn't reclaim the SR
+    # subject — delete soft + hard so the next deploy gets a fresh
+    # schema ID rather than colliding with a tombstoned one.
+    echo "→ Deleting ${#SINK_TOPICS[@]} SR subjects (soft + hard)..."
+    for topic in "${SINK_TOPICS[@]}"; do
+        subject="${topic}-value"
+        kubectl exec -n "${NAMESPACE}" schemaregistry-0 -- bash -c "
+            curl -sf -X DELETE 'http://localhost:8081/subjects/${subject}' -o /dev/null
+            curl -sf -X DELETE 'http://localhost:8081/subjects/${subject}?permanent=true' -o /dev/null
+        " 2>/dev/null && echo "  ↳ ${subject}" || echo "  ↳ ${subject} (not registered)"
+    done
+
     echo ""
-    echo "✔ Jobs cancelled, DDL dropped, sink topics deleted."
+    echo "✔ Jobs cancelled, DDL dropped, sink topics + SR subjects deleted."
 fi

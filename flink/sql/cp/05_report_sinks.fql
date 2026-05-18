@@ -1,33 +1,116 @@
 -- =====================================================================
--- Report sink tables — Confluent Platform Flink (cp-flink session cluster)
+-- Report sink tables — cp-flink session cluster, Avro + Schema Registry
 --
--- Scope: this file is now scoped to the latency-percentiles report
--- only. The other 4 reports (latency, topology, hop_distribution,
--- coverage) moved to CMF as canonical SR-Protobuf-framed reports — see
--- scripts/deploy-cmf-reports.sh and flink/sql/cmf/.
+-- Each table writes to a Kafka topic whose value is **SR-framed Avro**
+-- (5-byte magic-byte + schema-id header followed by Avro binary).
+-- Schemas auto-register in Schema Registry on first write under subject
+-- `<topic>-value`. Control Center deserializes these topics natively.
 --
--- The latency-percentiles report stays on the cp-flink session cluster
--- because its T-Digest UDAF (`LATENCY_PERCENTILES`) requires a user-
--- defined function, which CMF Statements disallow. It uses Apache
--- Flink's open-source `protobuf` SQL format:
---   https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/protobuf/
+-- Format jar: `flink-sql-avro-confluent-registry-2.1.2.jar`, installed
+-- into /opt/flink/lib by the init container in
+-- k8s/base/flink-basic-deployment.yaml.
 --
--- That's raw Protobuf — no Confluent Schema Registry magic-byte+id
--- header. Consumers need the .proto schema out-of-band (see
--- ptf/src/main/proto/.../reports/reports.proto, message
--- LatencyPercentilesFlatReport). Control Center renders this topic as
--- gibberish; query via `make flink-sql` instead.
+-- Why Avro and not Protobuf:
+--   * cp-flink (the session-cluster image) doesn't ship an SR-integrated
+--     Protobuf format. Apache Flink open-source ships SR-Avro but not
+--     SR-Protobuf.
+--   * CMF supports SR-Protobuf for SQL Statements but disallows UDFs;
+--     the latency-percentiles report depends on the LATENCY_PERCENTILES
+--     T-Digest UDAF, so it can't live in CMF either.
+--   * Confluent's `protobuf-confluent` format isn't published on Maven
+--     Central for open-source Flink. We could write our own SR-Protobuf
+--     wrapper, but Avro+SR gets us Control Center decoding with zero
+--     custom code.
 --
--- The 'flink-protobuf' format SPI is installed into /opt/flink/lib by
--- an init container in k8s/base/flink-basic-deployment.yaml; the
--- generated proto classes ship inside isotope-flink-udf.jar (passed to
--- sql-client via `-j`).
+-- A deliberate consequence: the demo *event* topics (`iso-start`, etc.)
+-- still ride Protobuf+SR (DemoEvent, see app/src/main/proto/), but the
+-- *report* topics ride Avro+SR. Format-by-domain — events from the app,
+-- aggregates from Flink — is a clean split, not a defect.
 --
--- Window times: BIGINT epoch millis on the wire (Flink's protobuf
--- format maps google.protobuf.Timestamp to a nested ROW(seconds,
--- nanos), so we sidestep it). Consumers rehydrate via
--- TO_TIMESTAMP_LTZ(window_start, 3).
+-- Window times: BIGINT epoch millis on the wire (not TIMESTAMP_LTZ).
+-- Flink 2.1.2's avro-confluent format raises
+-- `UnsupportedOperationException: Unsupported to derive Schema for type:
+-- TIMESTAMP_LTZ(3)` for that type. Avro has `timestamp-millis` but the
+-- Flink 2.1.2 derivation path doesn't auto-pick it for TIMESTAMP_LTZ;
+-- the documented workaround is to emit epoch-millis BIGINT and rehydrate
+-- on read with TO_TIMESTAMP_LTZ(window_start, 3).
 -- =====================================================================
+
+CREATE TABLE IF NOT EXISTS latency_report_1m (
+    `window_start`    BIGINT,
+    `window_end`      BIGINT,
+    `origin_service`  STRING,
+    `this_topic`      STRING,
+    `sample_count`    BIGINT,
+    `distinct_traces` BIGINT,
+    `avg_latency_ms`  DOUBLE,
+    `min_latency_ms`  BIGINT,
+    `max_latency_ms`  BIGINT
+) WITH (
+    'connector'                          = 'kafka',
+    'topic'                              = 'isotope-report-latency-1m',
+    'properties.bootstrap.servers'       = 'kafka:9071',
+    'value.format'                       = 'avro-confluent',
+    'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'                   = 'fixed',
+    'scan.startup.mode'                  = 'earliest-offset',
+    'properties.group.id'                = 'isotope-report-reader'
+);
+
+CREATE TABLE IF NOT EXISTS topology_report_1m (
+    `window_start`     BIGINT,
+    `window_end`       BIGINT,
+    `origin_service`   STRING,
+    `producer_service` STRING,
+    `topic`            STRING,
+    `records`          BIGINT,
+    `distinct_traces`  BIGINT
+) WITH (
+    'connector'                          = 'kafka',
+    'topic'                              = 'isotope-report-topology-1m',
+    'properties.bootstrap.servers'       = 'kafka:9071',
+    'value.format'                       = 'avro-confluent',
+    'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'                   = 'fixed',
+    'scan.startup.mode'                  = 'earliest-offset',
+    'properties.group.id'                = 'isotope-report-reader'
+);
+
+CREATE TABLE IF NOT EXISTS hop_distribution_1m (
+    `window_start`    BIGINT,
+    `window_end`      BIGINT,
+    `this_topic`      STRING,
+    `hop_count`       INT,
+    `records`         BIGINT,
+    `distinct_traces` BIGINT
+) WITH (
+    'connector'                          = 'kafka',
+    'topic'                              = 'isotope-report-hop-distribution-1m',
+    'properties.bootstrap.servers'       = 'kafka:9071',
+    'value.format'                       = 'avro-confluent',
+    'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'                   = 'fixed',
+    'scan.startup.mode'                  = 'earliest-offset',
+    'properties.group.id'                = 'isotope-report-reader'
+);
+
+CREATE TABLE IF NOT EXISTS coverage_report_1m (
+    `window_start`    BIGINT,
+    `window_end`      BIGINT,
+    `this_topic`      STRING,
+    `origin_service`  STRING,
+    `distinct_traces` BIGINT,
+    `records`         BIGINT
+) WITH (
+    'connector'                          = 'kafka',
+    'topic'                              = 'isotope-report-coverage-1m',
+    'properties.bootstrap.servers'       = 'kafka:9071',
+    'value.format'                       = 'avro-confluent',
+    'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'                   = 'fixed',
+    'scan.startup.mode'                  = 'earliest-offset',
+    'properties.group.id'                = 'isotope-report-reader'
+);
 
 CREATE TABLE IF NOT EXISTS latency_percentiles_flat_1m (
     `window_start`    BIGINT,
@@ -39,14 +122,12 @@ CREATE TABLE IF NOT EXISTS latency_percentiles_flat_1m (
     `p99_ms`          DOUBLE,
     `sample_count`    BIGINT
 ) WITH (
-    'connector'                    = 'kafka',
-    'topic'                        = 'isotope-report-latency-percentiles-1m',
-    'properties.bootstrap.servers' = 'kafka:9071',
-    'value.format'                 = 'protobuf',
-    'value.protobuf.message-class-name'
-        = 'ai.signalroom.kafka.isotope.proto.reports.LatencyPercentilesFlatReport',
-    'sink.partitioner'             = 'fixed',
-    -- Source-side options for ad-hoc `SELECT * FROM …` queries.
-    'scan.startup.mode'            = 'earliest-offset',
-    'properties.group.id'          = 'isotope-report-reader'
+    'connector'                          = 'kafka',
+    'topic'                              = 'isotope-report-latency-percentiles-1m',
+    'properties.bootstrap.servers'       = 'kafka:9071',
+    'value.format'                       = 'avro-confluent',
+    'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'                   = 'fixed',
+    'scan.startup.mode'                  = 'earliest-offset',
+    'properties.group.id'                = 'isotope-report-reader'
 );

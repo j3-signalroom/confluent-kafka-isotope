@@ -180,58 +180,52 @@ make flink-up                # cert-manager → CFK Flink Operator → CMF → s
                              # (~5 min the first time)
 ```
 
-**Deploy the reports** — there are now **two deployment paths**,
-because CMF supports SR-Protobuf natively but disallows user-defined
-functions (and the percentiles report uses a T-Digest UDAF):
-
-| Reports | Path | Where it lives |
-|---|---|---|
-| `latency`, `topology`, `hop_distribution`, `coverage` | **CMF Statements** (canonical) | Each its own Application-mode Flink cluster; SR-Protobuf auto-registered; Control Center renders natively |
-| `latency_percentiles_flat` | **cp-flink session cluster** (UDAF-only) | Shares the open-source FlinkDeployment; uses Apache Flink's `protobuf` format (no SR magic byte) |
+**Deploy the reports** — all 5 reports run on the cp-flink session
+cluster (Flink 2.1.2). Sink topics use Apache Flink's
+[`avro-confluent`](https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/avro-confluent/)
+format — SR-framed Avro, auto-registered on first write — so Control
+Center renders the report rows natively.
 
 ```bash
-make cmf-reports-up                 # 4 reports on CMF (SR-Protobuf)
-make flink-reports-up               # latency_percentiles only on cp-flink session
+make flink-reports-up
 ```
 
-`cmf-reports-up` creates a CMF KafkaCatalog (wrapping SR), a
-KafkaDatabase (wrapping Kafka), a ComputePool, then `ALTER TABLE
-iso-start ADD headers METADATA …` (so the auto-exposed source has the
-`x-isotope-*` headers), and finally submits 4×(DDL, INSERT INTO)
-Statements. CMF auto-creates each `isotope-report-*-1m` Kafka topic
-and registers a Protobuf schema in SR for the `*-value` subject.
-**Control Center deserializes those topics natively** — no .proto
-schemas in the repo, no hand-installed format jars, no version
-juggling.
+`flink-reports-up` builds the PTF/UDAF shadow JAR if missing, copies
+it into the JobManager pod, pre-creates the 5 sink Kafka topics, then
+applies the source + view + sink DDL and submits 5 `INSERT INTO`
+streaming jobs (one per report). On first write to each sink, Apache
+Flink's `flink-sql-avro-confluent-registry` format registers a fresh
+Avro schema in SR under subject `<topic>-value`. **Control Center
+deserializes all 5 report topics natively** — no `.proto` files in
+the repo for the reports, no hand-installed format jars beyond the
+one init-container download.
 
-`flink-reports-up` is now scoped to the **latency_percentiles report
-only**. It still uses Apache Flink's open-source `protobuf` format
-(no SR magic byte) on the `isotope-report-latency-percentiles-1m`
-topic, with the `LatencyPercentilesUDAF` T-Digest aggregate from
-[ptf/src/main/java/.../LatencyPercentilesUDAF.java](ptf/src/main/java/ai/signalroom/kafka/isotope/flink/LatencyPercentilesUDAF.java).
-Control Center can't decode that topic without an out-of-band `.proto`
-([ptf/src/main/proto/…/reports.proto](ptf/src/main/proto/ai/signalroom/kafka/isotope/proto/reports/reports.proto)).
-The downstream demo topics (`iso-start`, etc.) still use SR-Protobuf
-via the Java app; that's unchanged.
+##### Format-by-domain
 
-##### Why the split?
+The demo *event* topics (`iso-start`, `iso-mid`, `iso-final`) still
+ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's
+unchanged. The *report* topics ride **Avro+SR** because cp-flink
+doesn't ship an SR-integrated Protobuf format and CMF (which does)
+disallows the UDAFs the percentiles report needs. Events from the
+app are Protobuf; aggregates from Flink are Avro. Two formats by
+domain — a clean split, not a defect.
 
-CMF 2.3.1 has a clean docs-supported flow for SR-Protobuf — but it
-**disallows UDFs in Statements** ([features-support page](https://docs.confluent.io/platform/current/flink/jobs/sql-statements/features-support.html)).
-The 4 portable reports (pure SQL aggregates) migrate cleanly. The
-percentiles report depends on a custom T-Digest UDAF and stays on
-the session cluster where UDFs work. Two paths is the honest answer
-on this stack.
+##### What we considered, what we didn't pick
 
-##### Version note
-
-CMF's compute pool runs the `confluentinc/cp-flink-sql:1.19-cp8-arm64`
-image — Confluent has not yet published a 2.x build of the
-`cp-flink-sql` image (which bundles `ce-flink-sql-job.jar` for CMF
-Statement execution). The cp-flink session cluster runs Flink 2.1.2.
-Two Flink versions in the same project. They're isolated (different
-pods, different JVMs, only share Kafka + SR), so the mismatch is
-ergonomic, not load-bearing.
+- **CMF (Confluent Manager for Apache Flink) Statements.** Gives SR-Protobuf
+  for free, but CMF [disallows UDFs in Statements](https://docs.confluent.io/platform/current/flink/jobs/sql-statements/features-support.html)
+  — the percentiles report can't migrate. Also, CMF's compute-pool image
+  (`cp-flink-sql`) is only published for Flink 1.19 today, forcing a
+  version mismatch. We installed CMF (see `make cmf-install`) and verified
+  the path end-to-end with 4 reports, then rolled back in favor of keeping
+  all 5 reports on one Flink 2.1 session cluster.
+- **A hand-written SR-Protobuf format wrapper.** Maintainable code, ~150
+  lines, but Apache Flink ships `avro-confluent` officially with zero
+  maintenance — same Control Center decoding outcome at ~0% the long-term
+  cost.
+- **Raw Protobuf (no SR magic byte) via Apache Flink's `protobuf` format.**
+  Worked, but Control Center couldn't decode the report topics. Earlier
+  state of this branch; abandoned in favor of Avro+SR.
 
 **Results persist in Kafka, not in the SQL Client session.** The
 streaming `INSERT INTO` jobs run on the Flink session cluster
