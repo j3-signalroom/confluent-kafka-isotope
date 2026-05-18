@@ -1,0 +1,33 @@
+-- =====================================================================
+-- Hop distribution report — how many hops each trace has accumulated
+-- by the time records arrive on each topic, in 1-minute tumbling
+-- windows.
+--
+-- Shapes this surfaces:
+--   - All records on topic-BC have hop_count=2 → pipeline as designed.
+--   - Some records have hop_count=5 → unexpected longer chain (loop?
+--     re-emission?).
+--   - hop_count=32 with very old origin_ts → truncated history; the
+--     hop-list eviction kicked in (Isotope.MAX_HOPS = 32).
+--
+-- Sinks into `hop_distribution_1m` (Kafka, Avro+SR).
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope-report-hop-distribution-1m';
+
+INSERT INTO hop_distribution_1m
+SELECT
+    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    `this_topic`,
+    `hop_count`,
+    COUNT(*)                  AS `records`,
+    COUNT(DISTINCT trace_id)  AS `distinct_traces`
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `this_topic`,
+    `hop_count`;

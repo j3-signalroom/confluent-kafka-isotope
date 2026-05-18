@@ -1,0 +1,37 @@
+-- =====================================================================
+-- Topology report — per-minute counts of records written by each
+-- (producer_service → topic) edge.
+--
+-- Produce-side view of the pipeline: which service is writing to which
+-- topic, at what rate. Caveats:
+--   1. Produce edges only — there's no consumer-side trace today, so a
+--      full bipartite (producer, consumer) graph requires also
+--      instrumenting consumers.
+--   2. `this_service` / `this_topic` are the *most recent hop's*
+--      identity. For a record on topic-BC produced by svc-B,
+--      this_service='svc-B', this_topic='topic-BC'; the upstream
+--      origin is still visible via `origin_service`.
+--
+-- Sinks into `topology_report_1m` (Kafka, Avro+SR).
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope-report-topology-1m';
+
+INSERT INTO topology_report_1m
+SELECT
+    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    `origin_service`,
+    `this_service`            AS `producer_service`,
+    `this_topic`              AS `topic`,
+    COUNT(*)                  AS `records`,
+    COUNT(DISTINCT trace_id)  AS `distinct_traces`
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_service`,
+    `this_topic`;

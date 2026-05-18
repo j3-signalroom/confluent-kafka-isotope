@@ -1,0 +1,36 @@
+-- =====================================================================
+-- Coverage report — count of distinct trace IDs seen at each topic in
+-- 1-minute tumbling windows.
+--
+-- Funnel signal: if your pipeline is
+--     origin → topic-AB → topic-BC → topic-CD
+-- you'd expect roughly the same distinct-trace count at each topic
+-- within a given window. A drop between topic-AB and topic-BC says
+-- some traces never made it past the AB→BC stage.
+--
+-- Coarse — same-window drift (trace produced at 59.9s, consumed at
+-- 60.1s lands in different buckets) is noise. For dispatchable alerts,
+-- use the Phase 2 stuck-trace PTF (session-windowed, keyed by
+-- trace_id, with explicit lateness).
+--
+-- Sinks into `coverage_report_1m` (Kafka, Avro+SR).
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope-report-coverage-1m';
+
+INSERT INTO coverage_report_1m
+SELECT
+    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    `this_topic`,
+    `origin_service`,
+    COUNT(DISTINCT trace_id)  AS `distinct_traces`,
+    COUNT(*)                  AS `records`
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `this_topic`,
+    `origin_service`;
