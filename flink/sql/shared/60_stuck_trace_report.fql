@@ -1,37 +1,48 @@
 -- =====================================================================
--- ⚠ CCAF-only. This file is NOT applied by `make flink-reports-up` on
--- the local Minikube CP Flink cluster. The PTF call below uses the
--- Confluent Cloud Flink (CCAF) `name => TABLE foo PARTITION BY col`
--- syntax which Apache Flink 2.1.1's parser rejects (parse error:
--- "PARTITION" not expected after `=>`). The Java PTF itself, the
--- function registration, and this view are valid as written; they
--- will deploy on CCAF as-is when you point the deployer at it.
--- =====================================================================
 -- Stuck-trace report — fires an alert for any trace that has not had a
 -- new hop within `staleness_seconds` of its last-observed hop, measured
 -- in event time.
+--
+-- Reads from the `isotope` view (typed projection of `isotope_raw`,
+-- with `x-isotope-*` headers decoded). Writes to the
+-- `stuck_trace_alerts_1m` table (Kafka sink, Avro+SR; see
+-- cp/05_report_sinks.fql). Schema auto-registers in SR on first write
+-- under subject `isotope-report-stuck-trace-1m-value`.
 --
 -- Depends on:
 --   - the `isotope` view (shared/05_isotope_view.fql)
 --   - the STUCK_TRACE_PTF function (cp/01_register_functions.fql or
 --     cc/01_register_functions.fql)
+--   - the `stuck_trace_alerts_1m` sink (cp/05_report_sinks.fql)
 --
 -- The PTF maintains per-trace_id state and event-time timers, so this
--- view is a streaming alert source — each row represents one stuck
+-- is a streaming alert source — each output row represents one stuck
 -- episode.
 --
--- Call syntax notes (per the Confluent PTF docs):
---   - All args MUST be named — Flink's parser rejects PARTITION BY when
---     it falls into expression context (named-arg + parenthesized
---     subquery), but accepts the bare `TABLE x PARTITION BY col` form
---     after `argname =>`.
---   - No backticks around identifiers in the named-arg position.
+-- Call form notes:
+--   - The PTF call MUST live in an `INSERT INTO ... SELECT ... FROM
+--     TABLE(ptf(...))` statement, not in a `CREATE VIEW`. Flink's
+--     `SqlCreateViewConverter` round-trips the view body through the
+--     `Expander` (re-serialize + re-parse to expand identifiers), and
+--     the named-arg + `TABLE x PARTITION BY col` shape does not survive
+--     that round trip — the re-parse rejects `PARTITION`. INSERT
+--     statements bypass the Expander, so the same call parses cleanly
+--     there. The Java PTF code, the registration, and this SQL are
+--     otherwise portable to CCAF as-is.
+--   - All args MUST be named in the PTF call.
 --   - `uid` is an implicit framework arg that pins state identity
 --     across query restarts; bump the version suffix when the PTF
 --     state schema changes incompatibly.
+--   - `staleness_seconds` is currently hard-coded inside the PTF
+--     (StuckTracePTF.STALENESS). Flink 2.1.2's PTF framework rejects
+--     extra user-declared scalar args when the implicit on_time / uid
+--     args are present; restore the named scalar arg here and in
+--     StuckTracePTF.eval() when that lands.
 -- =====================================================================
 
-CREATE VIEW IF NOT EXISTS stuck_trace_alerts AS
+SET 'pipeline.name' = 'isotope-report-stuck-trace-1m';
+
+INSERT INTO stuck_trace_alerts_1m
 SELECT
     trace_id,
     origin_service,
@@ -40,14 +51,10 @@ SELECT
     last_hop_count,
     last_seen_ts_ms,
     stuck_for_ms
-FROM STUCK_TRACE_PTF(
-    input   => TABLE isotope PARTITION BY trace_id,
-    on_time => DESCRIPTOR(event_time),
-    uid     => 'stuck-trace-v1'
+FROM TABLE(
+    STUCK_TRACE_PTF(
+        input   => TABLE isotope PARTITION BY trace_id,
+        on_time => DESCRIPTOR(event_time),
+        uid     => 'stuck-trace-v1'
+    )
 );
--- NOTE: the 60s staleness threshold is hard-coded inside the PTF source
--- (StuckTracePTF.STALENESS). Flink 2.1.1's PTF framework rejects extra
--- user-declared scalar args when the implicit on_time / uid args are
--- present; once that's resolved (or by mid-flight Flink version bump),
--- restore `staleness_seconds => CAST(... AS BIGINT)` here and the
--- matching parameter in StuckTracePTF.eval().

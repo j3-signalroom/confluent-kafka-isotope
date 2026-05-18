@@ -112,6 +112,29 @@ CREATE TABLE IF NOT EXISTS coverage_report_1m (
     'properties.group.id'                = 'isotope-report-reader'
 );
 
+-- Stuck-trace alert stream — NOT a 1-minute aggregated report; one row per
+-- stuck-trace event emitted by STUCK_TRACE_PTF when an event-time timer
+-- fires. Topic name keeps the `-1m` suffix for grouping with the other
+-- isotope-report-* topics, not because it carries window times.
+CREATE TABLE IF NOT EXISTS stuck_trace_alerts_1m (
+    `trace_id`        STRING,
+    `origin_service`  STRING,
+    `last_service`    STRING,
+    `last_topic`      STRING,
+    `last_hop_count`  INT,
+    `last_seen_ts_ms` BIGINT,
+    `stuck_for_ms`    BIGINT
+) WITH (
+    'connector'                          = 'kafka',
+    'topic'                              = 'isotope-report-stuck-trace-1m',
+    'properties.bootstrap.servers'       = 'kafka:9071',
+    'value.format'                       = 'avro-confluent',
+    'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'                   = 'fixed',
+    'scan.startup.mode'                  = 'earliest-offset',
+    'properties.group.id'                = 'isotope-report-reader'
+);
+
 CREATE TABLE IF NOT EXISTS latency_percentiles_flat_1m (
     `window_start`    BIGINT,
     `window_end`      BIGINT,

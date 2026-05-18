@@ -25,23 +25,25 @@ NAMESPACE=confluent
 JAR_HOST_PATH=ptf/build/libs/isotope-flink-udf.jar
 JAR_POD_PATH=/opt/flink/lib/isotope-flink-udf.jar
 
-# Sink topics — all 5 reports run on this session cluster, all written
+# Sink topics — all 6 reports run on this session cluster, all written
 # as SR-framed Avro (auto-registered on first write).
 SINK_TOPICS=(
     isotope-report-latency-1m
     isotope-report-topology-1m
     isotope-report-hop-distribution-1m
     isotope-report-coverage-1m
+    isotope-report-stuck-trace-1m
     isotope-report-latency-percentiles-1m
 )
 
 # Pipeline names — must match the `SET 'pipeline.name'` values in each
-# shared/{10,20,30,40,70}_*.fql so we can find and cancel the jobs.
+# shared/{10,20,30,40,60,70}_*.fql so we can find and cancel the jobs.
 JOB_NAMES=(
     isotope-report-latency-1m
     isotope-report-topology-1m
     isotope-report-hop-distribution-1m
     isotope-report-coverage-1m
+    isotope-report-stuck-trace-1m
     isotope-report-latency-percentiles-1m
 )
 
@@ -164,9 +166,7 @@ if [ "${ACTION}" = "up" ]; then
     # `isotope`, and the sink table) only resolve if they're all in the
     # same session.
     #
-    # All 5 reports run on the session cluster. 60_stuck_trace_report.fql
-    # is excluded — its PTF call syntax isn't supported by Apache
-    # Flink 2.1.x's parser (see flink/README.md for the long caveat).
+    # All 6 reports run on the session cluster.
     UP_FILES=(
         flink/sql/cp/00_source_table.fql
         flink/sql/cp/01_register_functions.fql
@@ -176,6 +176,7 @@ if [ "${ACTION}" = "up" ]; then
         flink/sql/shared/20_topology_report.fql
         flink/sql/shared/30_hop_distribution.fql
         flink/sql/shared/40_coverage_report.fql
+        flink/sql/shared/60_stuck_trace_report.fql
         flink/sql/shared/70_latency_percentiles_report.fql
     )
 
@@ -338,12 +339,13 @@ if [ "${ACTION}" = "up" ]; then
     echo "  pipeline.name = its sink topic name; check the Flink UI ('make flink-ui')"
     echo "  for live status."
     echo ""
-    echo "✔ Reports registered (8/9 — stuck_trace_alerts is CCAF-only). Try interactively:"
+    echo "✔ Reports registered (6/6). Try interactively:"
     echo "    make flink-sql"
     echo "    Flink SQL> SELECT * FROM latency_report_1m;"
     echo "    Flink SQL> SELECT * FROM topology_report_1m;"
     echo "    Flink SQL> SELECT * FROM hop_distribution_1m;"
     echo "    Flink SQL> SELECT * FROM coverage_report_1m;"
+    echo "    Flink SQL> SELECT * FROM stuck_trace_alerts_1m;"
     echo "    Flink SQL> SELECT * FROM latency_percentiles_flat_1m;"
     echo ""
     echo "Feed traffic via the demo CLI (any iso-* topic name works):"
