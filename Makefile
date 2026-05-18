@@ -474,6 +474,39 @@ flink-reports-up: ## Build PTF/UDAF JAR, upload to JM pod, register source + rep
 flink-reports-down: ## Drop the registered reports / views / functions (safe to run repeatedly)
 	@$(mkfile_dir)scripts/deploy-flink-reports.sh down
 
+# ------------------------------------------------------------------------------
+# Confluent Cloud for Apache Flink (CCAF) — Terraform-driven deploy
+# ------------------------------------------------------------------------------
+# Requires Terraform installed locally and a Confluent Cloud API key with
+# permissions to manage environments, Kafka clusters, Flink compute pools,
+# service accounts, role bindings, Flink artifacts, and statements.
+#
+# Pass the API key/secret via Make variables (visible to anyone running
+# `ps`), or invoke scripts/deploy-cc-flink-reports.sh directly:
+#
+#   make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
+#
+.PHONY: cc-flink-reports-up
+cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 16 Flink statements)
+	@if [ -z "$(CONFLUENT_API_KEY)" ] || [ -z "$(CONFLUENT_API_SECRET)" ]; then \
+		echo "✘ CONFLUENT_API_KEY and CONFLUENT_API_SECRET must be set."; \
+		echo "  e.g. make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=..."; \
+		exit 1; \
+	fi
+	@$(mkfile_dir)scripts/deploy-cc-flink-reports.sh create \
+		--confluent-api-key=$(CONFLUENT_API_KEY) \
+		--confluent-api-secret=$(CONFLUENT_API_SECRET)
+
+.PHONY: cc-flink-reports-down
+cc-flink-reports-down: ## Tear down CCAF reports + env via `terraform destroy` (deletes the environment and all resources in it)
+	@if [ -z "$(CONFLUENT_API_KEY)" ] || [ -z "$(CONFLUENT_API_SECRET)" ]; then \
+		echo "✘ CONFLUENT_API_KEY and CONFLUENT_API_SECRET must be set."; \
+		exit 1; \
+	fi
+	@$(mkfile_dir)scripts/deploy-cc-flink-reports.sh destroy \
+		--confluent-api-key=$(CONFLUENT_API_KEY) \
+		--confluent-api-secret=$(CONFLUENT_API_SECRET)
+
 .PHONY: flink-sql
 flink-sql: ## Open an interactive Flink SQL Client inside the JobManager pod (auto-loads sink DDL if 'flink-reports-up' has run)
 	@JM_POD=$$(kubectl get pods -n $(NAMESPACE) -l component=jobmanager \

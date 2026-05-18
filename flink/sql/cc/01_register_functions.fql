@@ -1,32 +1,31 @@
 -- =====================================================================
 -- Register Phase 2 functions — Confluent Cloud for Apache Flink (CCAF)
 --
--- Prereqs:
---   ./gradlew :ptf:shadowJar
---   # → ptf/build/libs/isotope-flink-udf.jar
+-- Prereqs (handled by Terraform — see terraform/cc/setup-confluent-flink.tf):
+--   1. The PTF/UDAF shadow JAR is built locally:
+--        ./gradlew :ptf:shadowJar
+--        # → ptf/build/libs/isotope-flink-udf.jar
+--   2. Terraform uploads it as a `confluent_flink_artifact` resource. The
+--      artifact ID is interpolated into this file via `templatefile()`,
+--      replacing the `${artifact_id}` placeholder below.
 --
--- CCAF requires the JAR to be uploaded as a "Flink artifact" first,
--- *then* the SQL CREATE FUNCTION can reference it. The upload is done
--- via the Confluent CLI, not via SQL. From a shell with `confluent`
--- logged in:
+-- The CREATE FUNCTION statements are then submitted via
+-- `confluent_flink_statement` resources with `depends_on` on the artifact,
+-- guaranteeing the JAR exists before the functions reference it.
 --
---   ARTIFACT_ID=$(confluent flink artifact create isotope-flink-udf \
+-- Manual application (without Terraform — e.g. ad-hoc via the Confluent
+-- CLI) requires first uploading the JAR and substituting its ID:
+--   confluent flink artifact create isotope-flink-udf \
 --       --cloud AWS --region us-east-1 \
 --       --environment <env-id> \
 --       --artifact-file ptf/build/libs/isotope-flink-udf.jar \
---       --output json | jq -r '.id')
---
--- Then run this file via:
---   confluent flink statement create register-functions \
---       --sql-file flink/sql/cc/01_register_functions.sql
---
--- Replace <ARTIFACT_ID> below with the value the upload returned.
+--       --output json | jq -r '.id'
 -- =====================================================================
 
 CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
     AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesUDAF'
-    USING JAR 'confluent-artifact://<ARTIFACT_ID>';
+    USING JAR 'confluent-artifact://${artifact_id}';
 
 CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
     AS 'ai.signalroom.kafka.isotope.flink.StuckTracePTF'
-    USING JAR 'confluent-artifact://<ARTIFACT_ID>';
+    USING JAR 'confluent-artifact://${artifact_id}';

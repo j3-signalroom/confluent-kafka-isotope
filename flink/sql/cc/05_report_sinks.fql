@@ -1,0 +1,124 @@
+-- =====================================================================
+-- Report sink tables — Confluent Cloud for Apache Flink (CCAF)
+--
+-- Each table maps 1:1 to a pre-created Kafka topic
+-- (`isotope-report-*-1m`, declared as `confluent_kafka_topic` resources
+-- in terraform/cc/setup-confluent-kafka.tf). CCAF auto-derives the
+-- Protobuf schema from the column types and registers it in Schema
+-- Registry under subject `<topic>-value` on first write.
+--
+-- Format: **Protobuf + Schema Registry** (`protobuf-registry`).
+--
+-- Why Protobuf+SR on CCAF (vs Avro+SR on CP)
+-- ------------------------------------------
+-- The CP-Flink session cluster runs Apache Flink open-source, which
+-- ships SR-Avro (`avro-confluent`) but no SR-Protobuf counterpart, so
+-- `flink/sql/cp/05_report_sinks.fql` lands on Avro. CCAF *does* ship
+-- SR-Protobuf as a first-class Flink format (`protobuf-registry`), so
+-- we use it here — exercising the asymmetry the README calls out under
+-- "format-by-runtime" rather than format-by-domain.
+--
+-- All other DDL — column shapes, names, types — is identical to the CP
+-- side. The shared INSERTs under `flink/sql/shared/` write to the same
+-- table names, so the format swap is the only difference between the
+-- two runtimes.
+--
+-- Window columns: BIGINT epoch millis on the wire, same as CP. Avoids
+-- a TIMESTAMP_LTZ-vs-Protobuf representational mismatch in any consumer
+-- and keeps the shared INSERTs unchanged.
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS latency_report_1m (
+    `window_start`    BIGINT,
+    `window_end`      BIGINT,
+    `origin_service`  STRING,
+    `this_topic`      STRING,
+    `sample_count`    BIGINT,
+    `distinct_traces` BIGINT,
+    `avg_latency_ms`  DOUBLE,
+    `min_latency_ms`  BIGINT,
+    `max_latency_ms`  BIGINT
+) WITH (
+    'kafka.topic'    = 'isotope-report-latency-1m',
+    'value.format'   = 'protobuf-registry',
+    'key.format'     = 'protobuf-registry',
+    'changelog.mode' = 'append'
+);
+
+CREATE TABLE IF NOT EXISTS topology_report_1m (
+    `window_start`     BIGINT,
+    `window_end`       BIGINT,
+    `origin_service`   STRING,
+    `producer_service` STRING,
+    `topic`            STRING,
+    `records`          BIGINT,
+    `distinct_traces`  BIGINT
+) WITH (
+    'kafka.topic'    = 'isotope-report-topology-1m',
+    'value.format'   = 'protobuf-registry',
+    'key.format'     = 'protobuf-registry',
+    'changelog.mode' = 'append'
+);
+
+CREATE TABLE IF NOT EXISTS hop_distribution_1m (
+    `window_start`    BIGINT,
+    `window_end`      BIGINT,
+    `this_topic`      STRING,
+    `hop_count`       INT,
+    `records`         BIGINT,
+    `distinct_traces` BIGINT
+) WITH (
+    'kafka.topic'    = 'isotope-report-hop-distribution-1m',
+    'value.format'   = 'protobuf-registry',
+    'key.format'     = 'protobuf-registry',
+    'changelog.mode' = 'append'
+);
+
+CREATE TABLE IF NOT EXISTS coverage_report_1m (
+    `window_start`    BIGINT,
+    `window_end`      BIGINT,
+    `this_topic`      STRING,
+    `origin_service`  STRING,
+    `distinct_traces` BIGINT,
+    `records`         BIGINT
+) WITH (
+    'kafka.topic'    = 'isotope-report-coverage-1m',
+    'value.format'   = 'protobuf-registry',
+    'key.format'     = 'protobuf-registry',
+    'changelog.mode' = 'append'
+);
+
+-- Stuck-trace alert stream — NOT a 1-minute aggregated report; one row
+-- per stuck-trace event emitted by STUCK_TRACE_PTF when an event-time
+-- timer fires. Topic name keeps the `-1m` suffix for grouping with the
+-- other isotope-report-* topics, not because it carries window times.
+CREATE TABLE IF NOT EXISTS stuck_trace_alerts_1m (
+    `trace_id`        STRING,
+    `origin_service`  STRING,
+    `last_service`    STRING,
+    `last_topic`      STRING,
+    `last_hop_count`  INT,
+    `last_seen_ts_ms` BIGINT,
+    `stuck_for_ms`    BIGINT
+) WITH (
+    'kafka.topic'    = 'isotope-report-stuck-trace-1m',
+    'value.format'   = 'protobuf-registry',
+    'key.format'     = 'protobuf-registry',
+    'changelog.mode' = 'append'
+);
+
+CREATE TABLE IF NOT EXISTS latency_percentiles_flat_1m (
+    `window_start`   BIGINT,
+    `window_end`     BIGINT,
+    `origin_service` STRING,
+    `this_topic`     STRING,
+    `p50_ms`         DOUBLE,
+    `p95_ms`         DOUBLE,
+    `p99_ms`         DOUBLE,
+    `sample_count`   BIGINT
+) WITH (
+    'kafka.topic'    = 'isotope-report-latency-percentiles-1m',
+    'value.format'   = 'protobuf-registry',
+    'key.format'     = 'protobuf-registry',
+    'changelog.mode' = 'append'
+);

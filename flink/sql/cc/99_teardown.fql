@@ -1,0 +1,30 @@
+-- =====================================================================
+-- Teardown — drops the 6 report sink tables, the upstream view, the
+-- source view, and the two functions. Safe to run repeatedly (uses
+-- `IF EXISTS`).
+--
+-- Under the Terraform-driven deploy, `terraform destroy` already removes
+-- every `confluent_flink_statement` resource, plus the artifact, compute
+-- pool, environment, and Kafka cluster. This file is kept for two reasons:
+--   1. Ad-hoc cleanup when you've applied statements outside Terraform
+--      (e.g. via the Cloud Console SQL workspace) and want to reset
+--      without destroying the whole environment.
+--   2. Documentation parity with `flink/sql/cp/99_teardown.fql`.
+-- =====================================================================
+
+-- Sink tables (each backed by an isotope-report-*-1m Kafka topic + SR
+-- protobuf subject; topics + subjects are NOT dropped by this file).
+DROP TABLE    IF EXISTS latency_percentiles_flat_1m;
+DROP TABLE    IF EXISTS stuck_trace_alerts_1m;
+DROP TABLE    IF EXISTS coverage_report_1m;
+DROP TABLE    IF EXISTS hop_distribution_1m;
+DROP TABLE    IF EXISTS topology_report_1m;
+DROP TABLE    IF EXISTS latency_report_1m;
+
+-- Upstream typed view → source view.
+DROP VIEW     IF EXISTS isotope;
+DROP VIEW     IF EXISTS isotope_raw;
+
+-- Functions (no dependents after the tables above are gone).
+DROP FUNCTION IF EXISTS STUCK_TRACE_PTF;
+DROP FUNCTION IF EXISTS LATENCY_PERCENTILES;
