@@ -58,7 +58,7 @@ flink/sql/
     20_topology_report.fql           # INSERT INTO: produce-edge counts per minute
     30_hop_distribution.fql          # INSERT INTO: hop-count buckets per topic per minute
     40_coverage_report.fql           # INSERT INTO: distinct traces per topic per minute
-    60_stuck_trace_report.fql        # Phase 2 — stuck-trace alerts via STUCK_TRACE_PTF (excluded on this Flink)
+    60_stuck_trace_report.fql        # Phase 2 — INSERT INTO: stuck-trace alerts via STUCK_TRACE_PTF
     70_latency_percentiles_report.fql # Phase 2 — INSERT INTO: p50/p95/p99 via LATENCY_PERCENTILES UDAF
 ```
 
@@ -76,7 +76,7 @@ the on-wire schema is plain Avro `long`. Consumers rehydrate via
 
 ```bash
 make flink-up           # cert-manager → CFK Flink Operator → CMF (installed but unused for reports) → session cluster
-make flink-reports-up   # build PTF JAR, copy to JM, create sink topics, submit 5 INSERT INTO streaming jobs
+make flink-reports-up   # build PTF JAR, copy to JM, create sink topics, submit 6 INSERT INTO streaming jobs
 make flink-sql          # interactive SQL Client (auto-loads sink DDL so SELECT * works)
 make flink-reports-down # cancel jobs, drop tables, delete sink topics + SR subjects
 ```

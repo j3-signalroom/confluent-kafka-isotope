@@ -1,55 +1,43 @@
 # Confluent Kafka Isotope
 
-An example of using Kafka **consumer and producer interceptors** to tag every
-message with a tracer — an *isotope* — that carries through every hop of a
-multi-topic pipeline. Apache Flink consumes the tagged records and reports on
-what the isotopes reveal: end-to-end latency, hop topology, drop/duplication
-rates, and pipeline coverage.
+An example of using Kafka **consumer and producer interceptors** to tag every message with a tracer — an *isotope* — that carries through every hop of a multi-topic pipeline. Apache Flink consumes the tagged records and reports on what the isotopes reveal: **end-to-end latency**, **hop topology**, **drop/duplication rates**, and **pipeline coverage**.
 
-A **portability requirement** runs through this project: the same isotope
-mechanism must work against both **Confluent Cloud for Apache Flink**
-(managed; restricted to Table API SQL + uploaded UDF/PTF JARs) and
-**Confluent Platform for Apache Flink** (full DataStream + Table API).
-Three decisions follow from that: tagging happens in the Kafka
-**producer/consumer interceptors** (the one extension point both runtimes
-share via the broker), the on-wire **header** format is **JSON** (so
-Flink SQL can read the scalar fields with `CAST(headers[…] AS STRING)`
-and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`,
-`StuckTracePTF`) ship as a single JAR that registers identically on
-either runtime.
+A **portability requirement** runs through this project: the same isotope mechanism must work against both **Confluent Cloud for Apache Flink (CCAF)** (managed) and **Confluent Platform for Apache Flink** (self-managed) — both used here via Table API SQL plus uploaded UDF/PTF JARs (no DataStream code on either side). Three decisions follow from that: tagging happens in the Kafka **producer/consumer interceptors** (the one extension point both runtimes share via the broker), the on-wire **header** format is **JSON** (so Flink SQL can read the scalar fields with `CAST(headers[…] AS STRING)` and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`, `StuckTracePTF`) ship as a single JAR that registers identically on either runtime.
 
-Message **values** on the demo topics are **SR-framed Protobuf**
-(`ai.signalroom.kafka.isotope.proto.DemoEvent`) — the standard Confluent
-value format. The interceptors and reports are agnostic to value format
-because the isotope rides in headers; the Protobuf choice just gives the
-integration tests and the demo CLI a typed payload to work with.
+One asymmetry the runtimes don't share: **Flink-native SR-Protobuf**. CCAF supports SR-framed Protobuf as a Flink sink format via its topic catalog; Apache Flink open-source (the CP Flink runtime) ships `avro-confluent` but no SR-Protobuf counterpart. So Flink *report sinks* land on **Avro+SR on CP** and can be **Protobuf+SR on CCAF** — a runtime constraint, not a project preference. The demo *event* topics (next paragraph) are unaffected because they're written by the Kafka producer client, not by Flink.
 
-## How the isotope is carried
+Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom.kafka.isotope.proto.DemoEvent`) — the standard Confluent value format. The interceptors and reports are agnostic to value format because the isotope rides in headers; the Protobuf choice just gives the integration tests and the demo CLI a typed payload to work with.
 
-- **Header `x-isotope`** (JSON bytes) carries the full hop history,
-  forwarded by every hop:
-  - `t` — 16-byte **UUIDv7** trace ID (RFC 9562): 48-bit ms timestamp in
-    the high bits + 74 bits random. Stable for the life of the trace,
-    and lexicographic byte order matches creation order — sort trace
-    IDs and you get chronological order for free.
-  - `o` — origin timestamp (ms) — same value as the timestamp embedded
-    in the UUIDv7 trace ID; kept as its own field for typed access from
-    Flink SQL without needing to decode the UUID bytes.
+---
+
+**Table of Contents**
+<!-- toc -->
+- [1.0 How the isotope is carried](#10-how-the-isotope-is-carried)
+- [2.0 Repo layout](#20-repo-layout)
+- [3.0 Running](#30-running)
+  - [3.1. Unit tests (no broker, instant)](#31-unit-tests-no-broker-instant)
+  - [3.2 Demo CLI — see one trace propagate live](#32-demo-cli--see-one-trace-propagate-live)
+  - [3.3 Integration tests (live Kafka via Minikube)](#33-integration-tests-live-kafka-via-minikube)
+  - [3.4 Flink SQL reports on Minikube](#34-flink-sql-reports-on-minikube)
+  - [3.5 Recommended path the first time through](#35-recommended-path-the-first-time-through)
+<!-- tocstop -->
+
+---
+
+## **1.0 How the isotope is carried**
+
+- **Header `x-isotope`** (JSON bytes) carries the full hop history, forwarded by every hop:
+  - `t` — 16-byte **UUIDv7** trace ID (RFC 9562): 48-bit ms timestamp in the high bits + 74 bits random. Stable for the life of the trace,and lexicographic byte order matches creation order — sort trace IDs and you get chronological order for free.
+  - `o` — origin timestamp (ms) — same value as the timestamp embedded in the UUIDv7 trace ID; kept as its own field for typed access from Flink SQL without needing to decode the UUID bytes.
   - `s` — origin service name (set once, never reassigned)
   - `h` — ordered list of hops, each `{s: service, t: topic, m: tsMs}`
-  - `x` — `true` if the hop list exceeded `MAX_HOPS = 32` and the oldest
-    hop was evicted
+  - `x` — `true` if the hop list exceeded `MAX_HOPS = 32` and the oldest hop was evicted
 - **Six scalar headers** (UTF-8 strings) carry the most-recent-hop view so
-  Flink SQL can read them via `CAST(headers['x-isotope-…'] AS STRING)`
-  without parsing the JSON array (no UDF required on either CCAF or CP
-  Flink). See [flink/README.md](flink/README.md) for the full header table.
+  Flink SQL can read them via `CAST(headers['x-isotope-…'] AS STRING)` without parsing the JSON array (no UDF required on either CCAF or CP Flink). See [flink/README.md](flink/README.md) for the full header table.
 
-A producer with the isotope interceptor loaded appends one hop on every
-`send()`. A consume-then-produce service calls
-`IsotopeContext.adoptFromRecord(record)` between consume and produce so
-the trace ID and origin survive the hop.
+A producer with the isotope interceptor loaded appends one hop on every `send()`. A consume-then-produce service calls `IsotopeContext.adoptFromRecord(record)` between consume and produce so the trace ID and origin survive the hop.
 
-## Repo layout
+## **2.0 Repo layout**
 
 ```
 app/                                    isotope JVM library + demo CLI + tests
@@ -74,15 +62,21 @@ ptf/                                    Phase 2 — Flink PTF + UDAF shadow JAR
   src/test/java/.../                    LatencyPercentilesUDAFTest
 flink/sql/                              Flink SQL reports — identical on
                                         CCAF and CP Flink except source DDL
-  cp/, cc/, shared/                     per-environment source + shared reports
+  cp/                                   CP Flink: 00_source_table, 01_register_functions,
+                                        05_report_sinks (avro-confluent), 99_teardown
+  cc/                                   CCAF: 00_source_table (view over auto-registered
+                                        topic), 01_register_functions (confluent-artifact:// JAR)
+  shared/                               05_isotope_view + 6 INSERT INTO reports
+                                        (10_latency, 20_topology, 30_hop_distribution,
+                                        40_coverage, 60_stuck_trace, 70_latency_percentiles)
 k8s/base/                               CFK Kafka/SR/Connect/ksqlDB/C3 manifests
 scripts/                                port-forward helpers, deploy-flink-reports.sh
 Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ```
 
-## Running
+## **3.0 Running**
 
-### 1. Unit tests (no broker, instant)
+### **3.1. Unit tests (no broker, instant)**
 
 ```bash
 ./gradlew test                       # both subprojects
@@ -91,11 +85,9 @@ Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ./gradlew :ptf:test                  # LatencyPercentilesUDAFTest — T-Digest accumulator semantics
 ```
 
-### 2. Demo CLI — see one trace propagate live
+### **3.2 Demo CLI — see one trace propagate live**
 
-The fastest way to watch the isotope mechanic. Requires the cluster to be up
-and the Kafka + SR forwards running (see step 3 below for the bring-up
-commands). The CLI has three modes:
+The fastest way to watch the isotope mechanic. Requires the cluster to be up and the Kafka + SR forwards running (see step 3 below for the bring-up commands). The CLI has three modes:
 
 | Mode | Args | What it does |
 |---|---|---|
@@ -119,13 +111,9 @@ commands). The CLI has three modes:
 ./gradlew :app:run --args="send iso-start svc-A 'hello world'" -q
 ```
 
-Terminal A's output for each record shows the same `trace_id` across all
-three hops, `origin = svc-A` (never reassigned), and `hops[]` listing
-`svc-A → svc-B → svc-C` in order with per-hop timestamps. Override
-endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're
-not on the default Minikube layout.
+Terminal A's output for each record shows the same `trace_id` across all three hops, `origin = svc-A` (never reassigned), and `hops[]` listing `svc-A → svc-B → svc-C` in order with per-hop timestamps. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
 
-### 3. Integration tests (live Kafka via Minikube)
+### **3.3 Integration tests (live Kafka via Minikube)**
 
 Bring up the local Confluent Platform stack and port-forward Kafka + SR:
 
@@ -165,13 +153,9 @@ The integration tests cover:
 | `ConsumerInterceptorIT` | `IsotopeContext.adoptFromRecord` extracts isotope into thread-local on tagged records; clears the thread-local for untagged records |
 | `ThreeStageHopPropagationIT` | `svc-A → topic-AB → svc-B → topic-BC → svc-C` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `svc-A`, this = `svc-B`, hop count = 2) at the terminal |
 
-### 4. Flink SQL reports on Minikube
+### **3.4 Flink SQL reports on Minikube**
 
-The four Phase-1 reports plus the two Phase-2 (PTF / UDAF) reports run
-against a Flink session cluster managed by the Confluent Flink Kubernetes
-Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see
-**[flink/README.md](flink/README.md)** for that side; this section is the
-local-Minikube path.
+The four Phase-1 reports plus the Phase-2 PTF and UDAF reports — six in total — run against a Flink session cluster managed by the Confluent Flink Kubernetes Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see **[flink/README.md](flink/README.md)** for that side; this section is the local-Minikube path.
 
 **Bring up Flink:**
 
@@ -180,139 +164,19 @@ make flink-up                # cert-manager → CFK Flink Operator → CMF → s
                              # (~5 min the first time)
 ```
 
-**Deploy the reports** — all 5 reports run on the cp-flink session
-cluster (Flink 2.1.2). Sink topics use Apache Flink's
-[`avro-confluent`](https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/avro-confluent/)
-format — SR-framed Avro, auto-registered on first write — so Control
-Center renders the report rows natively.
+**Deploy the reports** — all 6 reports run on the cp-flink session cluster (Flink 2.1.2). Sink topics use Apache Flink's [`avro-confluent`](https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/avro-confluent/) format — SR-framed Avro, auto-registered on first write — so Control Center renders the report rows natively.
 
 ```bash
 make flink-reports-up
 ```
 
-`flink-reports-up` builds the PTF/UDAF shadow JAR if missing, copies
-it into the JobManager pod, pre-creates the 5 sink Kafka topics, then
-applies the source + view + sink DDL and submits 5 `INSERT INTO`
-streaming jobs (one per report). On first write to each sink, Apache
-Flink's `flink-sql-avro-confluent-registry` format registers a fresh
-Avro schema in SR under subject `<topic>-value`. **Control Center
-deserializes all 5 report topics natively** — no `.proto` files in
-the repo for the reports, no hand-installed format jars beyond the
-one init-container download.
+`flink-reports-up` builds the PTF/UDAF shadow JAR if missing, copies it into the JobManager pod, pre-creates the 6 sink Kafka topics, then applies the source + view + sink DDL and submits 6 `INSERT INTO` streaming jobs (one per report). On first write to each sink, Apache Flink's `flink-sql-avro-confluent-registry` format registers a fresh Avro schema in SR under subject `<topic>-value`. **Control Center deserializes all 6 report topics natively** — no `.proto` files in the repo for the reports, no hand-installed format jars beyond the one init-container download.
 
-##### Format-by-domain
+#### **3.4.1 Format-by-domain**
 
-The demo *event* topics (`iso-start`, `iso-mid`, `iso-final`) still
-ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's
-unchanged. The *report* topics ride **Avro+SR** because cp-flink
-doesn't ship an SR-integrated Protobuf format and CMF (which does)
-disallows the UDAFs the percentiles report needs. Events from the
-app are Protobuf; aggregates from Flink are Avro. Two formats by
-domain — a clean split, not a defect.
+The demo *event* topics (`iso-start`, `iso-mid`, `iso-final`) still ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's unchanged. The *report* topics ride **Avro+SR** because cp-flink doesn't ship an SR-integrated Protobuf format and CMF (which does) disallows the UDAFs the percentiles report needs. Events from the app are Protobuf; aggregates from Flink are Avro. Two formats by domain — a clean split, not a defect.
 
-##### What we considered, what we didn't pick
-
-- **CMF (Confluent Manager for Apache Flink) Statements.** Gives SR-Protobuf
-  for free, but CMF [disallows UDFs in Statements](https://docs.confluent.io/platform/current/flink/jobs/sql-statements/features-support.html)
-  — the percentiles report can't migrate. Also, CMF's compute-pool image
-  (`cp-flink-sql`) is only published for Flink 1.19 today, forcing a
-  version mismatch. We installed CMF (see `make cmf-install`) and verified
-  the path end-to-end with 4 reports, then rolled back in favor of keeping
-  all 5 reports on one Flink 2.1 session cluster.
-- **A hand-written SR-Protobuf format wrapper.** Maintainable code, ~150
-  lines, but Apache Flink ships `avro-confluent` officially with zero
-  maintenance — same Control Center decoding outcome at ~0% the long-term
-  cost.
-- **Raw Protobuf (no SR magic byte) via Apache Flink's `protobuf` format.**
-  Worked, but Control Center couldn't decode the report topics. Earlier
-  state of this branch; abandoned in favor of Avro+SR.
-
-**Results persist in Kafka, not in the SQL Client session.** The
-streaming `INSERT INTO` jobs run on the Flink session cluster
-indefinitely, accumulating one row per closed window per group into
-their sink topic. Closing your SQL Client session does not stop them
-— use `make flink-reports-down` for that.
-
-**Query interactively** — opens a Flink SQL Client inside the
-JobManager pod. If `flink-reports-up` has already run, the sink table
-DDL is auto-loaded so `SELECT *` works out of the box:
-
-```bash
-make flink-sql
-# Flink SQL> SELECT * FROM latency_report_1m;
-# Flink SQL> SELECT * FROM topology_report_1m;
-# Flink SQL> SELECT * FROM hop_distribution_1m;
-# Flink SQL> SELECT * FROM coverage_report_1m;
-# Flink SQL> SELECT * FROM latency_percentiles_flat_1m;              -- Phase 2 UDAF
-# NOTE: `stuck_trace_alerts` (Phase 2 PTF) is not deployed on the
-#       Minikube cluster — see the caveat below.
-```
-
-Each `SELECT` here is a *read-only* tail of the sink topic — it
-doesn't start an aggregation job, just streams whatever the
-already-running INSERTs have produced. Closed-window rows accumulate
-over time, so a fresh `SELECT *` shows the full history (until the
-topic's retention policy kicks in).
-
-The Flink UI shows the 5 long-lived INSERT jobs (one per report) plus
-any ad-hoc SELECTs you start:
-
-```bash
-make flink-ui                # opens http://localhost:8081 in your browser
-```
-
-**Drive traffic** in another terminal while the queries are running:
-
-```bash
-./gradlew :app:run --args="send iso-start svc-A 'hello'" -q
-# or the full 3-stage chain from § 2 above
-```
-
-You should see report rows update as records flow.
-
-**Teardown** — cancels the running INSERT INTO jobs via the Flink
-REST API, drops the catalog tables / views / functions, **and deletes
-the `isotope-report-*-1m` Kafka topics** (all historical report data
-is lost):
-
-```bash
-make flink-reports-down
-```
-
-#### Known caveat: `STUCK_TRACE_PTF` does not deploy on this Flink image
-
-PTFs in Confluent Flink are an **Early Access Program** feature, and
-their SQL call syntax is in flux. The stuck-trace PTF view uses the
-Confluent-documented form —
-`input => TABLE isotope PARTITION BY trace_id, on_time => DESCRIPTOR(...)`
-— which **the parser shipped in `confluentinc/cp-flink:2.1.1-cp1-java21`
-rejects** with `Encountered "PARTITION" at line N, column M`. We
-confirmed this by walking four syntactic variants (named-arg + bare
-TABLE, named-arg + parenthesised subquery, positional + named hybrid,
-all-named); all hit the same grammar gate or its Calcite
-`ClassCastException` downstream.
-
-What I'm **not** sure about: whether the parser in this image is
-genuinely behind CCAF's, whether there's an opt-in flag for the EAP
-grammar, or whether the docs run ahead of any current Flink build.
-The Confluent EAP-feature page says this syntax works on CCAF; we
-haven't verified that directly on a CCAF cluster.
-
-What this means in practice:
-- `make flink-reports-up` applies **8 of 9** reports successfully on
-  Minikube; `60_stuck_trace_report.fql` is intentionally skipped by the
-  deploy script and carries a banner comment explaining why.
-- The PTF Java code in
-  [ptf/src/.../StuckTracePTF.java](ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StuckTracePTF.java)
-  matches the canonical Confluent
-  [InactivityAlert example](https://docs.confluent.io/cloud/current/flink/how-to-guides/create-process-table-function.html#example-inactivity-alert-ptf-with-timers)
-  structurally, so the JAR should be portable when the parser side
-  catches up (or against CCAF directly).
-- The UDAF (`LATENCY_PERCENTILES`) is unaffected — UDAFs don't use
-  PTF-call syntax, and `latency_percentiles_flat_1m` deploys fine
-  on Minikube.
-
-### Recommended path the first time through
+### **3.5 Recommended path the first time through**
 
 1. `./gradlew test` — proves the codec + UDAF logic without any cluster.
 2. `make cp-up && make kafka-pf-up && ./gradlew :app:integrationTest` —
@@ -320,16 +184,4 @@ What this means in practice:
 3. The 3-stage demo CLI walkthrough above — visually shows the trace
    accumulating hops.
 4. `make flink-up && make flink-reports-up && make flink-sql` — reports
-   populate as you drive traffic via the demo CLI (see § 4).
-
-## Status
-
-| Piece | Status |
-|---|---|
-| Kafka interceptors + JSON codec | Implemented; 10 unit tests passing (codec roundtrip, hop eviction, header size, UUIDv7 version/variant/order properties) |
-| Live-broker integration tests | All 5 tests passing against Minikube CP (Kafka 4.x + SR 8.2.0) |
-| Demo CLI (`send` / `hop` / `sink`) | Implemented and exercised end-to-end |
-| Protobuf message values via SR | Implemented; integration tests round-trip `DemoEvent` |
-| Flink SQL reports — Phase 1 (4 reports) | `make flink-reports-up` deploys all 4 (`latency_report_1m`, `topology_report_1m`, `hop_distribution_1m`, `coverage_report_1m`) on Minikube |
-| Flink UDAF — Phase 2 (`LATENCY_PERCENTILES`) | Shadow JAR builds (89 KB), UDAF unit-tested (5 tests), deploys + queries on Minikube via `latency_percentiles_flat_1m` |
-| Flink PTF — Phase 2 (`STUCK_TRACE_PTF`) | Java code complete and unit-compileable; SQL call deferred — Apache Flink 2.1.1's parser rejects the documented EAP PTF call syntax (see § 4 caveat). JAR + FQL ready for CCAF when validated there. |
+   populate as you drive traffic via the demo CLI (see § 3.2).

@@ -45,7 +45,7 @@ public class StuckTracePTF extends ProcessTableFunction<StuckTraceAlert> {
     private static final String TIMER_NAME = "stuck";
 
     /**
-     * Staleness threshold — fixed at 60s for the demo. Flink 2.1.1's PTF
+     * Staleness threshold — fixed at 60s for the demo. Flink 2.1.2's PTF
      * framework rejects user-declared scalar args alongside the implicit
      * {@code on_time} / {@code uid} args (Calcite "DEFAULT only allowed
      * for optional parameters"); to keep the call site matching the
