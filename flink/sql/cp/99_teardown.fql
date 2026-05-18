@@ -1,21 +1,20 @@
 -- =====================================================================
--- Teardown — drops the latency-percentiles sink table + upstream view
--- + source table + functions on the cp-flink session cluster. Safe to
--- run repeatedly; uses IF EXISTS.
---
--- Scope: the other 4 reports (latency, topology, hop_distribution,
--- coverage) live in CMF now — they're torn down by
--- `make cmf-reports-down`, not by this file.
+-- Teardown — drops the 5 report sink tables + upstream view + source
+-- table + functions. Safe to run repeatedly; uses IF EXISTS.
 --
 -- Applied via `make flink-reports-down`. The deploy script
 -- (scripts/deploy-flink-reports.sh) cancels the running INSERT INTO
--- job via the Flink REST API *before* this FQL is applied, and
--- deletes the underlying Kafka topic *after* — neither operation is
--- expressible in portable Flink SQL, so they live in the shell script.
+-- jobs via `flink cancel` *before* this FQL is applied, and deletes
+-- the underlying Kafka topics + SR subjects *after*. Neither operation
+-- is expressible in portable Flink SQL, so they live in the script.
 -- =====================================================================
 
--- Percentiles sink (backed by isotope-report-latency-percentiles-1m).
+-- Sink tables (each backed by an isotope-report-* Kafka topic + SR Avro subject).
 DROP TABLE    IF EXISTS latency_percentiles_flat_1m;
+DROP TABLE    IF EXISTS coverage_report_1m;
+DROP TABLE    IF EXISTS hop_distribution_1m;
+DROP TABLE    IF EXISTS topology_report_1m;
+DROP TABLE    IF EXISTS latency_report_1m;
 
 -- Upstream typed view → source table.
 DROP VIEW     IF EXISTS isotope;

@@ -1,0 +1,40 @@
+-- =====================================================================
+-- Latency report — per-hop latency from origin, aggregated by origin
+-- service and current hop topic, in 1-minute tumbling windows.
+--
+-- "Latency" here is `broker_ts_at_this_hop - origin_ts`. It's the
+-- end-of-pipeline latency only for the terminal hop; for intermediate
+-- hops it's the partial latency up to that point.
+--
+-- p50/p95 are intentionally absent here — see
+-- 70_latency_percentiles_report.fql for the T-Digest UDAF-based version.
+--
+-- Reads from the `isotope` view (typed projection of `isotope_raw`,
+-- with `x-isotope-*` headers decoded). Writes to the
+-- `latency_report_1m` table (Kafka sink, Avro+SR; see
+-- cp/05_report_sinks.fql). Schema auto-registers in SR on first write
+-- under subject `isotope-report-latency-1m-value`; Control Center
+-- renders the rows natively.
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope-report-latency-1m';
+
+INSERT INTO latency_report_1m
+SELECT
+    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    `origin_service`,
+    `this_topic`,
+    COUNT(*)                          AS `sample_count`,
+    COUNT(DISTINCT trace_id)          AS `distinct_traces`,
+    AVG(CAST(latency_ms AS DOUBLE))   AS `avg_latency_ms`,
+    CAST(MIN(latency_ms) AS BIGINT)   AS `min_latency_ms`,
+    CAST(MAX(latency_ms) AS BIGINT)   AS `max_latency_ms`
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_topic`;

@@ -557,22 +557,6 @@ cmf-uninstall: ## Uninstall CMF (safe to run even if not installed)
 		&& echo "✔ CMF removed." \
 		|| echo "→ cmf not installed, skipping."
 
-.PHONY: cmf-reports-up
-cmf-reports-up: ## Deploy the 4 CMF-managed report Statements (canonical SR-Protobuf path)
-	@$(mkfile_dir)scripts/deploy-cmf-reports.sh up
-
-.PHONY: cmf-reports-down
-cmf-reports-down: ## Tear down CMF report Statements, delete sink topics + SR subjects (keeps pool/catalog/db)
-	@$(mkfile_dir)scripts/deploy-cmf-reports.sh down
-
-.PHONY: cmf-resources-down
-cmf-resources-down: ## Remove CMF compute pool / database / catalog (run AFTER cmf-reports-down)
-	@kubectl port-forward -n $(NAMESPACE) svc/cmf-service 18080:80 >/dev/null 2>&1 & \
-	PF=$$!; sleep 2; \
-	curl -sS -o /dev/null -w "  pool        → %{http_code}\n" -X DELETE http://localhost:18080/cmf/api/v1/environments/$(CMF_ENV_NAME)/compute-pools/iso-pool; \
-	curl -sS -o /dev/null -w "  database    → %{http_code}\n" -X DELETE http://localhost:18080/cmf/api/v1/catalogs/kafka/iso-cat/databases/iso-db; \
-	curl -sS -o /dev/null -w "  catalog     → %{http_code}\n" -X DELETE http://localhost:18080/cmf/api/v1/catalogs/kafka/iso-cat; \
-	kill $$PF 2>/dev/null; true
 
 .PHONY: cmf-proxy-logs
 cmf-proxy-logs: ## Show logs from the cmf-proxy sidecar in the C3 pod (debug Flink tab connectivity)

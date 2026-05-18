@@ -11,30 +11,20 @@ flink = "2.1.2"
 t-digest = "3.3"
 shadow = "9.4.1"
 
-# Protobuf message-value format for Kafka topics, via Confluent Schema
-# Registry. The Confluent client version is matched to the SR deployed by
-# k8s/base/confluent-platform-c3++.yaml (cp-server:8.2.0). protoc is pinned
-# to match the protobuf-java runtime that kafka-protobuf-serializer 8.2.0
-# pulls transitively (protobuf-java 4.32.1) — keeping protoc and runtime on
-# the same major avoids generated-vs-runtime ABI surprises.
+# Protobuf message-value format for Kafka topics in the :app project
+# (DemoEvent on iso-* topics), via Confluent Schema Registry. The
+# Confluent client version is matched to the SR deployed by
+# k8s/base/confluent-platform-c3++.yaml (cp-server:8.2.0). protoc is
+# pinned to match the protobuf-java runtime that kafka-protobuf-serializer
+# 8.2.0 pulls transitively (protobuf-java 4.32.1) — keeping protoc and
+# runtime on the same major avoids generated-vs-runtime ABI surprises.
+#
+# The Flink-side report sinks DO NOT use Protobuf — they use Avro+SR via
+# Apache Flink's `flink-sql-avro-confluent-registry` (installed into
+# /opt/flink/lib by an init container in flink-basic-deployment.yaml).
+# So this protoc pin is only relevant to :app, not :ptf.
 confluent       = "8.2.0"
 protoc          = "4.32.1"
-# Flink-side protobuf-java + protoc version, used ONLY for :ptf's report
-# .proto files. Apache Flink 2.1.2's protobuf format
-# (flink-protobuf-2.1.2.jar) was compiled against protobuf-java 3.21.7 and
-# calls API removed in 4.x (e.g. Descriptors$FileDescriptor.getSyntax()).
-# The :ptf shadow JAR carries protoc 3.21.x-generated message classes and
-# runs on a protobuf-java 3.21.7 runtime installed in /opt/flink/lib by
-# the init container in k8s/base/flink-basic-deployment.yaml — keeping
-# everything Flink-side on the older major. :app is unaffected (its
-# DemoEvent is generated against protoc 4.32.1 and runs against
-# kafka-protobuf-serializer's transitive protobuf-java 4.32.1).
-#
-# Named `flinkprotobuf` rather than something like `protoc-flink` because
-# the latter kebab-converts to libs.versions.protoc.flink in the Gradle
-# accessor, which would force `protoc` into a sub-namespace and break the
-# `libs.versions.protoc.get()` call in app/build.gradle.
-flinkprotobuf   = "3.21.7"
 protobuf-plugin = "0.9.4"
 
 [libraries]
@@ -48,21 +38,12 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 # Phase 2 — Flink table API + percentile sketch for PTF/UDAF JAR.
 flink-table-api-java = { module = "org.apache.flink:flink-table-api-java", version.ref = "flink" }
 flink-table-common   = { module = "org.apache.flink:flink-table-common",   version.ref = "flink" }
-# Apache Flink's open-source Protobuf SQL format. Bundles the format SPI
-# but NOT protobuf-java itself; the generated message classes still need
-# a protobuf-java runtime on the Flink classpath (provided by
-# flink-protobuf's own deps in /opt/flink/lib).
-flink-protobuf       = { module = "org.apache.flink:flink-protobuf",       version.ref = "flink" }
 t-digest             = { module = "com.tdunning:t-digest",                 version.ref = "t-digest" }
 
-# Protobuf topic-value format.
+# Protobuf topic-value format (used by :app for DemoEvent on iso-* topics).
 kafka-protobuf-serializer = { module = "io.confluent:kafka-protobuf-serializer", version.ref = "confluent" }
 protobuf-java             = { module = "com.google.protobuf:protobuf-java",       version.ref = "protoc" }
 protoc                    = { module = "com.google.protobuf:protoc",              version.ref = "protoc" }
-# 3.21.7-aligned variants used by :ptf only. See the `flinkprotobuf`
-# comment in [versions] for the rationale + naming explanation.
-flinkprotobuf-java   = { module = "com.google.protobuf:protobuf-java", version.ref = "flinkprotobuf" }
-flinkprotobuf-protoc = { module = "com.google.protobuf:protoc",        version.ref = "flinkprotobuf" }
 
 [plugins]
 shadow   = { id = "com.gradleup.shadow",  version.ref = "shadow" }
