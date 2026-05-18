@@ -26,6 +26,16 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
     }
+    // Compile to Java-17 bytecode. CP-Flink (`cp-flink:2.1.2-cp1-java21`)
+    // runs Java-17 bytecode without issue; CCAF rejects artifacts compiled
+    // for Java versions > 17 ("artifact should be compiled with a Java
+    // version <= 17"). Targeting 17 makes the same JAR portable to both.
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release.set(17)
 }
 
 tasks.named('test') {

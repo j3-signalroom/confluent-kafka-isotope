@@ -39,6 +39,13 @@ import java.util.UUID;
  *
  * Reads kafka.bootstrap / schema.registry.url system properties; defaults
  * are wired for the local Minikube setup once `make kafka-pf-up` is up.
+ *
+ * For Confluent Cloud, also pass:
+ *   -Dkafka.security.protocol=SASL_SSL
+ *   -Dkafka.sasl.mechanism=PLAIN
+ *   -Dkafka.sasl.jaas.config='org.apache.kafka.common.security.plain.PlainLoginModule required username="..." password="...";'
+ *   -Dschema.registry.basic.auth.user.info=<sr-key>:<sr-secret>
+ * — `scripts/cc-cli-env.sh` builds these from `terraform output`.
  */
 public final class App {
 
@@ -47,7 +54,46 @@ public final class App {
     private static final String SCHEMA_REGISTRY_URL =
         System.getProperty("schema.registry.url", "http://localhost:8081");
 
+    // Optional CCAF / SASL_SSL config. Defaults are blank (the Minikube
+    // dev cluster is plaintext-no-auth), so applying these is a no-op
+    // unless the user passes the matching -D properties.
+    private static final String SECURITY_PROTOCOL =
+        System.getProperty("kafka.security.protocol", "PLAINTEXT");
+    private static final String SASL_MECHANISM =
+        System.getProperty("kafka.sasl.mechanism", "");
+    private static final String SASL_JAAS_CONFIG =
+        System.getProperty("kafka.sasl.jaas.config", "");
+
+    // Optional Schema Registry basic-auth (CCAF Stream Governance). The
+    // Confluent SR serializer/deserializer reads these keys directly off
+    // the producer/consumer Properties, so we set them on the same map.
+    private static final String SR_BASIC_AUTH_USER_INFO =
+        System.getProperty("schema.registry.basic.auth.user.info", "");
+
     private App() {}
+
+    /**
+     * Apply Kafka client security settings (security.protocol +
+     * SASL mechanism + JAAS) to a producer/consumer/admin Properties
+     * map. No-op when the defaults are unchanged from PLAINTEXT.
+     */
+    private static void applyKafkaSecurity(Properties p) {
+        p.put("security.protocol", SECURITY_PROTOCOL);
+        if (!SASL_MECHANISM.isEmpty())   p.put("sasl.mechanism", SASL_MECHANISM);
+        if (!SASL_JAAS_CONFIG.isEmpty()) p.put("sasl.jaas.config", SASL_JAAS_CONFIG);
+    }
+
+    /**
+     * Apply Schema Registry basic-auth credentials to a producer/consumer
+     * Properties map (the SR serializer reads them from there). No-op
+     * unless -Dschema.registry.basic.auth.user.info=... was passed.
+     */
+    private static void applySchemaRegistryAuth(Properties p) {
+        if (!SR_BASIC_AUTH_USER_INFO.isEmpty()) {
+            p.put("basic.auth.credentials.source", "USER_INFO");
+            p.put("basic.auth.user.info", SR_BASIC_AUTH_USER_INFO);
+        }
+    }
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) { usage(); System.exit(2); }
@@ -75,6 +121,14 @@ public final class App {
             Endpoints (override via -Dkafka.bootstrap=... -Dschema.registry.url=...):
               kafka.bootstrap     = localhost:30092
               schema.registry.url = http://localhost:8081
+
+            Optional Confluent Cloud auth (default: plaintext, no auth):
+              -Dkafka.security.protocol=SASL_SSL
+              -Dkafka.sasl.mechanism=PLAIN
+              -Dkafka.sasl.jaas.config=<JAAS line>
+              -Dschema.registry.basic.auth.user.info=<sr-key>:<sr-secret>
+            `source scripts/cc-cli-env.sh` exports the right values from
+            `terraform output`.
             """);
     }
 
@@ -90,6 +144,7 @@ public final class App {
         p.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP);
         p.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, 10_000);
         p.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, 15_000);
+        applyKafkaSecurity(p);
         try (Admin admin = Admin.create(p)) {
             try {
                 admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1))).all().get();
@@ -122,6 +177,8 @@ public final class App {
         p.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
             IsotopeProducerInterceptor.class.getName());
         p.put(IsotopeProducerInterceptor.SERVICE_NAME_CONFIG, service);
+        applyKafkaSecurity(p);
+        applySchemaRegistryAuth(p);
 
         DemoEvent event = DemoEvent.newBuilder()
             .setEventId(Isotope.uuidV7String())
@@ -173,6 +230,8 @@ public final class App {
         cp.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-hop-" + service + "-" + UUID.randomUUID());
         cp.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         cp.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        applyKafkaSecurity(cp);
+        applySchemaRegistryAuth(cp);
 
         Properties pp = new Properties();
         pp.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP);
@@ -183,6 +242,8 @@ public final class App {
         pp.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
             IsotopeProducerInterceptor.class.getName());
         pp.put(IsotopeProducerInterceptor.SERVICE_NAME_CONFIG, service);
+        applyKafkaSecurity(pp);
+        applySchemaRegistryAuth(pp);
 
         System.out.printf("→ hopping %s → %s as %s (Ctrl-C to stop)%n", inTopic, outTopic, service);
 
@@ -223,6 +284,8 @@ public final class App {
         p.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-sink-" + UUID.randomUUID());
         p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        applyKafkaSecurity(p);
+        applySchemaRegistryAuth(p);
 
         System.out.printf("→ sinking %s (Ctrl-C to stop)%n", topic);
         try (KafkaConsumer<byte[], DemoEvent> consumer = new KafkaConsumer<>(p)) {

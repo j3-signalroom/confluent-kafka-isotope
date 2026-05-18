@@ -11,8 +11,8 @@
 # /tmp/isotope-report-sinks.fql that this script leaves behind.
 #
 # Usage:
-#   scripts/deploy-flink-reports.sh up       # build JAR, upload, create topics, submit jobs
-#   scripts/deploy-flink-reports.sh down     # cancel jobs, drop DDL, delete topics
+#   scripts/deploy-cp-flink-reports.sh up       # build JAR, upload, create topics, submit jobs
+#   scripts/deploy-cp-flink-reports.sh down     # cancel jobs, drop DDL, delete topics
 #
 # Prereqs:
 #   - Minikube + CP up  (`make cp-up`)
@@ -37,7 +37,7 @@ SINK_TOPICS=(
 )
 
 # Pipeline names — must match the `SET 'pipeline.name'` values in each
-# shared/{10,20,30,40,60,70}_*.fql so we can find and cancel the jobs.
+# cp/{10,20,30,40,60,70}_*.fql so we can find and cancel the jobs.
 JOB_NAMES=(
     isotope-report-latency-1m
     isotope-report-topology-1m
@@ -170,14 +170,14 @@ if [ "${ACTION}" = "up" ]; then
     UP_FILES=(
         flink/sql/cp/00_source_table.fql
         flink/sql/cp/01_register_functions.fql
-        flink/sql/shared/05_isotope_view.fql
+        flink/sql/cp/05_isotope_view.fql
         flink/sql/cp/05_report_sinks.fql
-        flink/sql/shared/10_latency_report.fql
-        flink/sql/shared/20_topology_report.fql
-        flink/sql/shared/30_hop_distribution.fql
-        flink/sql/shared/40_coverage_report.fql
-        flink/sql/shared/60_stuck_trace_report.fql
-        flink/sql/shared/70_latency_percentiles_report.fql
+        flink/sql/cp/10_latency_report.fql
+        flink/sql/cp/20_topology_report.fql
+        flink/sql/cp/30_hop_distribution.fql
+        flink/sql/cp/40_coverage_report.fql
+        flink/sql/cp/60_stuck_trace_report.fql
+        flink/sql/cp/70_latency_percentiles_report.fql
     )
 
     # File used by the deploy session itself (source + functions + views
@@ -194,7 +194,7 @@ if [ "${ACTION}" = "up" ]; then
     SINKS_INIT_FILES=(
         flink/sql/cp/00_source_table.fql
         flink/sql/cp/01_register_functions.fql
-        flink/sql/shared/05_isotope_view.fql
+        flink/sql/cp/05_isotope_view.fql
         flink/sql/cp/05_report_sinks.fql
     )
     for f in "${UP_FILES[@]}"; do

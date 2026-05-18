@@ -30,6 +30,18 @@ output "schema_registry_url" {
   value       = data.confluent_schema_registry_cluster.isotope.rest_endpoint
 }
 
+output "sr_api_key" {
+  description = "Active Schema Registry API key (rotating). Pair with sr_api_secret in the demo CLI's basic-auth config."
+  value       = module.sr_api_key_rotation.active_api_key.id
+  sensitive   = true
+}
+
+output "sr_api_secret" {
+  description = "Active Schema Registry API secret. Pair with sr_api_key in the demo CLI's basic-auth config."
+  value       = module.sr_api_key_rotation.active_api_key.secret
+  sensitive   = true
+}
+
 output "compute_pool_id" {
   description = "Flink compute pool ID running the report INSERTs."
   value       = confluent_flink_compute_pool.isotope.id

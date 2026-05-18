@@ -22,7 +22,17 @@ import java.time.Instant;
  *     {@code lastSeen + stalenessSeconds}. Re-registering the same timer
  *     name on every fresh hop replaces the previous one — Flink handles
  *     the dedup for us.
- *   - When the timer fires, emits one {@link StuckTraceAlert}.
+ *   - When the timer fires, emits one {@link Row} matching the
+ *     {@link FunctionHint} output schema below.
+ *
+ * Why we emit {@link Row} rather than a POJO: same reason as
+ * {@code LatencyPercentilesUDAF}. Flink 2.1.2 / CCAF's sink-write codegen
+ * generates a hard cast of the function output to {@code Row} in the
+ * {@code INSERT INTO} path; if the function is parameterised on a POJO
+ * the cast fails at runtime with
+ * "class StuckTraceAlert cannot be cast to class org.apache.flink.types.Row".
+ * Declaring the return type as {@code Row} keeps the codegen happy on
+ * both the interactive-SELECT path and the sink-INSERT path.
  *
  * SQL invocation pattern follows Confluent's documented PTF call syntax —
  * all args named, table arg as bare {@code TABLE x PARTITION BY col} (no
@@ -40,7 +50,7 @@ import java.time.Instant;
     + "trace_id STRING, origin_service STRING, last_service STRING, "
     + "last_topic STRING, last_hop_count INT, last_seen_ts_ms BIGINT, "
     + "stuck_for_ms BIGINT>"))
-public class StuckTracePTF extends ProcessTableFunction<StuckTraceAlert> {
+public class StuckTracePTF extends ProcessTableFunction<Row> {
 
     private static final String TIMER_NAME = "stuck";
 
@@ -96,7 +106,7 @@ public class StuckTracePTF extends ProcessTableFunction<StuckTraceAlert> {
     public void onTimer(TraceState state) {
         if (state == null || state.lastSeenTsMs == null) return;
 
-        collect(new StuckTraceAlert(
+        collect(Row.of(
             state.traceId,
             state.originService,
             state.lastService,

@@ -1,10 +1,10 @@
 # =====================================================================
 # Service account, role bindings, compute pool, artifact, statements.
 #
-# Note on file split: Terraform doesn't care about file boundaries — all
-# resources here are evaluated in one module graph alongside everything
-# in setup-confluent-environment.tf, setup-confluent-kafka.tf, data.tf,
-# variables.tf. The split is purely for human readability.
+# Pattern mirrors apache_flink-kickstarter-ii: every CCAF Flink statement
+# lives inline in HCL as a `confluent_flink_statement` resource. The
+# parallel CP runtime hardcodes its SQL in flink/sql/cp/ (no shared
+# directory) — the two runtimes are independent.
 # =====================================================================
 
 resource "confluent_service_account" "flink_sql_runner" {
@@ -17,9 +17,7 @@ resource "confluent_role_binding" "flink_sql_runner_as_flink_developer" {
   role_name   = "FlinkDeveloper"
   crn_pattern = data.confluent_organization.current.resource_name
 
-  depends_on = [
-    confluent_service_account.flink_sql_runner
-  ]
+  depends_on = [confluent_service_account.flink_sql_runner]
 }
 
 resource "confluent_role_binding" "flink_sql_runner_as_resource_owner_topic_access" {
@@ -27,9 +25,7 @@ resource "confluent_role_binding" "flink_sql_runner_as_resource_owner_topic_acce
   role_name   = "ResourceOwner"
   crn_pattern = "${confluent_kafka_cluster.isotope.rbac_crn}/kafka=${confluent_kafka_cluster.isotope.id}/topic=*"
 
-  depends_on = [
-    confluent_role_binding.flink_sql_runner_as_flink_developer
-  ]
+  depends_on = [confluent_role_binding.flink_sql_runner_as_flink_developer]
 }
 
 resource "confluent_role_binding" "flink_sql_runner_as_assigner" {
@@ -37,9 +33,7 @@ resource "confluent_role_binding" "flink_sql_runner_as_assigner" {
   role_name   = "Assigner"
   crn_pattern = "${data.confluent_organization.current.resource_name}/service-account=${confluent_service_account.flink_sql_runner.id}"
 
-  depends_on = [
-    confluent_role_binding.flink_sql_runner_as_resource_owner_topic_access
-  ]
+  depends_on = [confluent_role_binding.flink_sql_runner_as_resource_owner_topic_access]
 }
 
 resource "confluent_role_binding" "flink_sql_runner_schema_registry_access" {
@@ -47,9 +41,7 @@ resource "confluent_role_binding" "flink_sql_runner_schema_registry_access" {
   role_name   = "ResourceOwner"
   crn_pattern = "${data.confluent_schema_registry_cluster.isotope.resource_name}/subject=*"
 
-  depends_on = [
-    confluent_role_binding.flink_sql_runner_as_assigner
-  ]
+  depends_on = [confluent_role_binding.flink_sql_runner_as_assigner]
 }
 
 resource "confluent_role_binding" "flink_sql_runner_as_resource_owner_transactional_access" {
@@ -57,16 +49,27 @@ resource "confluent_role_binding" "flink_sql_runner_as_resource_owner_transactio
   role_name   = "ResourceOwner"
   crn_pattern = "${confluent_kafka_cluster.isotope.rbac_crn}/kafka=${confluent_kafka_cluster.isotope.id}/transactional-id=*"
 
-  depends_on = [
-    confluent_role_binding.flink_sql_runner_schema_registry_access
-  ]
+  depends_on = [confluent_role_binding.flink_sql_runner_schema_registry_access]
+}
+
+# Consumer-group access — needed by the demo CLI's sink/hop modes (each
+# instantiates a Kafka consumer with a fresh group id like
+# `isotope-sink-<uuid>` / `isotope-hop-<service>-<uuid>`). Without this
+# binding, the broker rejects the group registration with
+# `GroupAuthorizationException: Not authorized to access group: ...`.
+# Flink statements themselves don't trigger this — they read via the
+# CCAF runtime's own group management — but external Kafka clients do.
+resource "confluent_role_binding" "flink_sql_runner_as_resource_owner_group_access" {
+  principal   = "User:${confluent_service_account.flink_sql_runner.id}"
+  role_name   = "ResourceOwner"
+  crn_pattern = "${confluent_kafka_cluster.isotope.rbac_crn}/kafka=${confluent_kafka_cluster.isotope.id}/group=*"
+
+  depends_on = [confluent_role_binding.flink_sql_runner_as_resource_owner_transactional_access]
 }
 
 # ---------------------------------------------------------------------------
-# Compute pool — single small pool runs all the report INSERTs plus the
-# six DDL CREATEs. 10 CFU is comfortable for the demo (each INSERT is
-# parallelism 1, six in flight + headroom). Increase max_cfu if you scale
-# the demo CLI's send rate or open many ad-hoc SELECTs concurrently.
+# Compute pool — single small pool runs every report INSERT plus the
+# DDL CREATEs. 10 CFU is comfortable for the demo.
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_compute_pool" "isotope" {
@@ -79,14 +82,10 @@ resource "confluent_flink_compute_pool" "isotope" {
     id = confluent_environment.isotope.id
   }
 
-  depends_on = [
-    confluent_role_binding.flink_sql_runner_as_resource_owner_transactional_access
-  ]
+  depends_on = [confluent_role_binding.flink_sql_runner_as_resource_owner_group_access]
 }
 
-# Rotating Flink API key pair owned by the same service account. Used by
-# every confluent_flink_statement resource's `credentials {}` block to
-# authenticate against the Flink REST endpoint.
+# Rotating Flink API key for every confluent_flink_statement's credentials block.
 module "flink_api_key_rotation" {
   source = "github.com/j3-signalroom/iac-confluent-api_key_rotation-tf_module"
 
@@ -113,8 +112,8 @@ module "flink_api_key_rotation" {
 
 # ---------------------------------------------------------------------------
 # Common properties bag — every `confluent_flink_statement` below sets
-# `sql.current-catalog` = environment display name and `sql.current-database`
-# = Kafka cluster display name, so unqualified table/view references resolve.
+# `sql.current-catalog` and `sql.current-database` so unqualified table /
+# view references resolve to the cluster's topic catalog.
 # ---------------------------------------------------------------------------
 
 locals {
@@ -126,11 +125,8 @@ locals {
 
 # ---------------------------------------------------------------------------
 # Flink artifact — uploads ptf/build/libs/isotope-flink-udf.jar to CCAF.
-# Build it locally first with `./gradlew :ptf:shadowJar` (the wrapper
-# script `scripts/deploy-cc-flink-reports.sh` handles this for you).
-#
-# The artifact ID is interpolated into the CREATE FUNCTION statements
-# below via `confluent-artifact://${confluent_flink_artifact.isotope_udf.id}`.
+# Build it with Java-17-target bytecode (see ptf/build.gradle) — CCAF
+# rejects artifacts compiled for Java versions > 17.
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_artifact" "isotope_udf" {
@@ -146,56 +142,16 @@ resource "confluent_flink_artifact" "isotope_udf" {
 }
 
 # ---------------------------------------------------------------------------
-# Statement 1 — `isotope_raw` view over the three iso-* topics.
-# Templated from flink/sql/cc/00_source_table.fql (file is the source of
-# truth so the same DDL works for ad-hoc Cloud Console submission too).
+# Statements 1-3 — ALTER TABLE on each iso-* topic to expose Kafka record
+# headers as a column. CCAF's auto-imported topic tables do not include
+# `headers` by default; the source view below references it.
 # ---------------------------------------------------------------------------
 
-resource "confluent_flink_statement" "isotope_raw_view" {
-  statement = file("${local.cc_sql_dir}/00_source_table.fql")
-
-  properties    = local.flink_statement_properties
-  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
-
-  credentials {
-    key    = module.flink_api_key_rotation.active_api_key.id
-    secret = module.flink_api_key_rotation.active_api_key.secret
-  }
-
-  organization {
-    id = data.confluent_organization.current.id
-  }
-
-  environment {
-    id = confluent_environment.isotope.id
-  }
-
-  principal {
-    id = confluent_service_account.flink_sql_runner.id
-  }
-
-  compute_pool {
-    id = confluent_flink_compute_pool.isotope.id
-  }
-
-  lifecycle {
-    ignore_changes = [compute_pool]
-  }
-
-  depends_on = [
-    confluent_kafka_topic.isotope_event,
-    confluent_flink_compute_pool.isotope,
-  ]
-}
-
-# ---------------------------------------------------------------------------
-# Statement 2 — `isotope` typed view (header decoder + latency).
-# Templated from flink/sql/shared/05_isotope_view.fql (identical on CP and
-# CC; the shared/ directory is the canonical source of truth).
-# ---------------------------------------------------------------------------
-
-resource "confluent_flink_statement" "isotope_view" {
-  statement = file("${local.shared_sql_dir}/05_isotope_view.fql")
+resource "confluent_flink_statement" "alter_iso_start_add_headers" {
+  statement = <<-EOT
+    ALTER TABLE `iso-start`
+        ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
+  EOT
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -211,27 +167,177 @@ resource "confluent_flink_statement" "isotope_view" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes = [statement, compute_pool]
   }
 
   depends_on = [
-    confluent_flink_statement.isotope_raw_view,
+    confluent_kafka_topic.isotope_event["iso-start"],
+    confluent_flink_compute_pool.isotope,
+  ]
+}
+
+resource "confluent_flink_statement" "alter_iso_mid_add_headers" {
+  statement = <<-EOT
+    ALTER TABLE `iso-mid`
+        ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [
+    confluent_kafka_topic.isotope_event["iso-mid"],
+    confluent_flink_compute_pool.isotope,
+  ]
+}
+
+resource "confluent_flink_statement" "alter_iso_final_add_headers" {
+  statement = <<-EOT
+    ALTER TABLE `iso-final`
+        ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [
+    confluent_kafka_topic.isotope_event["iso-final"],
+    confluent_flink_compute_pool.isotope,
   ]
 }
 
 # ---------------------------------------------------------------------------
-# Statements 3-8 — 6 sink tables (CCAF Protobuf+SR; CCAF auto-derives
-# the Protobuf schema from the column types and registers it in SR under
-# subject `<topic>-value` on first INSERT).
-#
-# DDL is duplicated inline from flink/sql/cc/05_report_sinks.fql to give
-# each table its own `depends_on` chain. Keep that file in sync if you
-# change a sink shape — see the header comment in 05_report_sinks.fql.
+# Statement 4 — `isotope_raw` view over the three iso-* topics.
 # ---------------------------------------------------------------------------
 
-resource "confluent_flink_statement" "latency_report_sink" {
+resource "confluent_flink_statement" "isotope_raw_view" {
   statement = <<-EOT
-    CREATE TABLE IF NOT EXISTS latency_report_1m (
+    CREATE VIEW IF NOT EXISTS isotope_raw AS
+    SELECT
+        `$rowtime` AS `event_time`,
+        `headers`  AS `headers`
+    FROM `iso-start`
+    UNION ALL
+    SELECT
+        `$rowtime` AS `event_time`,
+        `headers`  AS `headers`
+    FROM `iso-mid`
+    UNION ALL
+    SELECT
+        `$rowtime` AS `event_time`,
+        `headers`  AS `headers`
+    FROM `iso-final`;
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [
+    confluent_flink_statement.alter_iso_start_add_headers,
+    confluent_flink_statement.alter_iso_mid_add_headers,
+    confluent_flink_statement.alter_iso_final_add_headers,
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# Statement 5 — `isotope` typed view (header decoder + per-record latency).
+# ---------------------------------------------------------------------------
+
+resource "confluent_flink_statement" "isotope_view" {
+  statement = <<-EOT
+    CREATE VIEW IF NOT EXISTS isotope AS
+    SELECT
+        CAST(`headers`['x-isotope-trace-id']                       AS STRING) AS trace_id,
+        CAST(CAST(`headers`['x-isotope-origin-ts']    AS STRING)   AS BIGINT) AS origin_ts_ms,
+        CAST(`headers`['x-isotope-origin-service']                 AS STRING) AS origin_service,
+        CAST(`headers`['x-isotope-this-service']                   AS STRING) AS this_service,
+        CAST(`headers`['x-isotope-this-topic']                     AS STRING) AS this_topic,
+        CAST(CAST(`headers`['x-isotope-hop-count']    AS STRING)   AS INT)    AS hop_count,
+        `event_time`,
+        TIMESTAMPDIFF(
+            MILLISECOND,
+            TO_TIMESTAMP_LTZ(
+                CAST(CAST(`headers`['x-isotope-origin-ts'] AS STRING) AS BIGINT),
+                3),
+            `event_time`
+        ) AS latency_ms
+    FROM isotope_raw
+    WHERE `headers`['x-isotope-trace-id'] IS NOT NULL;
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [confluent_flink_statement.isotope_raw_view]
+}
+
+# ---------------------------------------------------------------------------
+# Statements 6-11 — 6 sink tables. SR-framed Protobuf format is requested
+# via `sql.tables.kafka.{value,key}.format` statement-level properties
+# (see local.flink_statement_sink_properties). CCAF derives the Protobuf
+# schema from the column types and registers it in SR under subject
+# `<topic>-value` on first INSERT.
+# ---------------------------------------------------------------------------
+
+resource "confluent_flink_statement" "isotope_report_latency_1m" {
+  statement = <<-EOT
+    CREATE TABLE IF NOT EXISTS isotope_report_latency_1m (
         `window_start`    BIGINT,
         `window_end`      BIGINT,
         `origin_service`  STRING,
@@ -242,10 +348,7 @@ resource "confluent_flink_statement" "latency_report_sink" {
         `min_latency_ms`  BIGINT,
         `max_latency_ms`  BIGINT
     ) WITH (
-        'kafka.topic'    = 'isotope-report-latency-1m',
-        'value.format'   = 'protobuf-registry',
-        'key.format'     = 'protobuf-registry',
-        'changelog.mode' = 'append'
+        'value.format' = 'proto-registry'
     );
   EOT
 
@@ -263,17 +366,15 @@ resource "confluent_flink_statement" "latency_report_sink" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [
-    confluent_kafka_topic.isotope_report["isotope-report-latency-1m"],
-  ]
+  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-latency-1m"]]
 }
 
-resource "confluent_flink_statement" "topology_report_sink" {
+resource "confluent_flink_statement" "isotope_report_topology_1m" {
   statement = <<-EOT
-    CREATE TABLE IF NOT EXISTS topology_report_1m (
+    CREATE TABLE IF NOT EXISTS isotope_report_topology_1m (
         `window_start`     BIGINT,
         `window_end`       BIGINT,
         `origin_service`   STRING,
@@ -282,10 +383,7 @@ resource "confluent_flink_statement" "topology_report_sink" {
         `records`          BIGINT,
         `distinct_traces`  BIGINT
     ) WITH (
-        'kafka.topic'    = 'isotope-report-topology-1m',
-        'value.format'   = 'protobuf-registry',
-        'key.format'     = 'protobuf-registry',
-        'changelog.mode' = 'append'
+        'value.format' = 'proto-registry'
     );
   EOT
 
@@ -303,17 +401,15 @@ resource "confluent_flink_statement" "topology_report_sink" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [
-    confluent_kafka_topic.isotope_report["isotope-report-topology-1m"],
-  ]
+  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-topology-1m"]]
 }
 
-resource "confluent_flink_statement" "hop_distribution_sink" {
+resource "confluent_flink_statement" "isotope_report_hop_distribution_1m" {
   statement = <<-EOT
-    CREATE TABLE IF NOT EXISTS hop_distribution_1m (
+    CREATE TABLE IF NOT EXISTS isotope_report_hop_distribution_1m (
         `window_start`    BIGINT,
         `window_end`      BIGINT,
         `this_topic`      STRING,
@@ -321,10 +417,7 @@ resource "confluent_flink_statement" "hop_distribution_sink" {
         `records`         BIGINT,
         `distinct_traces` BIGINT
     ) WITH (
-        'kafka.topic'    = 'isotope-report-hop-distribution-1m',
-        'value.format'   = 'protobuf-registry',
-        'key.format'     = 'protobuf-registry',
-        'changelog.mode' = 'append'
+        'value.format' = 'proto-registry'
     );
   EOT
 
@@ -342,17 +435,15 @@ resource "confluent_flink_statement" "hop_distribution_sink" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [
-    confluent_kafka_topic.isotope_report["isotope-report-hop-distribution-1m"],
-  ]
+  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-hop-distribution-1m"]]
 }
 
-resource "confluent_flink_statement" "coverage_report_sink" {
+resource "confluent_flink_statement" "isotope_report_coverage_1m" {
   statement = <<-EOT
-    CREATE TABLE IF NOT EXISTS coverage_report_1m (
+    CREATE TABLE IF NOT EXISTS isotope_report_coverage_1m (
         `window_start`    BIGINT,
         `window_end`      BIGINT,
         `this_topic`      STRING,
@@ -360,10 +451,7 @@ resource "confluent_flink_statement" "coverage_report_sink" {
         `distinct_traces` BIGINT,
         `records`         BIGINT
     ) WITH (
-        'kafka.topic'    = 'isotope-report-coverage-1m',
-        'value.format'   = 'protobuf-registry',
-        'key.format'     = 'protobuf-registry',
-        'changelog.mode' = 'append'
+        'value.format' = 'proto-registry'
     );
   EOT
 
@@ -381,17 +469,15 @@ resource "confluent_flink_statement" "coverage_report_sink" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [
-    confluent_kafka_topic.isotope_report["isotope-report-coverage-1m"],
-  ]
+  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-coverage-1m"]]
 }
 
-resource "confluent_flink_statement" "stuck_trace_alerts_sink" {
+resource "confluent_flink_statement" "isotope_report_stuck_trace_1m" {
   statement = <<-EOT
-    CREATE TABLE IF NOT EXISTS stuck_trace_alerts_1m (
+    CREATE TABLE IF NOT EXISTS isotope_report_stuck_trace_1m (
         `trace_id`        STRING,
         `origin_service`  STRING,
         `last_service`    STRING,
@@ -400,10 +486,7 @@ resource "confluent_flink_statement" "stuck_trace_alerts_sink" {
         `last_seen_ts_ms` BIGINT,
         `stuck_for_ms`    BIGINT
     ) WITH (
-        'kafka.topic'    = 'isotope-report-stuck-trace-1m',
-        'value.format'   = 'protobuf-registry',
-        'key.format'     = 'protobuf-registry',
-        'changelog.mode' = 'append'
+        'value.format' = 'proto-registry'
     );
   EOT
 
@@ -421,93 +504,22 @@ resource "confluent_flink_statement" "stuck_trace_alerts_sink" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [
-    confluent_kafka_topic.isotope_report["isotope-report-stuck-trace-1m"],
-  ]
-}
-
-resource "confluent_flink_statement" "latency_percentiles_sink" {
-  statement = <<-EOT
-    CREATE TABLE IF NOT EXISTS latency_percentiles_flat_1m (
-        `window_start`   BIGINT,
-        `window_end`     BIGINT,
-        `origin_service` STRING,
-        `this_topic`     STRING,
-        `p50_ms`         DOUBLE,
-        `p95_ms`         DOUBLE,
-        `p99_ms`         DOUBLE,
-        `sample_count`   BIGINT
-    ) WITH (
-        'kafka.topic'    = 'isotope-report-latency-percentiles-1m',
-        'value.format'   = 'protobuf-registry',
-        'key.format'     = 'protobuf-registry',
-        'changelog.mode' = 'append'
-    );
-  EOT
-
-  properties    = local.flink_statement_properties
-  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
-
-  credentials {
-    key    = module.flink_api_key_rotation.active_api_key.id
-    secret = module.flink_api_key_rotation.active_api_key.secret
-  }
-
-  organization { id = data.confluent_organization.current.id }
-  environment { id = confluent_environment.isotope.id }
-  principal { id = confluent_service_account.flink_sql_runner.id }
-  compute_pool { id = confluent_flink_compute_pool.isotope.id }
-
-  lifecycle {
-    ignore_changes = [compute_pool]
-  }
-
-  depends_on = [
-    confluent_kafka_topic.isotope_report["isotope-report-latency-percentiles-1m"],
-  ]
+  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-stuck-trace-1m"]]
 }
 
 # ---------------------------------------------------------------------------
-# Statements 9-10 — CREATE FUNCTION for the two Phase-2 functions.
-# `${confluent_flink_artifact.isotope_udf.id}` is interpolated by HCL into
-# the `confluent-artifact://<id>` URI.
+# Statement 12 — CREATE FUNCTION for STUCK_TRACE_PTF (a ProcessTableFunction).
 #
-# The SQL shape matches flink/sql/cc/01_register_functions.fql which uses
-# `${artifact_id}` as a templatefile placeholder; here the HCL interpolation
-# fills it directly from the artifact resource.
+# LATENCY_PERCENTILES (an AggregateFunction / UDAF) is intentionally NOT
+# registered on CCAF — the platform rejects all UDAF registrations with
+# "aggregate functions are not supported" regardless of the accumulator
+# shape. The Java class still ships in the JAR for the CP runtime, which
+# has no such restriction (see flink/sql/cp/01_register_functions.fql and
+# flink/sql/cp/70_latency_percentiles_report.fql).
 # ---------------------------------------------------------------------------
-
-resource "confluent_flink_statement" "register_latency_percentiles" {
-  statement = <<-EOT
-    CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
-        AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesUDAF'
-        USING JAR 'confluent-artifact://${confluent_flink_artifact.isotope_udf.id}';
-  EOT
-
-  properties    = local.flink_statement_properties
-  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
-
-  credentials {
-    key    = module.flink_api_key_rotation.active_api_key.id
-    secret = module.flink_api_key_rotation.active_api_key.secret
-  }
-
-  organization { id = data.confluent_organization.current.id }
-  environment { id = confluent_environment.isotope.id }
-  principal { id = confluent_service_account.flink_sql_runner.id }
-  compute_pool { id = confluent_flink_compute_pool.isotope.id }
-
-  lifecycle {
-    ignore_changes = [compute_pool]
-  }
-
-  depends_on = [
-    confluent_flink_artifact.isotope_udf,
-  ]
-}
 
 resource "confluent_flink_statement" "register_stuck_trace_ptf" {
   statement = <<-EOT
@@ -530,28 +542,42 @@ resource "confluent_flink_statement" "register_stuck_trace_ptf" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [
-    confluent_flink_artifact.isotope_udf,
-  ]
+  depends_on = [confluent_flink_artifact.isotope_udf]
 }
 
 # ---------------------------------------------------------------------------
-# Statements 11-16 — 6 streaming INSERT INTO jobs from shared/. Each
-# templatefile() reads the canonical FQL the CP runtime uses, then
-# `replace()` strips the `SET 'pipeline.name' = '...';` line (CCAF
-# rejects SET; the job name is set per-resource via the CCAF
-# `statement_name` field or just left to auto-generate).
+# Statements 14-19 — 6 streaming INSERT INTO jobs. Same business logic as
+# the CP-side INSERTs in flink/sql/cp/{10,20,30,40,60,70}_*.fql; transcribed
+# here without the `SET 'pipeline.name'` directive (CCAF rejects SET in
+# submitted statements — it's a SQL-Client interactive command, not a Flink
+# SQL statement).
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "insert_latency_report" {
-  statement = replace(
-    file("${local.shared_sql_dir}/10_latency_report.fql"),
-    local.set_pipeline_name_regex,
-    ""
-  )
+  statement = <<-EOT
+    INSERT INTO isotope_report_latency_1m
+    SELECT
+        UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+        UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `origin_service`,
+        `this_topic`,
+        COUNT(*)                          AS `sample_count`,
+        COUNT(DISTINCT trace_id)          AS `distinct_traces`,
+        AVG(CAST(latency_ms AS DOUBLE))   AS `avg_latency_ms`,
+        CAST(MIN(latency_ms) AS BIGINT)   AS `min_latency_ms`,
+        CAST(MAX(latency_ms) AS BIGINT)   AS `max_latency_ms`
+    FROM TABLE(
+        TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+    )
+    GROUP BY
+        `window_start`,
+        `window_end`,
+        `origin_service`,
+        `this_topic`;
+  EOT
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -572,16 +598,31 @@ resource "confluent_flink_statement" "insert_latency_report" {
 
   depends_on = [
     confluent_flink_statement.isotope_view,
-    confluent_flink_statement.latency_report_sink,
+    confluent_flink_statement.isotope_report_latency_1m,
   ]
 }
 
 resource "confluent_flink_statement" "insert_topology_report" {
-  statement = replace(
-    file("${local.shared_sql_dir}/20_topology_report.fql"),
-    local.set_pipeline_name_regex,
-    ""
-  )
+  statement = <<-EOT
+    INSERT INTO isotope_report_topology_1m
+    SELECT
+        UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+        UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `origin_service`,
+        `this_service`            AS `producer_service`,
+        `this_topic`              AS `topic`,
+        COUNT(*)                  AS `records`,
+        COUNT(DISTINCT trace_id)  AS `distinct_traces`
+    FROM TABLE(
+        TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+    )
+    GROUP BY
+        `window_start`,
+        `window_end`,
+        `origin_service`,
+        `this_service`,
+        `this_topic`;
+  EOT
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -602,16 +643,29 @@ resource "confluent_flink_statement" "insert_topology_report" {
 
   depends_on = [
     confluent_flink_statement.isotope_view,
-    confluent_flink_statement.topology_report_sink,
+    confluent_flink_statement.isotope_report_topology_1m,
   ]
 }
 
 resource "confluent_flink_statement" "insert_hop_distribution" {
-  statement = replace(
-    file("${local.shared_sql_dir}/30_hop_distribution.fql"),
-    local.set_pipeline_name_regex,
-    ""
-  )
+  statement = <<-EOT
+    INSERT INTO isotope_report_hop_distribution_1m
+    SELECT
+        UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+        UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `this_topic`,
+        `hop_count`,
+        COUNT(*)                  AS `records`,
+        COUNT(DISTINCT trace_id)  AS `distinct_traces`
+    FROM TABLE(
+        TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+    )
+    GROUP BY
+        `window_start`,
+        `window_end`,
+        `this_topic`,
+        `hop_count`;
+  EOT
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -632,16 +686,29 @@ resource "confluent_flink_statement" "insert_hop_distribution" {
 
   depends_on = [
     confluent_flink_statement.isotope_view,
-    confluent_flink_statement.hop_distribution_sink,
+    confluent_flink_statement.isotope_report_hop_distribution_1m,
   ]
 }
 
 resource "confluent_flink_statement" "insert_coverage_report" {
-  statement = replace(
-    file("${local.shared_sql_dir}/40_coverage_report.fql"),
-    local.set_pipeline_name_regex,
-    ""
-  )
+  statement = <<-EOT
+    INSERT INTO isotope_report_coverage_1m
+    SELECT
+        UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+        UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `this_topic`,
+        `origin_service`,
+        COUNT(DISTINCT trace_id)  AS `distinct_traces`,
+        COUNT(*)                  AS `records`
+    FROM TABLE(
+        TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+    )
+    GROUP BY
+        `window_start`,
+        `window_end`,
+        `this_topic`,
+        `origin_service`;
+  EOT
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -662,16 +729,29 @@ resource "confluent_flink_statement" "insert_coverage_report" {
 
   depends_on = [
     confluent_flink_statement.isotope_view,
-    confluent_flink_statement.coverage_report_sink,
+    confluent_flink_statement.isotope_report_coverage_1m,
   ]
 }
 
 resource "confluent_flink_statement" "insert_stuck_trace_alerts" {
-  statement = replace(
-    file("${local.shared_sql_dir}/60_stuck_trace_report.fql"),
-    local.set_pipeline_name_regex,
-    ""
-  )
+  statement = <<-EOT
+    INSERT INTO isotope_report_stuck_trace_1m
+    SELECT
+        trace_id,
+        origin_service,
+        last_service,
+        last_topic,
+        last_hop_count,
+        last_seen_ts_ms,
+        stuck_for_ms
+    FROM TABLE(
+        STUCK_TRACE_PTF(
+            input   => TABLE isotope PARTITION BY trace_id,
+            on_time => DESCRIPTOR(event_time),
+            uid     => 'stuck-trace-v1'
+        )
+    );
+  EOT
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -692,38 +772,8 @@ resource "confluent_flink_statement" "insert_stuck_trace_alerts" {
 
   depends_on = [
     confluent_flink_statement.isotope_view,
-    confluent_flink_statement.stuck_trace_alerts_sink,
+    confluent_flink_statement.isotope_report_stuck_trace_1m,
     confluent_flink_statement.register_stuck_trace_ptf,
   ]
 }
 
-resource "confluent_flink_statement" "insert_latency_percentiles" {
-  statement = replace(
-    file("${local.shared_sql_dir}/70_latency_percentiles_report.fql"),
-    local.set_pipeline_name_regex,
-    ""
-  )
-
-  properties    = local.flink_statement_properties
-  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
-
-  credentials {
-    key    = module.flink_api_key_rotation.active_api_key.id
-    secret = module.flink_api_key_rotation.active_api_key.secret
-  }
-
-  organization { id = data.confluent_organization.current.id }
-  environment { id = confluent_environment.isotope.id }
-  principal { id = confluent_service_account.flink_sql_runner.id }
-  compute_pool { id = confluent_flink_compute_pool.isotope.id }
-
-  lifecycle {
-    ignore_changes = [compute_pool]
-  }
-
-  depends_on = [
-    confluent_flink_statement.isotope_view,
-    confluent_flink_statement.latency_percentiles_sink,
-    confluent_flink_statement.register_latency_percentiles,
-  ]
-}

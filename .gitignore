@@ -43,6 +43,7 @@ hs_err_pid*
 .terraform.lock.hcl
 tfplan.out
 tfplan
+*.tfstate.lock.info
 
 # Downloaded dependencies
 .cache/
@@ -55,15 +56,8 @@ __pycache__/
 .ruff_cache/
 
 # Environment/secrets
-.ptf_udf
 *.pem
 
 .claude/
 
 scratch.pad
-
-# Live CC topic dumps from `make dump-cc-topic` — may be large and may
-# carry real customer identifiers. Regenerate on demand instead of committing.
-sample_data/streaming__timeseries__filtered_for_poc.csv
-sample_data/streaming__timeseries__filtered_for_poc.csv.gz
-sample_data/streaming__timeseries__filtered_for_poc.jsonl

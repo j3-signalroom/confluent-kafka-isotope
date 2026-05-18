@@ -143,7 +143,7 @@ if [ "${create_action}" = true ]; then
     terraform apply -auto-approve -input=false
 
     echo
-    print_info "Deploy complete. Useful outputs:"
+    print_info "Deploy complete. Non-sensitive outputs:"
     terraform output environment_id
     terraform output kafka_cluster_id
     terraform output kafka_bootstrap_servers
@@ -151,18 +151,21 @@ if [ "${create_action}" = true ]; then
     terraform output compute_pool_id
     terraform output artifact_id
     echo
-    print_info "Sensitive outputs (Kafka API key/secret) — view with:"
-    print_info "    terraform -chdir=${TERRAFORM_DIR} output -raw kafka_api_key"
-    print_info "    terraform -chdir=${TERRAFORM_DIR} output -raw kafka_api_secret"
+
+    # ----------------------------------------------------------------------
+    # Smoke-load scripts/cc-cli-env.sh so the user sees the masked-credential
+    # summary before being told to source it themselves. Running it here is
+    # a subshell — the exports do NOT propagate to the parent shell that
+    # invoked `make cc-flink-reports-up`. The user still has to source it.
+    # ----------------------------------------------------------------------
+    print_step "Sanity-loading scripts/cc-cli-env.sh (subshell)"
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/cc-cli-env.sh" || print_warn "cc-cli-env.sh exited non-zero (see above)"
+
     echo
-    print_info "Point the demo CLI at the new cluster:"
-    print_info "    BOOTSTRAP=\$(terraform -chdir=${TERRAFORM_DIR} output -raw kafka_bootstrap_servers)"
-    print_info "    SR_URL=\$(terraform -chdir=${TERRAFORM_DIR} output -raw schema_registry_url)"
-    print_info "    KEY=\$(terraform -chdir=${TERRAFORM_DIR} output -raw kafka_api_key)"
-    print_info "    SECRET=\$(terraform -chdir=${TERRAFORM_DIR} output -raw kafka_api_secret)"
-    print_info "    # CCAF requires SASL_SSL — extend App.java to read the relevant"
-    print_info "    # -D properties (security.protocol, sasl.mechanism, sasl.jaas.config)"
-    print_info "    # before pointing it at \$BOOTSTRAP."
+    print_info "Next step — source the helper in your own shell to export the env vars:"
+    print_info "    source scripts/cc-cli-env.sh"
+    print_info "Then drive the 3-stage demo (see README § 3.5)."
 else
     print_step "terraform destroy"
     terraform destroy -auto-approve -input=false

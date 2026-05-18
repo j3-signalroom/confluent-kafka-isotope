@@ -19,9 +19,9 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
   - [3.2 Demo CLI — see one trace propagate live](#32-demo-cli--see-one-trace-propagate-live)
   - [3.3 Integration tests (live Kafka via Minikube)](#33-integration-tests-live-kafka-via-minikube)
   - [3.4 Flink SQL reports on Minikube](#34-flink-sql-reports-on-minikube)
-  - [3.4.1 Format-by-domain](#341-format-by-domain)
-- [3.5 Flink SQL reports on Confluent Cloud (CCAF)](#35-flink-sql-reports-on-confluent-cloud-ccaf)
-- [3.6 Recommended path the first time through](#36-recommended-path-the-first-time-through)
+    - [3.4.1 Format-by-domain](#341-format-by-domain)
+  - [3.5 Flink SQL reports on Confluent Cloud (CCAF)](#35-flink-sql-reports-on-confluent-cloud-ccaf)
+  - [3.6 Recommended path the first time through](#36-recommended-path-the-first-time-through)
 <!-- tocstop -->
 
 ---
@@ -65,14 +65,13 @@ ptf/                                    Phase 2 — Flink PTF + UDAF shadow JAR
 flink/sql/                              Flink SQL reports — identical on
                                         CCAF and CP Flink except source DDL
   cp/                                   CP Flink: 00_source_table, 01_register_functions,
-                                        05_report_sinks (avro-confluent), 99_teardown
-  cc/                                   CCAF: 00_source_table (view over auto-registered
-                                        topic), 01_register_functions (confluent-artifact:// JAR)
-  shared/                               05_isotope_view + 6 INSERT INTO reports
-                                        (10_latency, 20_topology, 30_hop_distribution,
-                                        40_coverage, 60_stuck_trace, 70_latency_percentiles)
+                                        05_isotope_view, 05_report_sinks (avro-confluent),
+                                        10/20/30/40/60/70 INSERT INTO reports, 99_teardown
+                                        (CCAF SQL is inlined under terraform/setup-confluent-flink.tf;
+                                        CP SQL is hardcoded in flink/sql/cp/.)
 k8s/base/                               CFK Kafka/SR/Connect/ksqlDB/C3 manifests
-scripts/                                port-forward helpers, deploy-flink-reports.sh
+scripts/                                port-forward helpers, deploy-cp-flink-reports.sh,
+                                        deploy-cc-flink-reports.sh
 Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ```
 
@@ -219,9 +218,49 @@ terraform -chdir=terraform output -raw kafka_api_key     # sensitive
 terraform -chdir=terraform output -raw kafka_api_secret  # sensitive
 ```
 
-**Format-by-runtime (not -by-domain).** The CP runtime ships `avro-confluent` but no SR-Protobuf, so [§ 3.4](#34-flink-sql-reports-on-minikube)'s reports land on Avro+SR. CCAF ships SR-Protobuf as a first-class Flink format (`protobuf-registry`), so the CCAF sinks land on **Protobuf+SR**. The shared `INSERT INTO` statements in [flink/sql/shared/](flink/sql/shared/) are byte-identical across CP and CCAF — only the per-environment sink DDL differs in format. See [flink/sql/cc/05_report_sinks.fql](flink/sql/cc/05_report_sinks.fql) for the CCAF sink shapes.
+**Format-by-runtime (not -by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [flink/sql/cp/05_report_sinks.fql](flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [flink/sql/cp/](flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
 
-**Driving traffic.** The current demo CLI (App.java) defaults to localhost-no-auth Kafka, so pointing it at CCAF needs SASL_SSL + SR basic auth wired into [`App.java`](app/src/main/java/ai/signalroom/kafka/isotope/App.java) — explicitly out of scope for this CC deploy. For now you can drive the reports by either (a) the [Confluent CLI](https://docs.confluent.io/confluent-cli/current/command-reference/kafka/topic/confluent_kafka_topic_produce.html) `kafka topic produce` against the iso-* topics, or (b) any Kafka producer with the isotope JAR on its classpath and the SASL config above.
+**CCAF UDAF limitation.** CCAF currently rejects all `CREATE FUNCTION` statements for user-defined aggregate functions ("aggregate functions are not supported"). The `LATENCY_PERCENTILES` UDAF — Phase-2 of the project — therefore deploys on CP only; the percentile report (`latency_percentiles_flat_1m`) does not exist on CCAF. The other Phase-2 function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not a UDAF), works on both runtimes. The JAR itself is portable — `LatencyPercentilesUDAF` ships with a byte[]-based accumulator and is ready to register when Confluent lifts the restriction. The five CCAF reports are: `latency` (avg/min/max), `topology`, `hop_distribution`, `coverage`, `stuck_trace`.
+
+**Driving traffic — the 3-stage demo against CCAF.** [App.java](app/src/main/java/ai/signalroom/kafka/isotope/App.java) reads four optional `-D` properties (`kafka.security.protocol`, `kafka.sasl.mechanism`, `kafka.sasl.jaas.config`, `schema.registry.basic.auth.user.info`) that default to plaintext-no-auth for Minikube. [scripts/cc-cli-env.sh](scripts/cc-cli-env.sh) pulls the Kafka + Schema-Registry credentials from `terraform output` (both keys are rotated by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf)) and builds the JAAS string.
+
+The thin wrapper [scripts/cc-app-run.sh](scripts/cc-app-run.sh) sources the env helper then invokes `./gradlew :app:run` with the six `-D` flags — pass it the same `send` / `hop` / `sink` args you'd give App.java:
+
+```bash
+# Four terminals (same A/B/C/D order as § 3.2). No manual env exports —
+# the wrapper sources cc-cli-env.sh, which pulls everything from terraform.
+scripts/cc-app-run.sh sink iso-final                # A
+scripts/cc-app-run.sh hop iso-mid iso-final svc-C   # B
+scripts/cc-app-run.sh hop iso-start iso-mid svc-B   # C
+scripts/cc-app-run.sh send iso-start svc-A 'hello'  # D
+```
+
+The wrapper hard-fails with a clear message if any of the seven required values is missing, so you'll never silently hand gradle empty `-D` values.
+
+Terminal A prints the same `trace_id` across all three hops, and the CCAF report INSERTs populate as you fire Terminal D — `SELECT * FROM isotope_report_latency_1m` etc. in the Cloud Console SQL workspace.
+
+**Sustained traffic — required to see report rows.** The five INSERT INTO jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, and a tumbling window only emits when the watermark advances past `window_end`. A handful of records bursted from Terminal D within a single 1-minute interval will sit in one open window forever (the most-recent record is the watermark, and it never gets older than itself). Spread traffic across **multiple** windows so the watermark crosses each boundary:
+
+```bash
+# 30 records spaced 5s apart ≈ 2.5 minutes of event-time → spans 3+ windows
+for i in {1..30}; do
+  scripts/cc-app-run.sh send iso-start svc-A "burst-$i"
+  sleep 5
+done
+```
+
+Wait ~90 seconds after the *last* record before checking `isotope_report_latency_1m` (and friends) — that's the watermark catching up. The `stuck_trace_alerts_1m` sink only fires for traces that go ≥60s of event time without a fresh hop, so the burst above won't trigger it (every trace gets one record and ends — no stalled in-flight state). To exercise `STUCK_TRACE_PTF`: send a single record to `iso-start` and don't run the `svc-B` / `svc-C` hops, then keep sending unrelated records elsewhere so the watermark advances past the stuck trace's `event_time + 60s`.
+
+> **Tip — auto-source after apply.** `make cc-flink-reports-up` runs in its own subshell, so it can't export env vars back into yours. Add this to your `~/.zshrc` / `~/.bashrc` for a one-liner that applies and exports:
+> ```bash
+> cc-up() {
+>   make cc-flink-reports-up "$@" && source scripts/cc-cli-env.sh
+> }
+> cc-down() {
+>   make cc-flink-reports-down "$@" && unset BOOTSTRAP SR_URL KAFKA_KEY KAFKA_SECRET SR_KEY SR_SECRET JAAS
+> }
+> # then:  cc-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
+> ```
 
 **Teardown:**
 

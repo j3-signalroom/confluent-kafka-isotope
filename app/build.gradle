@@ -66,6 +66,17 @@ tasks.named('run', JavaExec) {
     systemProperty 'org.slf4j.simpleLogger.log.io.confluent',                             'error'
     systemProperty 'org.slf4j.simpleLogger.showThreadName',                               'false'
     systemProperty 'org.slf4j.simpleLogger.showDateTime',                                 'false'
+
+    // Forward kafka.* and schema.registry.* -D flags from the gradle CLI
+    // through to the forked application JVM so App.java's
+    // System.getProperty() calls actually see them. By default JavaExec
+    // does NOT inherit gradle's system properties.
+    System.getProperties().each { k, v ->
+        def key = k.toString()
+        if (key.startsWith('kafka.') || key.startsWith('schema.registry.')) {
+            systemProperty key, v.toString()
+        }
+    }
 }
 
 tasks.named('test') {

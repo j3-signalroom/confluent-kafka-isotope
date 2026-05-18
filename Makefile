@@ -468,11 +468,11 @@ flink-delete: ## Delete the Flink session cluster (safe to run even if cluster i
 
 .PHONY: flink-reports-up
 flink-reports-up: ## Build PTF/UDAF JAR, upload to JM pod, register source + reports (Phase 1 + 2)
-	@$(mkfile_dir)scripts/deploy-flink-reports.sh up
+	@$(mkfile_dir)scripts/deploy-cp-flink-reports.sh up
 
 .PHONY: flink-reports-down
 flink-reports-down: ## Drop the registered reports / views / functions (safe to run repeatedly)
-	@$(mkfile_dir)scripts/deploy-flink-reports.sh down
+	@$(mkfile_dir)scripts/deploy-cp-flink-reports.sh down
 
 # ------------------------------------------------------------------------------
 # Confluent Cloud for Apache Flink (CCAF) — Terraform-driven deploy

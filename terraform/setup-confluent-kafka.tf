@@ -40,6 +40,39 @@ module "kafka_api_key_rotation" {
   ]
 }
 
+# Rotating Schema Registry API key pair owned by the same service account.
+# The demo CLI (App.java) and any external Kafka client using the SR
+# Protobuf serializer needs an SR basic-auth credential — `cc-cli-env.sh`
+# reads these via `terraform output` so users no longer have to mint an SR
+# API key manually in the Cloud Console.
+module "sr_api_key_rotation" {
+  source = "github.com/j3-signalroom/iac-confluent-api_key_rotation-tf_module"
+
+  owner = {
+    id          = confluent_service_account.flink_sql_runner.id
+    api_version = confluent_service_account.flink_sql_runner.api_version
+    kind        = confluent_service_account.flink_sql_runner.kind
+  }
+
+  resource = {
+    id          = data.confluent_schema_registry_cluster.isotope.id
+    api_version = data.confluent_schema_registry_cluster.isotope.api_version
+    kind        = data.confluent_schema_registry_cluster.isotope.kind
+
+    environment = {
+      id = confluent_environment.isotope.id
+    }
+  }
+
+  key_display_name             = "SR Service Account API Key - {date} - Managed by Terraform (confluent-kafka-isotope)"
+  number_of_api_keys_to_retain = var.number_of_api_keys_to_retain
+  day_count                    = var.day_count
+
+  depends_on = [
+    confluent_role_binding.flink_sql_runner_schema_registry_access
+  ]
+}
+
 # ---------------------------------------------------------------------------
 # Topics — explicit confluent_kafka_topic resources so `terraform destroy`
 # tears them down. Three isotope event topics (demo CLI writes DemoEvent
