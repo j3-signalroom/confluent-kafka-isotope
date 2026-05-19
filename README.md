@@ -1,8 +1,8 @@
 # Confluent Kafka Isotope
 
-An example of using Kafka **consumer and producer interceptors** to tag every message with a tracer — an *isotope* — that carries through every hop of a multi-topic pipeline. Apache Flink consumes the tagged records and reports on what the isotopes reveal: **end-to-end latency**, **hop topology**, **drop/duplication rates**, and **pipeline coverage**.
+An example of using a Kafka **producer interceptor** to tag every message with a tracer — an *isotope* — that carries through every hop of a multi-topic pipeline. Consume-then-produce services adopt the inbound trace into thread-local with one explicit call (`IsotopeContext.adoptFromRecord(record)`) between consume and produce; the next `send()` then appends a fresh hop automatically. Apache Flink consumes the tagged records and reports on what the isotopes reveal: **end-to-end latency**, **hop topology**, **drop/duplication rates**, and **pipeline coverage**.
 
-A **portability requirement** runs through this project: the same isotope mechanism must work against both **Confluent Cloud for Apache Flink (CCAF)** (managed) and **Confluent Platform for Apache Flink** (self-managed) — both used here via Table API SQL plus uploaded UDF/PTF JARs (no DataStream code on either side). Three decisions follow from that: tagging happens in the Kafka **producer/consumer interceptors** (the one extension point both runtimes share via the broker), the on-wire **header** format is **JSON** (so Flink SQL can read the scalar fields with `CAST(headers[…] AS STRING)` and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`, `StuckTracePTF`) ship as a single JAR that registers identically on either runtime.
+A **portability requirement** runs through this project: the same isotope mechanism must work against both **Confluent Cloud for Apache Flink (CCAF)** (managed) and **Confluent Platform for Apache Flink** (self-managed) — both used here via Table API SQL plus uploaded UDF/PTF JARs (no DataStream code on either side). Three decisions follow from that: tagging happens in a Kafka **producer interceptor** (the one extension point both runtimes share via the broker), the on-wire **header** format is **JSON** (so Flink SQL can read the scalar fields with `CAST(headers[…] AS STRING)` and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`, `StuckTracePTF`) ship as a single JAR that registers identically on either runtime.
 
 One asymmetry the runtimes don't share: **Flink-native SR-Protobuf**. CCAF supports SR-framed Protobuf as a Flink sink format via its topic catalog; Apache Flink open-source (the CP Flink runtime) ships `avro-confluent` but no SR-Protobuf counterpart. So Flink *report sinks* land on **Avro+SR on CP** and can be **Protobuf+SR on CCAF** — a runtime constraint, not a project preference. The demo *event* topics (next paragraph) are unaffected because they're written by the Kafka producer client, not by Flink.
 
@@ -40,25 +40,27 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
 
 A producer with the isotope interceptor loaded appends one hop on every `send()`. A consume-then-produce service calls `IsotopeContext.adoptFromRecord(record)` between consume and produce so the trace ID and origin survive the hop.
 
-**How the interceptors actually get invoked.** Application code never calls `onSend` / `onConsume` / `onAcknowledgement` / `onCommit` directly — the Kafka client invokes them by reflection once two things are in place:
+**How the producer interceptor gets invoked.** Application code never calls `onSend` / `onAcknowledgement` directly — the Kafka client invokes them by reflection once two things are in place:
 
-1. **Register the class in client config.** Put `IsotopeProducerInterceptor.class.getName()` under `interceptor.classes` on the producer ([App.java:185](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L185), [App.java:250](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L250), [IsotopeTestHarness.java:96](app/src/integrationTest/java/ai/signalroom/kafka/isotope/IsotopeTestHarness.java#L96)) and `IsotopeConsumerInterceptor.class.getName()` on the consumer ([IsotopeTestHarness.java:127](app/src/integrationTest/java/ai/signalroom/kafka/isotope/IsotopeTestHarness.java#L127)). The `KafkaProducer` / `KafkaConsumer` constructor instantiates the interceptor and owns its lifecycle.
-2. **Call `producer.send(...)` / `consumer.poll(...)` as normal.** Every `send()` triggers `onSend` (caller thread, before serialization) and later `onAcknowledgement` (producer I/O thread, after broker ack or failure). Every `poll()` triggers `onConsume` (caller thread, after fetch decode, before records are returned). `onCommit` fires only on auto-commit or an explicit `commitSync` / `commitAsync` — this project uses neither.
+1. **Register the class in producer config.** Put `IsotopeProducerInterceptor.class.getName()` under `interceptor.classes` ([App.java:185](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L185), [App.java:250](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L250), [IsotopeTestHarness.java:96](app/src/integrationTest/java/ai/signalroom/kafka/isotope/IsotopeTestHarness.java#L96)). The `KafkaProducer` constructor instantiates the interceptor and owns its lifecycle.
+2. **Call `producer.send(...)` as normal.** Every `send()` triggers `onSend` (caller thread, before serialization) and later `onAcknowledgement` (producer I/O thread, after broker ack or failure).
 
-The exact call sites in `kafka-clients` 4.2.0: `KafkaProducer.send` invokes `interceptors.onSend` ([line 950](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L950)) and `AppendCallbacks.onCompletion` invokes `interceptors.onAcknowledgement` ([line 1600](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1600)); `ClassicKafkaConsumer.poll` ([line 662](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/consumer/internals/ClassicKafkaConsumer.java#L662)) and `AsyncKafkaConsumer.poll` ([line 875](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/consumer/internals/AsyncKafkaConsumer.java#L875)) invoke `interceptors.onConsume`. Exceptions thrown by any interceptor are caught and logged by the client's fan-out wrapper — they never break the `send` / `poll` call.
+The exact call sites in `kafka-clients` 4.2.0: `KafkaProducer.send` invokes `interceptors.onSend` ([line 950](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L950)) and `AppendCallbacks.onCompletion` invokes `interceptors.onAcknowledgement` ([line 1600](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1600)). Exceptions thrown by the interceptor are caught and logged by the client's fan-out wrapper — they never break the `send` call.
+
+**Consumer-side adoption is explicit, not an interceptor.** A `ConsumerInterceptor.onConsume` sees a whole batch from `poll()`, but the application processes records one at a time, so a thread-local snapshot from the batch would be ambiguous. Instead, services call `IsotopeContext.adoptFromRecord(record)` per record between consume and produce. The next `send()` then sees that thread-local and appends a new hop. This project ships no consumer interceptor at all — the producer interceptor plus per-record adoption is the entire mechanism.
 
 ## **2.0 Architecture**
 
-A bird's-eye view of the moving parts. The JVM library in [app/](app/) registers two Kafka client interceptors that put the isotope into record headers and lift it back out; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube applies `.fql` files under [scripts/flink/sql/cp/](scripts/flink/sql/cp/), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The Phase-2 shadow JAR from [ptf/](ptf/) registers identically on both. (Kafka is drawn once below for clarity — each runtime provisions its own cluster.)
+A bird's-eye view of the moving parts. The JVM library in [app/](app/) registers a Kafka producer interceptor that stamps the isotope into record headers on every `send()`; consume-then-produce services adopt the inbound trace via an explicit `IsotopeContext.adoptFromRecord(record)` call; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube applies `.fql` files under [scripts/flink/sql/cp/](scripts/flink/sql/cp/), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The Phase-2 shadow JAR from [ptf/](ptf/) registers identically on both. (Kafka is drawn once below for clarity — each runtime provisions its own cluster.)
 
 ```mermaid
 flowchart TB
     subgraph App["app/ — JVM library + demo CLI"]
         Svc["App.java<br/>send · hop · sink modes<br/>(or your real services)"]
         IPI["IsotopeProducerInterceptor<br/>stamps UUIDv7 trace ID<br/>+ appends hop on every send()"]
-        ICI["IsotopeConsumerInterceptor<br/>+ IsotopeContext.adoptFromRecord()"]
+        Adopt["IsotopeContext.adoptFromRecord()<br/>explicit per-record adoption<br/>between consume and produce"]
         Svc -- "producer.interceptor.classes" --> IPI
-        Svc -- "consumer.interceptor.classes" --> ICI
+        Svc -- "calls per record" --> Adopt
     end
 
     subgraph Kafka["Kafka event topics — Protobuf+SR DemoEvent values; isotope rides in record headers"]
@@ -66,7 +68,7 @@ flowchart TB
     end
 
     IPI -- "produce (x-isotope JSON + 6 scalar headers)" --> Kafka
-    Kafka -- "consume" --> ICI
+    Kafka -- "consume + adopt" --> Adopt
 
     subgraph PTF["ptf/ — isotope-flink-udf shadow JAR"]
         UDAF["LatencyPercentilesUDAF<br/>T-Digest p50/p95/p99"]
@@ -122,11 +124,10 @@ app/                                    isotope JVM library + demo CLI + tests
     IsotopeContext.java                 ThreadLocal + adoptFromRecord()
     IsotopeProducerInterceptor.java     stamps/appends x-isotope + 6 scalar
                                         reporting headers on send()
-    IsotopeConsumerInterceptor.java     batch-aware logging; no auto-propagation
     App.java                            demo CLI — send / hop / sink modes
   src/test/java/.../                    IsotopeCodecTest (no broker needed)
   src/integrationTest/java/.../         BrokerSmokeIT, ProducerInterceptorIT,
-                                        ConsumerInterceptorIT, ThreeStageHopPropagationIT,
+                                        ThreeStageHopPropagationIT,
                                         IsotopeTestHarness — live-broker tests; produce/consume
                                         DemoEvent via SR-framed Protobuf
                                         (need Minikube CP + SR port-forwarded)
@@ -230,7 +231,7 @@ make kafka-pf-up                     # localhost:30092 → Kafka, localhost:8081
 Then run the suite:
 
 ```bash
-./gradlew :app:integrationTest                                          # all 5 tests
+./gradlew :app:integrationTest                                          # all 3 tests
 ./gradlew :app:integrationTest --tests '*ProducerInterceptorIT'         # just one
 ```
 
@@ -253,9 +254,8 @@ The integration tests cover:
 | Test | What it verifies |
 |---|---|
 | `BrokerSmokeIT` | AdminClient can create/list/delete a topic via the NodePort port-forward |
-| `ProducerInterceptorIT` | A bare consumer sees the `x-isotope` JSON header + all 6 scalar reporting headers with the expected origin/hop values, and the Protobuf round-trip preserves `DemoEvent.source` / `payload` |
-| `ConsumerInterceptorIT` | `IsotopeContext.adoptFromRecord` extracts isotope into thread-local on tagged records; clears the thread-local for untagged records |
-| `ThreeStageHopPropagationIT` | `svc-A → topic-AB → svc-B → topic-BC → svc-C` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `svc-A`, this = `svc-B`, hop count = 2) at the terminal |
+| `ProducerInterceptorIT` | A consumer sees the `x-isotope` JSON header + all 6 scalar reporting headers with the expected origin/hop values, and the Protobuf round-trip preserves `DemoEvent.source` / `payload` |
+| `ThreeStageHopPropagationIT` | `svc-A → topic-AB → svc-B → topic-BC → svc-C` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `svc-A`, this = `svc-B`, hop count = 2) at the terminal; consume-then-produce hops use `IsotopeContext.adoptFromRecord` to carry the trace forward |
 
 ### **4.4 Flink SQL reports on Confluent Platform for Apache Flink (Minikube)**
 

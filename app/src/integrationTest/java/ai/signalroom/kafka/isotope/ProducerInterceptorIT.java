@@ -42,7 +42,7 @@ class ProducerInterceptorIT {
                 }
 
                 try (KafkaConsumer<byte[], DemoEvent> consumer =
-                         IsotopeTestHarness.bareConsumer("grp-" + topic)) {
+                         IsotopeTestHarness.consumer("grp-" + topic)) {
                     consumer.subscribe(List.of(topic));
                     ConsumerRecords<byte[], DemoEvent> records =
                         consumer.poll(IsotopeTestHarness.POLL_TIMEOUT);
