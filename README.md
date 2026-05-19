@@ -231,7 +231,7 @@ make kafka-pf-up                     # localhost:30092 → Kafka, localhost:8081
 Then run the suite:
 
 ```bash
-./gradlew :app:integrationTest                                          # all 3 tests
+./gradlew :app:integrationTest                                          # every IT below
 ./gradlew :app:integrationTest --tests '*ProducerInterceptorIT'         # just one
 ```
 
