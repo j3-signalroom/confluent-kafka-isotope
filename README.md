@@ -51,7 +51,7 @@ The exact call sites in `kafka-clients` 4.2.0: `KafkaProducer.send` invokes `int
 
 ## **2.0 Architecture**
 
-A bird's-eye view of the moving parts. The JVM library in [app/](app/) registers a Kafka producer interceptor that stamps the isotope into record headers on every `send()`; consume-then-produce services adopt the inbound trace via an explicit `IsotopeContext.adoptFromRecord(record)` call; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube applies `.fql` files under [scripts/flink/sql/cp/](scripts/flink/sql/cp/), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The Phase-2 shadow JAR from [ptf/](ptf/) registers identically on both. (Kafka is drawn once below for clarity — each runtime provisions its own cluster.)
+A bird's-eye view of the moving parts. The JVM library in [app/](app/) registers a Kafka producer interceptor that stamps the isotope into record headers on every `send()`; consume-then-produce services adopt the inbound trace via an explicit `IsotopeContext.adoptFromRecord(record)` call; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube applies `.fql` files under [scripts/flink/sql/cp/](scripts/flink/sql/cp/), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The shadow JAR from [ptf/](ptf/) (which powers two of the six reports) registers identically on both. (Kafka is drawn once below for clarity — each runtime provisions its own cluster.)
 
 ```mermaid
 flowchart TB
@@ -131,7 +131,7 @@ app/                                    isotope JVM library + demo CLI + tests
                                         IsotopeTestHarness — live-broker tests; produce/consume
                                         DemoEvent via SR-framed Protobuf
                                         (need Minikube CP + SR port-forwarded)
-ptf/                                    Phase 2 — Flink PTF + UDAF shadow JAR
+ptf/                                    Flink PTF + UDAF shadow JAR (powers 2 of 6 reports)
   src/main/java/ai/signalroom/kafka/isotope/flink/
     LatencyPercentilesUDAF.java         T-Digest p50/p95/p99 aggregate
     StuckTracePTF.java                  per-trace state + event-time timer
@@ -259,7 +259,7 @@ The integration tests cover:
 
 ### **4.4 Flink SQL reports on Confluent Platform for Apache Flink (Minikube)**
 
-The four Phase-1 reports plus the Phase-2 PTF and UDAF reports — six in total — run against a Flink session cluster managed by the Confluent Flink Kubernetes Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see **[§ 4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)** for that path; this section is the local-Minikube path.
+The four pure-SQL reports plus the two JAR-backed reports (one PTF, one UDAF) — six in total — run against a Flink session cluster managed by the Confluent Flink Kubernetes Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see **[§ 4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)** for that path; this section is the local-Minikube path.
 
 **Bring up Flink:**
 
@@ -325,7 +325,7 @@ terraform -chdir=terraform output -raw kafka_api_secret  # sensitive
 
 **Format-by-runtime (not -by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
 
-**CCAF UDAF limitation.** CCAF currently rejects all `CREATE FUNCTION` statements for user-defined aggregate functions ("aggregate functions are not supported"). The `LATENCY_PERCENTILES` UDAF — Phase-2 of the project — therefore deploys on CP only; the percentile report (`latency_percentiles_flat_1m`) does not exist on CCAF. The other Phase-2 function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not a UDAF), works on both runtimes. The JAR itself is portable — `LatencyPercentilesUDAF` ships with a byte[]-based accumulator and is ready to register when Confluent lifts the restriction. The five CCAF reports are: `latency` (avg/min/max), `topology`, `hop_distribution`, `coverage`, `stuck_trace`.
+**CCAF UDAF limitation.** CCAF currently rejects all `CREATE FUNCTION` statements for user-defined aggregate functions ("aggregate functions are not supported"). The `LATENCY_PERCENTILES` UDAF therefore deploys on CP only; the percentile report (`latency_percentiles_flat_1m`) does not exist on CCAF. The other JAR-backed function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not a UDAF), works on both runtimes. The JAR itself is portable — `LatencyPercentilesUDAF` ships with a byte[]-based accumulator and is ready to register when Confluent lifts the restriction. The five CCAF reports are: `latency` (avg/min/max), `topology`, `hop_distribution`, `coverage`, `stuck_trace`.
 
 **Driving traffic — the 3-stage demo against CCAF.** [App.java](app/src/main/java/ai/signalroom/kafka/isotope/App.java) reads four optional `-D` properties (`kafka.security.protocol`, `kafka.sasl.mechanism`, `kafka.sasl.jaas.config`, `schema.registry.basic.auth.user.info`) that default to plaintext-no-auth for Minikube. [scripts/cc-cli-env.sh](scripts/cc-cli-env.sh) pulls the Kafka + Schema-Registry credentials from `terraform output` (both keys are rotated by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf)) and builds the JAAS string.
 

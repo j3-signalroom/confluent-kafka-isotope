@@ -10,7 +10,7 @@
 --
 -- Coarse — same-window drift (trace produced at 59.9s, consumed at
 -- 60.1s lands in different buckets) is noise. For dispatchable alerts,
--- use the Phase 2 stuck-trace PTF (session-windowed, keyed by
+-- use the JAR-backed stuck-trace PTF (session-windowed, keyed by
 -- trace_id, with explicit lateness).
 --
 -- Sinks into `coverage_report_1m` (Kafka, Avro+SR).

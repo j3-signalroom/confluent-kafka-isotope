@@ -1,5 +1,5 @@
 -- =====================================================================
--- Register Phase 2 functions — Confluent Platform Flink (CMF on Minikube)
+-- Register the JAR-backed functions — Confluent Platform Flink (CMF on Minikube)
 --
 -- Prereqs:
 --   ./gradlew :ptf:shadowJar

@@ -467,7 +467,7 @@ flink-delete: ## Delete the Flink session cluster (safe to run even if cluster i
 		|| echo "→ Flink cluster not found or API server unreachable, skipping."
 
 .PHONY: flink-reports-up
-flink-reports-up: ## Build PTF/UDAF JAR, upload to JM pod, register source + reports (Phase 1 + 2)
+flink-reports-up: ## Build PTF/UDAF JAR, upload to JM pod, register source + reports (pure-SQL + JAR-backed)
 	@$(mkfile_dir)scripts/deploy-cp-flink-reports.sh up
 
 .PHONY: flink-reports-down

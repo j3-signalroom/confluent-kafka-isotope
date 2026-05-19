@@ -1,1 +1,1 @@
-Copyright (c) 2026 Life360, Inc.
+Copyright (c) 2026 Jeffrey Jonathan Jennings
