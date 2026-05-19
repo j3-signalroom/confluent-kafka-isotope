@@ -20,7 +20,7 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
   - [3.3 Integration tests (live Kafka via Minikube)](#33-integration-tests-live-kafka-via-minikube)
   - [3.4 Flink SQL reports on Confluent Platform (Minikube)](#34-flink-sql-reports-on-confluent-platform-minikube)
     - [3.4.1 Format-by-domain](#341-format-by-domain)
-  - [3.5 Flink SQL reports on Confluent Cloud (CCAF)](#35-flink-sql-reports-on-confluent-cloud-ccaf)
+  - [3.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)](#35-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)
   - [3.6 Recommended path the first time through](#36-recommended-path-the-first-time-through)
 <!-- tocstop -->
 
@@ -177,13 +177,13 @@ make flink-reports-up
 
 The demo *event* topics (`iso_start`, `iso_mid`, `iso_final`) still ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's unchanged. The *report* topics ride **Avro+SR** because cp-flink doesn't ship an SR-integrated Protobuf format and CMF (which does) disallows the UDAFs the percentiles report needs. Events from the app are Protobuf; aggregates from Flink are Avro. Two formats by domain — a clean split, not a defect.
 
-### **3.5 Flink SQL reports on Confluent Cloud (CCAF)**
+### **3.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**
 
 CCAF parallel of [§ 3.4](#34-flink-sql-reports-on-minikube), driven by Terraform under [terraform/](terraform/). One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, 9 topics (3 isotope event + 6 report sinks), a Flink compute pool, a rotating service-account API key pair, the PTF/UDAF JAR uploaded as a Flink artifact, and 16 long-lived `confluent_flink_statement` resources (source view, typed view, 6 sinks, 2 `CREATE FUNCTION`, 6 streaming `INSERT INTO`). The Terraform shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version, same `iac-confluent-api_key_rotation-tf_module`, same DROP-then-CREATE statement pattern.
 
 **Prereqs:**
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) `>= 1.5` installed locally.
+- [Terraform](https://developer.hashicorp.com/terraform/install) `>= 1.13` installed locally.
 - A Confluent Cloud API key (Cloud-level, not cluster-scoped) with permissions to create environments, Kafka clusters, Flink compute pools, service accounts, role bindings, Flink artifacts, and statements. Generate via Console → Settings → Cloud API keys.
 
 **Deploy:**
