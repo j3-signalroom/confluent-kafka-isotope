@@ -11,8 +11,8 @@
 # /tmp/isotope-report-sinks.fql that this script leaves behind.
 #
 # Usage:
-#   scripts/deploy-flink-reports.sh up       # build JAR, upload, create topics, submit jobs
-#   scripts/deploy-flink-reports.sh down     # cancel jobs, drop DDL, delete topics
+#   scripts/deploy-cp-flink-reports.sh up       # build JAR, upload, create topics, submit jobs
+#   scripts/deploy-cp-flink-reports.sh down     # cancel jobs, drop DDL, delete topics
 #
 # Prereqs:
 #   - Minikube + CP up  (`make cp-up`)
@@ -28,23 +28,23 @@ JAR_POD_PATH=/opt/flink/lib/isotope-flink-udf.jar
 # Sink topics — all 6 reports run on this session cluster, all written
 # as SR-framed Avro (auto-registered on first write).
 SINK_TOPICS=(
-    isotope-report-latency-1m
-    isotope-report-topology-1m
-    isotope-report-hop-distribution-1m
-    isotope-report-coverage-1m
-    isotope-report-stuck-trace-1m
-    isotope-report-latency-percentiles-1m
+    isotope_report_latency_1m
+    isotope_report_topology_1m
+    isotope_report_hop_distribution_1m
+    isotope_report_coverage_1m
+    isotope_report_stuck_trace_1m
+    isotope_report_latency_percentiles_1m
 )
 
 # Pipeline names — must match the `SET 'pipeline.name'` values in each
-# shared/{10,20,30,40,60,70}_*.fql so we can find and cancel the jobs.
+# cp/{10,20,30,40,60,70}_*.fql so we can find and cancel the jobs.
 JOB_NAMES=(
-    isotope-report-latency-1m
-    isotope-report-topology-1m
-    isotope-report-hop-distribution-1m
-    isotope-report-coverage-1m
-    isotope-report-stuck-trace-1m
-    isotope-report-latency-percentiles-1m
+    isotope_report_latency_1m
+    isotope_report_topology_1m
+    isotope_report_hop_distribution_1m
+    isotope_report_coverage_1m
+    isotope_report_stuck_trace_1m
+    isotope_report_latency_percentiles_1m
 )
 
 ACTION="${1:-up}"
@@ -170,14 +170,14 @@ if [ "${ACTION}" = "up" ]; then
     UP_FILES=(
         flink/sql/cp/00_source_table.fql
         flink/sql/cp/01_register_functions.fql
-        flink/sql/shared/05_isotope_view.fql
+        flink/sql/cp/05_isotope_view.fql
         flink/sql/cp/05_report_sinks.fql
-        flink/sql/shared/10_latency_report.fql
-        flink/sql/shared/20_topology_report.fql
-        flink/sql/shared/30_hop_distribution.fql
-        flink/sql/shared/40_coverage_report.fql
-        flink/sql/shared/60_stuck_trace_report.fql
-        flink/sql/shared/70_latency_percentiles_report.fql
+        flink/sql/cp/10_latency_report.fql
+        flink/sql/cp/20_topology_report.fql
+        flink/sql/cp/30_hop_distribution.fql
+        flink/sql/cp/40_coverage_report.fql
+        flink/sql/cp/60_stuck_trace_report.fql
+        flink/sql/cp/70_latency_percentiles_report.fql
     )
 
     # File used by the deploy session itself (source + functions + views
@@ -194,7 +194,7 @@ if [ "${ACTION}" = "up" ]; then
     SINKS_INIT_FILES=(
         flink/sql/cp/00_source_table.fql
         flink/sql/cp/01_register_functions.fql
-        flink/sql/shared/05_isotope_view.fql
+        flink/sql/cp/05_isotope_view.fql
         flink/sql/cp/05_report_sinks.fql
     )
     for f in "${UP_FILES[@]}"; do
@@ -349,7 +349,7 @@ if [ "${ACTION}" = "up" ]; then
     echo "    Flink SQL> SELECT * FROM latency_percentiles_flat_1m;"
     echo ""
     echo "Feed traffic via the demo CLI (any iso-* topic name works):"
-    echo "    ./gradlew :app:run --args=\"send iso-start svc-A 'hello'\" -q"
+    echo "    ./gradlew :app:run --args=\"send iso_start svc-A 'hello'\" -q"
 else
     # 1. Cancel each named streaming job via the Flink REST API.
     echo "→ Cancelling streaming jobs by pipeline.name ..."

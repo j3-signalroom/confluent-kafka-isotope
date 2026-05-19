@@ -22,7 +22,7 @@
 --     wrapper, but Avro+SR gets us Control Center decoding with zero
 --     custom code.
 --
--- A deliberate consequence: the demo *event* topics (`iso-start`, etc.)
+-- A deliberate consequence: the demo *event* topics (`iso_start`, etc.)
 -- still ride Protobuf+SR (DemoEvent, see app/src/main/proto/), but the
 -- *report* topics ride Avro+SR. Format-by-domain — events from the app,
 -- aggregates from Flink — is a clean split, not a defect.
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS latency_report_1m (
     `max_latency_ms`  BIGINT
 ) WITH (
     'connector'                          = 'kafka',
-    'topic'                              = 'isotope-report-latency-1m',
+    'topic'                              = 'isotope_report_latency_1m',
     'properties.bootstrap.servers'       = 'kafka:9071',
     'value.format'                       = 'avro-confluent',
     'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS topology_report_1m (
     `distinct_traces`  BIGINT
 ) WITH (
     'connector'                          = 'kafka',
-    'topic'                              = 'isotope-report-topology-1m',
+    'topic'                              = 'isotope_report_topology_1m',
     'properties.bootstrap.servers'       = 'kafka:9071',
     'value.format'                       = 'avro-confluent',
     'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS hop_distribution_1m (
     `distinct_traces` BIGINT
 ) WITH (
     'connector'                          = 'kafka',
-    'topic'                              = 'isotope-report-hop-distribution-1m',
+    'topic'                              = 'isotope_report_hop_distribution_1m',
     'properties.bootstrap.servers'       = 'kafka:9071',
     'value.format'                       = 'avro-confluent',
     'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS coverage_report_1m (
     `records`         BIGINT
 ) WITH (
     'connector'                          = 'kafka',
-    'topic'                              = 'isotope-report-coverage-1m',
+    'topic'                              = 'isotope_report_coverage_1m',
     'properties.bootstrap.servers'       = 'kafka:9071',
     'value.format'                       = 'avro-confluent',
     'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS stuck_trace_alerts_1m (
     `stuck_for_ms`    BIGINT
 ) WITH (
     'connector'                          = 'kafka',
-    'topic'                              = 'isotope-report-stuck-trace-1m',
+    'topic'                              = 'isotope_report_stuck_trace_1m',
     'properties.bootstrap.servers'       = 'kafka:9071',
     'value.format'                       = 'avro-confluent',
     'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS latency_percentiles_flat_1m (
     `sample_count`    BIGINT
 ) WITH (
     'connector'                          = 'kafka',
-    'topic'                              = 'isotope-report-latency-percentiles-1m',
+    'topic'                              = 'isotope_report_latency_percentiles_1m',
     'properties.bootstrap.servers'       = 'kafka:9071',
     'value.format'                       = 'avro-confluent',
     'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',

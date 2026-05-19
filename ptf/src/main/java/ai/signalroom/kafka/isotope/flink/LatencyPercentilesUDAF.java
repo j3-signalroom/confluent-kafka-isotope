@@ -1,5 +1,7 @@
 package ai.signalroom.kafka.isotope.flink;
 
+import java.nio.ByteBuffer;
+
 import com.tdunning.math.stats.MergingDigest;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.FunctionHint;
@@ -18,21 +20,29 @@ import org.apache.flink.types.Row;
  *
  * Then unpack with `pcts.p50_ms`, `pcts.p95_ms`, `pcts.p99_ms`.
  *
- * Why T-Digest: standard Flink SQL has no portable approx-percentile
- * aggregate that works on both CCAF and CP Flink. T-Digest gives bounded
- * memory (default compression = 100 → a few KB per accumulator), accurate
- * tail percentiles, and merge semantics that play well with parallel
- * accumulators.
+ * Runtime-portability note: this UDAF is currently <b>only deployed on
+ * Confluent Platform Flink</b>. Confluent Cloud for Apache Flink (CCAF)
+ * rejects all UDAF CREATE FUNCTION statements with "aggregate functions
+ * are not supported" — a hard platform limitation, not something the
+ * accumulator shape can work around. The CC Terraform module
+ * (terraform/setup-confluent-flink.tf) intentionally omits this function;
+ * see the comment block above `register_stuck_trace_ptf` there.
+ *
+ * The accumulator nonetheless stores the T-Digest as `byte[]` (Flink-native,
+ * POJO-clean) rather than as a {@link MergingDigest} field, so the JAR is
+ * ready to deploy on CCAF the day Confluent lifts the UDAF restriction.
+ * Round-tripping through byte[] on every {@code accumulate}/{@code merge}/
+ * {@code getValue} costs a few microseconds per record (MergingDigest.
+ * smallByteSize is a few hundred bytes).
  *
  * Why we return {@code Row} (not a POJO): Flink 2.1.2 tightened structured-
  * type extraction. Declaring a POJO output forced the planner to derive a
- * STRUCTURED logical type, and downstream codegen (specifically, the
- * sink-write path used by {@code INSERT INTO}) emits a cast of the POJO
- * to {@code Row} which fails at Janino-compile time. Returning {@code Row}
- * with an explicit {@code @FunctionHint(output = @DataTypeHint("ROW<...>"))}
- * declares the logical type AND the conversion class consistently, so
- * codegen on every path (interactive SELECT and sink INSERT) is happy.
- * See {@link Percentiles} for the POJO retained for test readability.
+ * STRUCTURED logical type, and downstream codegen (specifically, the sink-
+ * write path used by {@code INSERT INTO}) emits a cast of the POJO to {@code
+ * Row} which fails at Janino-compile time. Returning {@code Row} with an
+ * explicit {@code @FunctionHint(output = @DataTypeHint("ROW<...>"))} declares
+ * the logical type AND the conversion class consistently. See {@link
+ * Percentiles} for the POJO retained for test readability.
  */
 @FunctionHint(output = @DataTypeHint(
     "ROW<p50_ms DOUBLE, p95_ms DOUBLE, p99_ms DOUBLE, sample_count BIGINT>"))
@@ -43,20 +53,15 @@ public class LatencyPercentilesUDAF
     private static final double COMPRESSION = 100.0;
 
     /**
-     * Mutable accumulator wrapping a serializable T-Digest sketch.
+     * POJO-shaped accumulator: a serialized T-Digest blob plus a sample count.
      *
-     * MergingDigest is the recommended T-Digest variant for streaming
-     * aggregation — bounded memory, merge() is fast, and the implementation
-     * is the same one used by Druid and many other percentile-in-streaming
-     * systems.
+     * Both fields are public, Flink-serializable (byte[] and long are native),
+     * and the class has the no-arg ctor Flink's POJO extractor needs. CCAF's
+     * UDF validator accepts this shape; on CP Flink it works identically.
      */
     public static class TDigestAccumulator {
-        // Flink 2.1.2+ tightened structured-type extraction and tries to
-        // introspect MergingDigest's private fields (e.g. mergeCount) when
-        // deriving an accumulator schema; the RAW hint tells Flink to treat
-        // the sketch as an opaque blob (Kryo-serialized for checkpoints).
-        @DataTypeHint(value = "RAW", bridgedTo = MergingDigest.class)
-        public MergingDigest digest = new MergingDigest(COMPRESSION);
+        /** Serialized {@link MergingDigest} (via {@link MergingDigest#asSmallBytes}). Null = empty digest. */
+        public byte[] digestBytes;
         public long sampleCount = 0L;
     }
 
@@ -67,28 +72,34 @@ public class LatencyPercentilesUDAF
 
     public void accumulate(TDigestAccumulator acc, Long latencyMs) {
         if (latencyMs == null) return;
-        acc.digest.add((double) latencyMs);
+        MergingDigest d = loadDigest(acc.digestBytes);
+        d.add((double) latencyMs);
+        acc.digestBytes = saveDigest(d);
         acc.sampleCount++;
     }
 
     public void retract(TDigestAccumulator acc, Long latencyMs) {
-        // T-Digest does not support retraction; with append-only Kafka
-        // streams (no UPDATE/DELETE) this method is never called by Flink
-        // for a tumbling-window aggregation. We define it (no-op) to keep
-        // the contract complete in case the function is used over a stream
-        // that produces retractions.
+        // T-Digest does not support retraction; with append-only Kafka streams
+        // (no UPDATE/DELETE) this method is never called by Flink for a
+        // tumbling-window aggregation. Defined (no-op) to keep the contract
+        // complete in case the function is used over a retracting stream.
     }
 
     public void merge(TDigestAccumulator acc, Iterable<TDigestAccumulator> others) {
+        MergingDigest accD = null;
+        boolean changed = false;
         for (TDigestAccumulator o : others) {
             if (o.sampleCount == 0L) continue;
-            acc.digest.add(o.digest);
+            if (accD == null) accD = loadDigest(acc.digestBytes);
+            accD.add(loadDigest(o.digestBytes));
             acc.sampleCount += o.sampleCount;
+            changed = true;
         }
+        if (changed) acc.digestBytes = saveDigest(accD);
     }
 
     public void resetAccumulator(TDigestAccumulator acc) {
-        acc.digest = new MergingDigest(COMPRESSION);
+        acc.digestBytes = null;
         acc.sampleCount = 0L;
     }
 
@@ -97,11 +108,23 @@ public class LatencyPercentilesUDAF
         if (acc.sampleCount == 0L) {
             return new Percentiles(null, null, null, 0L).toRow();
         }
+        MergingDigest d = loadDigest(acc.digestBytes);
         return new Percentiles(
-            acc.digest.quantile(0.50),
-            acc.digest.quantile(0.95),
-            acc.digest.quantile(0.99),
+            d.quantile(0.50),
+            d.quantile(0.95),
+            d.quantile(0.99),
             acc.sampleCount
         ).toRow();
+    }
+
+    private static MergingDigest loadDigest(byte[] bytes) {
+        if (bytes == null) return new MergingDigest(COMPRESSION);
+        return MergingDigest.fromBytes(ByteBuffer.wrap(bytes));
+    }
+
+    private static byte[] saveDigest(MergingDigest d) {
+        ByteBuffer buf = ByteBuffer.allocate(d.smallByteSize());
+        d.asSmallBytes(buf);
+        return buf.array();
     }
 }

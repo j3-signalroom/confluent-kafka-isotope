@@ -1,0 +1,115 @@
+resource "confluent_kafka_cluster" "isotope" {
+  display_name = local.cluster_display_name
+  availability = "SINGLE_ZONE"
+  cloud        = var.cloud
+  region       = var.region
+  standard {}
+
+  environment {
+    id = confluent_environment.isotope.id
+  }
+}
+
+# Rotating Kafka API key pair owned by the Flink SQL runner service account.
+# The active key is what topic creation + Flink runtime reads/writes use.
+module "kafka_api_key_rotation" {
+  source = "github.com/j3-signalroom/iac-confluent-api_key_rotation-tf_module"
+
+  owner = {
+    id          = confluent_service_account.flink_sql_runner.id
+    api_version = confluent_service_account.flink_sql_runner.api_version
+    kind        = confluent_service_account.flink_sql_runner.kind
+  }
+
+  resource = {
+    id          = confluent_kafka_cluster.isotope.id
+    api_version = confluent_kafka_cluster.isotope.api_version
+    kind        = confluent_kafka_cluster.isotope.kind
+
+    environment = {
+      id = confluent_environment.isotope.id
+    }
+  }
+
+  key_display_name             = "Kafka Service Account API Key - {date} - Managed by Terraform (confluent-kafka-isotope)"
+  number_of_api_keys_to_retain = var.number_of_api_keys_to_retain
+  day_count                    = var.day_count
+
+  depends_on = [
+    confluent_role_binding.flink_sql_runner_as_resource_owner_topic_access
+  ]
+}
+
+# Rotating Schema Registry API key pair owned by the same service account.
+# The demo CLI (App.java) and any external Kafka client using the SR
+# Protobuf serializer needs an SR basic-auth credential — `cc-cli-env.sh`
+# reads these via `terraform output` so users no longer have to mint an SR
+# API key manually in the Cloud Console.
+module "sr_api_key_rotation" {
+  source = "github.com/j3-signalroom/iac-confluent-api_key_rotation-tf_module"
+
+  owner = {
+    id          = confluent_service_account.flink_sql_runner.id
+    api_version = confluent_service_account.flink_sql_runner.api_version
+    kind        = confluent_service_account.flink_sql_runner.kind
+  }
+
+  resource = {
+    id          = data.confluent_schema_registry_cluster.isotope.id
+    api_version = data.confluent_schema_registry_cluster.isotope.api_version
+    kind        = data.confluent_schema_registry_cluster.isotope.kind
+
+    environment = {
+      id = confluent_environment.isotope.id
+    }
+  }
+
+  key_display_name             = "SR Service Account API Key - {date} - Managed by Terraform (confluent-kafka-isotope)"
+  number_of_api_keys_to_retain = var.number_of_api_keys_to_retain
+  day_count                    = var.day_count
+
+  depends_on = [
+    confluent_role_binding.flink_sql_runner_schema_registry_access
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# Topics — explicit confluent_kafka_topic resources so `terraform destroy`
+# tears them down. Three isotope event topics (demo CLI writes DemoEvent
+# Protobuf+SR records to these) plus six report sinks (Flink writes
+# Protobuf+SR aggregates here).
+# ---------------------------------------------------------------------------
+
+resource "confluent_kafka_topic" "isotope_event" {
+  for_each = toset(local.isotope_event_topics)
+
+  kafka_cluster {
+    id = confluent_kafka_cluster.isotope.id
+  }
+  topic_name    = each.value
+  rest_endpoint = confluent_kafka_cluster.isotope.rest_endpoint
+
+  credentials {
+    key    = module.kafka_api_key_rotation.active_api_key.id
+    secret = module.kafka_api_key_rotation.active_api_key.secret
+  }
+}
+
+# NOTE: the six `isotope_report_*_1m` sink topics are intentionally NOT
+# pre-created as `confluent_kafka_topic` resources here. CCAF's Topic
+# Catalog auto-imports any topic that exists in the bound cluster as a
+# `(key BYTES, val BYTES)` Flink table when the topic has no SR subject
+# registered yet — and once that auto-import happens, a subsequent
+# `CREATE TABLE IF NOT EXISTS sink_table (cols...)` silently no-ops
+# because the bytes-pair table "already exists". The INSERT INTO then
+# fails with "Column types of query result and sink do not match".
+#
+# The fix is to let CCAF's CREATE TABLE statement own both ends:
+#   - It creates the Kafka topic.
+#   - It registers the Protobuf schema in SR (derived from the column
+#     types declared in the DDL + 'value.format' = 'proto-registry').
+#   - It adds the columnar table to the catalog.
+#
+# Cleanup is handled by `terraform destroy` cascading through the
+# `confluent_environment` resource — the env destroy wipes the cluster
+# and every topic in it, including the ones CCAF auto-created.

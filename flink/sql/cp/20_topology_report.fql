@@ -15,7 +15,7 @@
 -- Sinks into `topology_report_1m` (Kafka, Avro+SR).
 -- =====================================================================
 
-SET 'pipeline.name' = 'isotope-report-topology-1m';
+SET 'pipeline.name' = 'isotope_report_topology_1m';
 
 INSERT INTO topology_report_1m
 SELECT

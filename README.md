@@ -18,8 +18,10 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
   - [3.1. Unit tests (no broker, instant)](#31-unit-tests-no-broker-instant)
   - [3.2 Demo CLI — see one trace propagate live](#32-demo-cli--see-one-trace-propagate-live)
   - [3.3 Integration tests (live Kafka via Minikube)](#33-integration-tests-live-kafka-via-minikube)
-  - [3.4 Flink SQL reports on Minikube](#34-flink-sql-reports-on-minikube)
-  - [3.5 Recommended path the first time through](#35-recommended-path-the-first-time-through)
+  - [3.4 Flink SQL reports on Confluent Platform (Minikube)](#34-flink-sql-reports-on-confluent-platform-minikube)
+    - [3.4.1 Format-by-domain](#341-format-by-domain)
+  - [3.5 Flink SQL reports on Confluent Cloud (CCAF)](#35-flink-sql-reports-on-confluent-cloud-ccaf)
+  - [3.6 Recommended path the first time through](#36-recommended-path-the-first-time-through)
 <!-- tocstop -->
 
 ---
@@ -63,14 +65,13 @@ ptf/                                    Phase 2 — Flink PTF + UDAF shadow JAR
 flink/sql/                              Flink SQL reports — identical on
                                         CCAF and CP Flink except source DDL
   cp/                                   CP Flink: 00_source_table, 01_register_functions,
-                                        05_report_sinks (avro-confluent), 99_teardown
-  cc/                                   CCAF: 00_source_table (view over auto-registered
-                                        topic), 01_register_functions (confluent-artifact:// JAR)
-  shared/                               05_isotope_view + 6 INSERT INTO reports
-                                        (10_latency, 20_topology, 30_hop_distribution,
-                                        40_coverage, 60_stuck_trace, 70_latency_percentiles)
+                                        05_isotope_view, 05_report_sinks (avro-confluent),
+                                        10/20/30/40/60/70 INSERT INTO reports, 99_teardown
+                                        (CCAF SQL is inlined under terraform/setup-confluent-flink.tf;
+                                        CP SQL is hardcoded in flink/sql/cp/.)
 k8s/base/                               CFK Kafka/SR/Connect/ksqlDB/C3 manifests
-scripts/                                port-forward helpers, deploy-flink-reports.sh
+scripts/                                port-forward helpers, deploy-cp-flink-reports.sh,
+                                        deploy-cc-flink-reports.sh
 Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ```
 
@@ -99,16 +100,16 @@ The fastest way to watch the isotope mechanic. Requires the cluster to be up and
 
 ```bash
 # Terminal A — terminal sink (will print the full 3-hop trail)
-./gradlew :app:run --args="sink iso-final" -q
+./gradlew :app:run --args="sink iso_final" -q
 
-# Terminal B — middle stage: iso-mid → iso-final as svc-C
-./gradlew :app:run --args="hop iso-mid iso-final svc-C" -q
+# Terminal B — middle stage: iso_mid → iso_final as svc-C
+./gradlew :app:run --args="hop iso_mid iso_final svc-C" -q
 
-# Terminal C — first stage: iso-start → iso-mid as svc-B
-./gradlew :app:run --args="hop iso-start iso-mid svc-B" -q
+# Terminal C — first stage: iso_start → iso_mid as svc-B
+./gradlew :app:run --args="hop iso_start iso_mid svc-B" -q
 
 # Terminal D — kick the chain off (run repeatedly to send more)
-./gradlew :app:run --args="send iso-start svc-A 'hello world'" -q
+./gradlew :app:run --args="send iso_start svc-A 'hello world'" -q
 ```
 
 Terminal A's output for each record shows the same `trace_id` across all three hops, `origin = svc-A` (never reassigned), and `hops[]` listing `svc-A → svc-B → svc-C` in order with per-hop timestamps. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
@@ -155,7 +156,7 @@ The integration tests cover:
 
 ### **3.4 Flink SQL reports on Minikube**
 
-The four Phase-1 reports plus the Phase-2 PTF and UDAF reports — six in total — run against a Flink session cluster managed by the Confluent Flink Kubernetes Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see **[flink/README.md](flink/README.md)** for that side; this section is the local-Minikube path.
+The four Phase-1 reports plus the Phase-2 PTF and UDAF reports — six in total — run against a Flink session cluster managed by the Confluent Flink Kubernetes Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see **[§ 3.5](#35-flink-sql-reports-on-confluent-cloud-ccaf)** for that path; this section is the local-Minikube path.
 
 **Bring up Flink:**
 
@@ -174,9 +175,102 @@ make flink-reports-up
 
 #### **3.4.1 Format-by-domain**
 
-The demo *event* topics (`iso-start`, `iso-mid`, `iso-final`) still ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's unchanged. The *report* topics ride **Avro+SR** because cp-flink doesn't ship an SR-integrated Protobuf format and CMF (which does) disallows the UDAFs the percentiles report needs. Events from the app are Protobuf; aggregates from Flink are Avro. Two formats by domain — a clean split, not a defect.
+The demo *event* topics (`iso_start`, `iso_mid`, `iso_final`) still ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's unchanged. The *report* topics ride **Avro+SR** because cp-flink doesn't ship an SR-integrated Protobuf format and CMF (which does) disallows the UDAFs the percentiles report needs. Events from the app are Protobuf; aggregates from Flink are Avro. Two formats by domain — a clean split, not a defect.
 
-### **3.5 Recommended path the first time through**
+### **3.5 Flink SQL reports on Confluent Cloud (CCAF)**
+
+CCAF parallel of [§ 3.4](#34-flink-sql-reports-on-minikube), driven by Terraform under [terraform/](terraform/). One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, 9 topics (3 isotope event + 6 report sinks), a Flink compute pool, a rotating service-account API key pair, the PTF/UDAF JAR uploaded as a Flink artifact, and 16 long-lived `confluent_flink_statement` resources (source view, typed view, 6 sinks, 2 `CREATE FUNCTION`, 6 streaming `INSERT INTO`). The Terraform shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version, same `iac-confluent-api_key_rotation-tf_module`, same DROP-then-CREATE statement pattern.
+
+**Prereqs:**
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) `>= 1.5` installed locally.
+- A Confluent Cloud API key (Cloud-level, not cluster-scoped) with permissions to create environments, Kafka clusters, Flink compute pools, service accounts, role bindings, Flink artifacts, and statements. Generate via Console → Settings → Cloud API keys.
+
+**Deploy:**
+
+```bash
+export CONFLUENT_API_KEY=...
+export CONFLUENT_API_SECRET=...
+make cc-flink-reports-up CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET
+```
+
+The wrapper script ([scripts/deploy-cc-flink-reports.sh](scripts/deploy-cc-flink-reports.sh)) builds the PTF/UDAF shadow JAR if missing, then runs `terraform apply -auto-approve` in [terraform/](terraform/). First-run takes ~6–8 minutes (Kafka cluster provisioning dominates). Re-applies are idempotent — `CREATE … IF NOT EXISTS` plus `lifecycle { ignore_changes = [compute_pool] }` on every statement.
+
+**What gets created** (see [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf) for the full graph):
+
+| Resource | Name | Notes |
+|---|---|---|
+| `confluent_environment` | `confluent-kafka-isotope` | ESSENTIALS stream-governance package |
+| `confluent_kafka_cluster` | `kafka-isotope` | Standard, single-zone, AWS us-east-1 by default |
+| `confluent_kafka_topic` × 9 | `iso-{start,mid,final}`, `isotope-report-*-1m` | Explicit so `destroy` cleans them up |
+| `confluent_service_account` + 5 role bindings | `isotope-flink-sql-runner` | FlinkDeveloper + ResourceOwner-topic + Assigner + SR-subject + transactional |
+| `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; comfortable headroom for 6 INSERTs + ad-hoc SELECTs |
+| `confluent_flink_artifact` | `isotope-flink-udf` | Uploads `ptf/build/libs/isotope-flink-udf.jar` |
+| `confluent_flink_statement` × 16 | (see file) | View + typed view + 6 sinks + 2 functions + 6 INSERTs |
+
+**Useful outputs:**
+
+```bash
+terraform -chdir=terraform output environment_id
+terraform -chdir=terraform output kafka_bootstrap_servers
+terraform -chdir=terraform output schema_registry_url
+terraform -chdir=terraform output -raw kafka_api_key     # sensitive
+terraform -chdir=terraform output -raw kafka_api_secret  # sensitive
+```
+
+**Format-by-runtime (not -by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [flink/sql/cp/05_report_sinks.fql](flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [flink/sql/cp/](flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
+
+**CCAF UDAF limitation.** CCAF currently rejects all `CREATE FUNCTION` statements for user-defined aggregate functions ("aggregate functions are not supported"). The `LATENCY_PERCENTILES` UDAF — Phase-2 of the project — therefore deploys on CP only; the percentile report (`latency_percentiles_flat_1m`) does not exist on CCAF. The other Phase-2 function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not a UDAF), works on both runtimes. The JAR itself is portable — `LatencyPercentilesUDAF` ships with a byte[]-based accumulator and is ready to register when Confluent lifts the restriction. The five CCAF reports are: `latency` (avg/min/max), `topology`, `hop_distribution`, `coverage`, `stuck_trace`.
+
+**Driving traffic — the 3-stage demo against CCAF.** [App.java](app/src/main/java/ai/signalroom/kafka/isotope/App.java) reads four optional `-D` properties (`kafka.security.protocol`, `kafka.sasl.mechanism`, `kafka.sasl.jaas.config`, `schema.registry.basic.auth.user.info`) that default to plaintext-no-auth for Minikube. [scripts/cc-cli-env.sh](scripts/cc-cli-env.sh) pulls the Kafka + Schema-Registry credentials from `terraform output` (both keys are rotated by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf)) and builds the JAAS string.
+
+The thin wrapper [scripts/cc-app-run.sh](scripts/cc-app-run.sh) sources the env helper then invokes `./gradlew :app:run` with the six `-D` flags — pass it the same `send` / `hop` / `sink` args you'd give App.java:
+
+```bash
+# Four terminals (same A/B/C/D order as § 3.2). No manual env exports —
+# the wrapper sources cc-cli-env.sh, which pulls everything from terraform.
+scripts/cc-app-run.sh sink iso_final                # A
+scripts/cc-app-run.sh hop iso_mid iso_final svc-C   # B
+scripts/cc-app-run.sh hop iso_start iso_mid svc-B   # C
+scripts/cc-app-run.sh send iso_start svc-A 'hello'  # D
+```
+
+The wrapper hard-fails with a clear message if any of the seven required values is missing, so you'll never silently hand gradle empty `-D` values.
+
+Terminal A prints the same `trace_id` across all three hops, and the CCAF report INSERTs populate as you fire Terminal D — `SELECT * FROM isotope_report_latency_1m` etc. in the Cloud Console SQL workspace.
+
+**Sustained traffic — required to see report rows.** The five INSERT INTO jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, and a tumbling window only emits when the watermark advances past `window_end`. A handful of records bursted from Terminal D within a single 1-minute interval will sit in one open window forever (the most-recent record is the watermark, and it never gets older than itself). Spread traffic across **multiple** windows so the watermark crosses each boundary:
+
+```bash
+# 30 records spaced 5s apart ≈ 2.5 minutes of event-time → spans 3+ windows
+for i in {1..30}; do
+  scripts/cc-app-run.sh send iso_start svc-A "burst-$i"
+  sleep 5
+done
+```
+
+Wait ~90 seconds after the *last* record before checking `isotope_report_latency_1m` (and friends) — that's the watermark catching up. The `stuck_trace_alerts_1m` sink only fires for traces that go ≥60s of event time without a fresh hop, so the burst above won't trigger it (every trace gets one record and ends — no stalled in-flight state). To exercise `STUCK_TRACE_PTF`: send a single record to `iso_start` and don't run the `svc-B` / `svc-C` hops, then keep sending unrelated records elsewhere so the watermark advances past the stuck trace's `event_time + 60s`.
+
+> **Tip — auto-source after apply.** `make cc-flink-reports-up` runs in its own subshell, so it can't export env vars back into yours. Add this to your `~/.zshrc` / `~/.bashrc` for a one-liner that applies and exports:
+> ```bash
+> cc-up() {
+>   make cc-flink-reports-up "$@" && source scripts/cc-cli-env.sh
+> }
+> cc-down() {
+>   make cc-flink-reports-down "$@" && unset BOOTSTRAP SR_URL KAFKA_KEY KAFKA_SECRET SR_KEY SR_SECRET JAAS
+> }
+> # then:  cc-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
+> ```
+
+**Teardown:**
+
+```bash
+make cc-flink-reports-down CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET
+```
+
+Runs `terraform destroy -auto-approve` — deletes every resource above, including the environment itself. Safe to run repeatedly.
+
+### **3.6 Recommended path the first time through**
 
 1. `./gradlew test` — proves the codec + UDAF logic without any cluster.
 2. `make cp-up && make kafka-pf-up && ./gradlew :app:integrationTest` —
@@ -185,3 +279,5 @@ The demo *event* topics (`iso-start`, `iso-mid`, `iso-final`) still ride **Proto
    accumulating hops.
 4. `make flink-up && make flink-reports-up && make flink-sql` — reports
    populate as you drive traffic via the demo CLI (see § 3.2).
+5. (Optional) `make cc-flink-reports-up` — the CCAF parallel; see § 3.5
+   for prereqs and the SASL-config caveat for the demo CLI.

@@ -3,7 +3,7 @@
 -- table + functions. Safe to run repeatedly; uses IF EXISTS.
 --
 -- Applied via `make flink-reports-down`. The deploy script
--- (scripts/deploy-flink-reports.sh) cancels the running INSERT INTO
+-- (scripts/deploy-cp-flink-reports.sh) cancels the running INSERT INTO
 -- jobs via `flink cancel` *before* this FQL is applied, and deletes
 -- the underlying Kafka topics + SR subjects *after*. Neither operation
 -- is expressible in portable Flink SQL, so they live in the script.

@@ -21,7 +21,7 @@
 -- tighter tails at the cost of memory.
 -- =====================================================================
 
-SET 'pipeline.name' = 'isotope-report-latency-percentiles-1m';
+SET 'pipeline.name' = 'isotope_report_latency_percentiles_1m';
 
 INSERT INTO latency_percentiles_flat_1m
 SELECT

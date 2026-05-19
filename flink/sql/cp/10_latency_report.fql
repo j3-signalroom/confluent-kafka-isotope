@@ -13,11 +13,11 @@
 -- with `x-isotope-*` headers decoded). Writes to the
 -- `latency_report_1m` table (Kafka sink, Avro+SR; see
 -- cp/05_report_sinks.fql). Schema auto-registers in SR on first write
--- under subject `isotope-report-latency-1m-value`; Control Center
+-- under subject `isotope_report_latency_1m-value`; Control Center
 -- renders the rows natively.
 -- =====================================================================
 
-SET 'pipeline.name' = 'isotope-report-latency-1m';
+SET 'pipeline.name' = 'isotope_report_latency_1m';
 
 INSERT INTO latency_report_1m
 SELECT
