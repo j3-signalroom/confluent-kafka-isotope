@@ -159,10 +159,11 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
   setup-confluent-environment.tf        environment (ESSENTIALS stream-governance package)
   setup-confluent-kafka.tf              Kafka cluster + Kafka API key rotation module
                                         (iac-confluent-api_key_rotation-tf_module)
-  setup-confluent-flink.tf              service account + 5 role bindings, compute pool,
+  setup-confluent-flink.tf              service account + 6 role bindings, compute pool,
                                         artifact upload, SR API key rotation, and 16 inline
-                                        `confluent_flink_statement` resources (source view,
-                                        typed view, 6 sinks, 2 CREATE FUNCTION, 6 INSERT INTO)
+                                        `confluent_flink_statement` resources: 3 ALTER TABLE
+                                        + 2 VIEW + 5 sink CREATE TABLE + 1 CREATE FUNCTION
+                                        (PTF; UDAF skipped — CCAF rejects UDAFs) + 5 INSERT INTO
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
   terraform.png                         rendered resource graph (embedded in § 4.5)
@@ -274,7 +275,7 @@ The demo *event* topics (`iso_start`, `iso_mid`, `iso_final`) still ride **Proto
 
 ### **4.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**
 
-CCAF parallel of [§ 4.4](#44-flink-sql-reports-on-confluent-platform-for-apache-flink-minikube), driven by Terraform under [terraform/](terraform/). One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, 9 topics (3 isotope event + 6 report sinks), a Flink compute pool, a rotating service-account API key pair, the PTF/UDAF JAR uploaded as a Flink artifact, and 16 long-lived `confluent_flink_statement` resources (source view, typed view, 6 sinks, 2 `CREATE FUNCTION`, 6 streaming `INSERT INTO`). The Terraform shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version, same `iac-confluent-api_key_rotation-tf_module`, same DROP-then-CREATE statement pattern.
+CCAF parallel of [§ 4.4](#44-flink-sql-reports-on-confluent-platform-for-apache-flink-minikube), driven by Terraform under [terraform/](terraform/). One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, 3 pre-created isotope event topics (report sink topics are created on the fly by the Flink `CREATE TABLE` statements — see the comment in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf) for why pre-creating them via `confluent_kafka_topic` would conflict with CCAF's Topic Catalog auto-import), a Flink compute pool, two rotating service-account API key pairs (one for Kafka, one for Schema Registry), the PTF/UDAF JAR uploaded as a Flink artifact, and 16 long-lived `confluent_flink_statement` resources broken down as **3 ALTER TABLE** (add scalar headers on the event topics) + **2 VIEW** (raw + typed) + **5 sink CREATE TABLE** + **1 CREATE FUNCTION** (PTF only — the UDAF is intentionally skipped, see the limitation note below) + **5 INSERT INTO** streaming jobs. The Terraform shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version, same `iac-confluent-api_key_rotation-tf_module`, same DROP-then-CREATE statement pattern.
 
 **Prereqs:**
 
@@ -299,11 +300,11 @@ The wrapper script ([scripts/deploy-cc-flink-reports.sh](scripts/deploy-cc-flink
 |---|---|---|
 | `confluent_environment` | `confluent-kafka-isotope` | ESSENTIALS stream-governance package |
 | `confluent_kafka_cluster` | `kafka-isotope` | Standard, single-zone, AWS us-east-1 by default |
-| `confluent_kafka_topic` × 9 | `iso-{start,mid,final}`, `isotope-report-*-1m` | Explicit so `destroy` cleans them up |
-| `confluent_service_account` + 5 role bindings | `isotope-flink-sql-runner` | FlinkDeveloper + ResourceOwner-topic + Assigner + SR-subject + transactional |
-| `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; comfortable headroom for 6 INSERTs + ad-hoc SELECTs |
+| `confluent_kafka_topic` × 3 | `iso_{start,mid,final}` | Only the event topics are pre-created. The 5 `isotope_report_*_1m` sink topics are created on first deploy by their `CREATE TABLE` statement (CCAF's Topic Catalog auto-imports any pre-existing topic as `(key BYTES, val BYTES)`, which would silently no-op the typed `CREATE TABLE`). `terraform destroy` cleans them up via the environment cascade. |
+| `confluent_service_account` + 6 role bindings | `isotope-flink-sql-runner` | FlinkDeveloper (org) + ResourceOwner on topic=\* / transactional-id=\* / group=\* / SR subject=\* + Assigner on the service account |
+| `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for 5 INSERTs + ad-hoc SELECTs |
 | `confluent_flink_artifact` | `isotope-flink-udf` | Uploads `ptf/build/libs/isotope-flink-udf.jar` |
-| `confluent_flink_statement` × 16 | (see file) | View + typed view + 6 sinks + 2 functions + 6 INSERTs |
+| `confluent_flink_statement` × 16 | (see file) | 3 ALTER TABLE (event-topic scalar headers) + 2 VIEW (raw + typed) + 5 sink CREATE TABLE + 1 CREATE FUNCTION (PTF only; UDAF skipped) + 5 INSERT INTO |
 
 **Useful outputs:**
 
