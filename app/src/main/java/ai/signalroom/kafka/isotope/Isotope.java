@@ -39,6 +39,9 @@ public final class Isotope {
     public static final String HEADER_THIS_TOPIC     = "x-isotope-this-topic";
     public static final String HEADER_HOP_COUNT      = "x-isotope-hop-count";
 
+    // Bounded ring for the hop list — a payload guard, not a routing cap.
+    // On overflow the oldest hop is evicted and `truncated` latches true;
+    // the trace keeps flowing through as many services as you want.
     public static final int MAX_HOPS = 32;
     public static final int TRACE_ID_BYTES = 16;
 
