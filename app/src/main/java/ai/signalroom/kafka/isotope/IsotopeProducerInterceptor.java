@@ -1,3 +1,10 @@
+/**
+ * Copyright (c) 2026 Jeffrey Jonathan Jennings
+ *
+ * @author Jeffrey Jonathan Jennings (J3)
+ *
+ *
+ */
 package ai.signalroom.kafka.isotope;
 
 import org.apache.kafka.clients.producer.ProducerInterceptor;
