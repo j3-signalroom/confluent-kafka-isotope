@@ -356,17 +356,6 @@ done
 
 Wait ~90 seconds after the *last* record before checking `isotope_report_latency_1m` (and friends) — that's the watermark catching up. The `stuck_trace_alerts_1m` sink only fires for traces that go ≥60s of event time without a fresh hop, so the burst above won't trigger it (every trace gets one record and ends — no stalled in-flight state). To exercise `STUCK_TRACE_PTF`: send a single record to `iso_start` and don't run the `svc-B` / `svc-C` hops, then keep sending unrelated records elsewhere so the watermark advances past the stuck trace's `event_time + 60s`.
 
-> **Tip — auto-source after apply.** `make cc-flink-reports-up` runs in its own subshell, so it can't export env vars back into yours. Add this to your `~/.zshrc` / `~/.bashrc` for a one-liner that applies and exports:
-> ```bash
-> cc-up() {
->   make cc-flink-reports-up "$@" && source scripts/cc-cli-env.sh
-> }
-> cc-down() {
->   make cc-flink-reports-down "$@" && unset BOOTSTRAP SR_URL KAFKA_KEY KAFKA_SECRET SR_KEY SR_SECRET JAAS
-> }
-> # then:  cc-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
-> ```
-
 **Teardown:**
 
 ```bash
