@@ -3,7 +3,7 @@
 #
 # Pattern mirrors apache_flink-kickstarter-ii: every CCAF Flink statement
 # lives inline in HCL as a `confluent_flink_statement` resource. The
-# parallel CP runtime hardcodes its SQL in flink/sql/cp/ (no shared
+# parallel CP runtime hardcodes its SQL in scripts/flink/sql/cp/ (no shared
 # directory) — the two runtimes are independent.
 # =====================================================================
 
@@ -520,8 +520,8 @@ resource "confluent_flink_statement" "isotope_report_stuck_trace_1m" {
 # registered on CCAF — the platform rejects all UDAF registrations with
 # "aggregate functions are not supported" regardless of the accumulator
 # shape. The Java class still ships in the JAR for the CP runtime, which
-# has no such restriction (see flink/sql/cp/01_register_functions.fql and
-# flink/sql/cp/70_latency_percentiles_report.fql).
+# has no such restriction (see scripts/flink/sql/cp/01_register_functions.fql and
+# scripts/flink/sql/cp/70_latency_percentiles_report.fql).
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "register_stuck_trace_ptf" {
@@ -553,7 +553,7 @@ resource "confluent_flink_statement" "register_stuck_trace_ptf" {
 
 # ---------------------------------------------------------------------------
 # Statements 14-19 — 6 streaming INSERT INTO jobs. Same business logic as
-# the CP-side INSERTs in flink/sql/cp/{10,20,30,40,60,70}_*.fql; transcribed
+# the CP-side INSERTs in scripts/flink/sql/cp/{10,20,30,40,60,70}_*.fql; transcribed
 # here without the `SET 'pipeline.name'` directive (CCAF rejects SET in
 # submitted statements — it's a SQL-Client interactive command, not a Flink
 # SQL statement).

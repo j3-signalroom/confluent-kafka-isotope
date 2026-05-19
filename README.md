@@ -35,7 +35,7 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
   - `h` — ordered list of hops, each `{s: service, t: topic, m: tsMs}`
   - `x` — `true` if the hop list exceeded `MAX_HOPS = 32` and the oldest hop was evicted
 - **Six scalar headers** (UTF-8 strings) carry the most-recent-hop view so
-  Flink SQL can read them via `CAST(headers['x-isotope-…'] AS STRING)` without parsing the JSON array (no UDF required on either CCAF or CP Flink). See [flink/README.md](flink/README.md) for the full header table.
+  Flink SQL can read them via `CAST(headers['x-isotope-…'] AS STRING)` without parsing the JSON array (no UDF required on either CCAF or CP Flink). See [scripts/flink/README.md](scripts/flink/README.md) for the full header table.
 
 A producer with the isotope interceptor loaded appends one hop on every `send()`. A consume-then-produce service calls `IsotopeContext.adoptFromRecord(record)` between consume and produce so the trace ID and origin survive the hop.
 
@@ -62,16 +62,15 @@ ptf/                                    Phase 2 — Flink PTF + UDAF shadow JAR
     StuckTracePTF.java                  per-trace state + event-time timer
     Percentiles.java, StuckTraceAlert.java  return-type DTOs
   src/test/java/.../                    LatencyPercentilesUDAFTest
-flink/sql/                              Flink SQL reports — identical on
-                                        CCAF and CP Flink except source DDL
-  cp/                                   CP Flink: 00_source_table, 01_register_functions,
-                                        05_isotope_view, 05_report_sinks (avro-confluent),
-                                        10/20/30/40/60/70 INSERT INTO reports, 99_teardown
-                                        (CCAF SQL is inlined under terraform/setup-confluent-flink.tf;
-                                        CP SQL is hardcoded in flink/sql/cp/.)
 k8s/base/                               CFK Kafka/SR/Connect/ksqlDB/C3 manifests
 scripts/                                port-forward helpers, deploy-cp-flink-reports.sh,
                                         deploy-cc-flink-reports.sh
+  flink/sql/cp/                         CP Flink SQL: 00_source_table, 01_register_functions,
+                                        05_isotope_view, 05_report_sinks (avro-confluent),
+                                        10/20/30/40/60/70 INSERT INTO reports, 99_teardown
+                                        (CCAF SQL is inlined under terraform/setup-confluent-flink.tf.)
+  flink/README.md                       Flink SQL reports — runtime split (CP=6 reports/Avro+SR,
+                                        CCAF=5 reports/Protobuf+SR), layout, operations
 Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ```
 
@@ -220,7 +219,7 @@ terraform -chdir=terraform output -raw kafka_api_key     # sensitive
 terraform -chdir=terraform output -raw kafka_api_secret  # sensitive
 ```
 
-**Format-by-runtime (not -by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [flink/sql/cp/05_report_sinks.fql](flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [flink/sql/cp/](flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
+**Format-by-runtime (not -by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
 
 **CCAF UDAF limitation.** CCAF currently rejects all `CREATE FUNCTION` statements for user-defined aggregate functions ("aggregate functions are not supported"). The `LATENCY_PERCENTILES` UDAF — Phase-2 of the project — therefore deploys on CP only; the percentile report (`latency_percentiles_flat_1m`) does not exist on CCAF. The other Phase-2 function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not a UDAF), works on both runtimes. The JAR itself is portable — `LatencyPercentilesUDAF` ships with a byte[]-based accumulator and is ready to register when Confluent lifts the restriction. The five CCAF reports are: `latency` (avg/min/max), `topology`, `hop_distribution`, `coverage`, `stuck_trace`.
 
