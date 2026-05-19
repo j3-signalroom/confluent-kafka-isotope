@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deploy (or tear down) the Phase-1 + Phase-2 Flink reports against the
-# CP Flink session cluster running on Minikube.
+# Deploy (or tear down) all six Flink reports (pure-SQL + JAR-backed)
+# against the CP Flink session cluster running on Minikube.
 #
 # As of the protobuf-sink refactor, each report is a Kafka sink topic
 # (SR-framed Protobuf) populated by a long-lived `INSERT INTO ... SELECT`

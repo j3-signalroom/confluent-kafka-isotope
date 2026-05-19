@@ -29,9 +29,9 @@ platform-level — not project preferences:
   `aggregate functions are not supported`, regardless of accumulator
   shape. The `LATENCY_PERCENTILES` T-Digest UDAF therefore registers
   on CP only. The Java class still ships in the JAR — it'll register
-  on CCAF the day Confluent lifts the restriction. The other Phase-2
-  function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not a UDAF),
-  works on both runtimes.
+  on CCAF the day Confluent lifts the restriction. The other
+  JAR-backed function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not
+  a UDAF), works on both runtimes.
 
 The demo *event* topics (`iso_start`, `iso_mid`, `iso_final`) ride
 Protobuf+SR via the Java app's `DemoEvent` schema on both runtimes —
@@ -77,7 +77,7 @@ hit this — `proto-registry` handles `TIMESTAMP_LTZ` directly.
 ## UDF/PTF JAR
 
 The single shadow JAR `ptf/build/libs/isotope-flink-udf.jar`
-(produced by `./gradlew :ptf:shadowJar`) carries both Phase-2
+(produced by `./gradlew :ptf:shadowJar`) carries both JAR-backed
 functions under the `ai.signalroom.kafka.isotope.flink` package:
 
 - `LatencyPercentilesUDAF` — T-Digest accumulator → p50/p95/p99

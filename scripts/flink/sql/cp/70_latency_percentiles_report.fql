@@ -1,6 +1,7 @@
 -- =====================================================================
 -- Latency-percentiles report — closes the "no portable percentiles in
--- pure SQL" gap from Phase 1's 10_latency_report.fql. Uses the
+-- pure SQL" gap from `10_latency_report.fql` (pure-SQL avg/min/max).
+-- Uses the
 -- LATENCY_PERCENTILES UDAF (T-Digest sketch) to compute p50 / p95 / p99
 -- per (origin_service, this_topic) per 1-minute tumbling window.
 --
