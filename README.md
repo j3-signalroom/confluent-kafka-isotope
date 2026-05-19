@@ -380,5 +380,5 @@ Runs `terraform destroy -auto-approve` — deletes every resource above, includi
 1. `./gradlew test` — proves the codec + UDAF logic without any cluster.
 2. `make cp-up && make kafka-pf-up && ./gradlew :app:integrationTest` — proves the broker + SR + interceptor + Protobuf path end-to-end.
 3. The 3-stage demo CLI walkthrough above — visually shows the trace accumulating hops.
-4. `make flink-up && make flink-reports-up && make flink-sql` — reports populate as you drive traffic via the demo CLI (see § 4.2).
-5. (Optional) `make cc-flink-reports-up` — the CCAF parallel; see § 4.5 for prereqs and the SASL-config caveat for the demo CLI.
+4. `make flink-up && make flink-reports-up && make flink-sql` — reports populate as you drive traffic via the demo CLI (see [§ 4.2](#42-demo-cli--see-one-trace-propagate-live)).
+5. (Optional) `make cc-flink-reports-up` — the CCAF parallel; see [§ 4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for prereqs and the SASL-config caveat for the demo CLI.
