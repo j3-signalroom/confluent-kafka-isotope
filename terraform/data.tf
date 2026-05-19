@@ -25,21 +25,21 @@ locals {
   # Canonical isotope event topics. The demo CLI writes DemoEvent (SR-Protobuf)
   # to these; the source view inlined in setup-confluent-flink.tf UNIONs them.
   isotope_event_topics = [
-    "iso-start",
-    "iso-mid",
-    "iso-final",
+    "iso_start",
+    "iso_mid",
+    "iso_final",
   ]
 
   # Sink topics for the six Flink SQL reports. Names mirror CP's sink topic
   # names (flink/sql/cp/{10,20,30,40,60,70}_*.fql) so report consumers see the
   # same topic layout regardless of runtime.
   isotope_report_topics = [
-    "isotope-report-latency-1m",
-    "isotope-report-topology-1m",
-    "isotope-report-hop-distribution-1m",
-    "isotope-report-coverage-1m",
-    "isotope-report-stuck-trace-1m",
-    "isotope-report-latency-percentiles-1m",
+    "isotope_report_latency_1m",
+    "isotope_report_topology_1m",
+    "isotope_report_hop_distribution_1m",
+    "isotope_report_coverage_1m",
+    "isotope_report_stuck_trace_1m",
+    "isotope_report_latency_percentiles_1m",
   ]
 
 }

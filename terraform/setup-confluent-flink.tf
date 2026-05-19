@@ -142,14 +142,14 @@ resource "confluent_flink_artifact" "isotope_udf" {
 }
 
 # ---------------------------------------------------------------------------
-# Statements 1-3 — ALTER TABLE on each iso-* topic to expose Kafka record
+# Statements 1-3 — ALTER TABLE on each iso_* topic to expose Kafka record
 # headers as a column. CCAF's auto-imported topic tables do not include
 # `headers` by default; the source view below references it.
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "alter_iso_start_add_headers" {
   statement = <<-EOT
-    ALTER TABLE `iso-start`
+    ALTER TABLE `iso_start`
         ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
   EOT
 
@@ -171,14 +171,14 @@ resource "confluent_flink_statement" "alter_iso_start_add_headers" {
   }
 
   depends_on = [
-    confluent_kafka_topic.isotope_event["iso-start"],
+    confluent_kafka_topic.isotope_event["iso_start"],
     confluent_flink_compute_pool.isotope,
   ]
 }
 
 resource "confluent_flink_statement" "alter_iso_mid_add_headers" {
   statement = <<-EOT
-    ALTER TABLE `iso-mid`
+    ALTER TABLE `iso_mid`
         ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
   EOT
 
@@ -200,14 +200,14 @@ resource "confluent_flink_statement" "alter_iso_mid_add_headers" {
   }
 
   depends_on = [
-    confluent_kafka_topic.isotope_event["iso-mid"],
+    confluent_kafka_topic.isotope_event["iso_mid"],
     confluent_flink_compute_pool.isotope,
   ]
 }
 
 resource "confluent_flink_statement" "alter_iso_final_add_headers" {
   statement = <<-EOT
-    ALTER TABLE `iso-final`
+    ALTER TABLE `iso_final`
         ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
   EOT
 
@@ -229,13 +229,13 @@ resource "confluent_flink_statement" "alter_iso_final_add_headers" {
   }
 
   depends_on = [
-    confluent_kafka_topic.isotope_event["iso-final"],
+    confluent_kafka_topic.isotope_event["iso_final"],
     confluent_flink_compute_pool.isotope,
   ]
 }
 
 # ---------------------------------------------------------------------------
-# Statement 4 — `isotope_raw` view over the three iso-* topics.
+# Statement 4 — `isotope_raw` view over the three iso_* topics.
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "isotope_raw_view" {
@@ -244,17 +244,17 @@ resource "confluent_flink_statement" "isotope_raw_view" {
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `iso-start`
+    FROM `iso_start`
     UNION ALL
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `iso-mid`
+    FROM `iso_mid`
     UNION ALL
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `iso-final`;
+    FROM `iso_final`;
   EOT
 
   properties    = local.flink_statement_properties
@@ -369,7 +369,10 @@ resource "confluent_flink_statement" "isotope_report_latency_1m" {
     ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-latency-1m"]]
+  # No depends_on for the sink topic — see comment in
+  # setup-confluent-kafka.tf where confluent_kafka_topic.isotope_report
+  # was intentionally removed. CCAF's CREATE TABLE creates the topic.
+  depends_on = [confluent_flink_compute_pool.isotope]
 }
 
 resource "confluent_flink_statement" "isotope_report_topology_1m" {
@@ -404,7 +407,7 @@ resource "confluent_flink_statement" "isotope_report_topology_1m" {
     ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-topology-1m"]]
+  depends_on = [confluent_flink_compute_pool.isotope]
 }
 
 resource "confluent_flink_statement" "isotope_report_hop_distribution_1m" {
@@ -438,7 +441,7 @@ resource "confluent_flink_statement" "isotope_report_hop_distribution_1m" {
     ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-hop-distribution-1m"]]
+  depends_on = [confluent_flink_compute_pool.isotope]
 }
 
 resource "confluent_flink_statement" "isotope_report_coverage_1m" {
@@ -472,7 +475,7 @@ resource "confluent_flink_statement" "isotope_report_coverage_1m" {
     ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-coverage-1m"]]
+  depends_on = [confluent_flink_compute_pool.isotope]
 }
 
 resource "confluent_flink_statement" "isotope_report_stuck_trace_1m" {
@@ -507,7 +510,7 @@ resource "confluent_flink_statement" "isotope_report_stuck_trace_1m" {
     ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [confluent_kafka_topic.isotope_report["isotope-report-stuck-trace-1m"]]
+  depends_on = [confluent_flink_compute_pool.isotope]
 }
 
 # ---------------------------------------------------------------------------

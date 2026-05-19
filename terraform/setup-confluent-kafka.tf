@@ -95,17 +95,21 @@ resource "confluent_kafka_topic" "isotope_event" {
   }
 }
 
-resource "confluent_kafka_topic" "isotope_report" {
-  for_each = toset(local.isotope_report_topics)
-
-  kafka_cluster {
-    id = confluent_kafka_cluster.isotope.id
-  }
-  topic_name    = each.value
-  rest_endpoint = confluent_kafka_cluster.isotope.rest_endpoint
-
-  credentials {
-    key    = module.kafka_api_key_rotation.active_api_key.id
-    secret = module.kafka_api_key_rotation.active_api_key.secret
-  }
-}
+# NOTE: the six `isotope_report_*_1m` sink topics are intentionally NOT
+# pre-created as `confluent_kafka_topic` resources here. CCAF's Topic
+# Catalog auto-imports any topic that exists in the bound cluster as a
+# `(key BYTES, val BYTES)` Flink table when the topic has no SR subject
+# registered yet — and once that auto-import happens, a subsequent
+# `CREATE TABLE IF NOT EXISTS sink_table (cols...)` silently no-ops
+# because the bytes-pair table "already exists". The INSERT INTO then
+# fails with "Column types of query result and sink do not match".
+#
+# The fix is to let CCAF's CREATE TABLE statement own both ends:
+#   - It creates the Kafka topic.
+#   - It registers the Protobuf schema in SR (derived from the column
+#     types declared in the DDL + 'value.format' = 'proto-registry').
+#   - It adds the columnar table to the catalog.
+#
+# Cleanup is handled by `terraform destroy` cascading through the
+# `confluent_environment` resource — the env destroy wipes the cluster
+# and every topic in it, including the ones CCAF auto-created.

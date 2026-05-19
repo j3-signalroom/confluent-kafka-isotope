@@ -16,8 +16,8 @@ Kafka tables via its topic catalog; CP Flink needs explicit
 
 ## Why Avro+SR (and not Protobuf+SR)?
 
-The downstream demo *event* topics (`iso-start`, `iso-mid`,
-`iso-final`) ride Protobuf+SR via the Java app's `DemoEvent` schema.
+The downstream demo *event* topics (`iso_start`, `iso_mid`,
+`iso_final`) ride Protobuf+SR via the Java app's `DemoEvent` schema.
 You might expect the report sinks to use the same format for
 consistency. They don't, and the reason is genuinely external:
 

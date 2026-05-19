@@ -6,10 +6,10 @@
 # name are forwarded to App.java as `--args`.
 #
 # Usage:
-#   scripts/cc-app-run.sh sink iso-final
-#   scripts/cc-app-run.sh hop iso-mid iso-final svc-C
-#   scripts/cc-app-run.sh hop iso-start iso-mid svc-B
-#   scripts/cc-app-run.sh send iso-start svc-A 'hello world'
+#   scripts/cc-app-run.sh sink iso_final
+#   scripts/cc-app-run.sh hop iso_mid iso_final svc-C
+#   scripts/cc-app-run.sh hop iso_start iso_mid svc-B
+#   scripts/cc-app-run.sh send iso_start svc-A 'hello world'
 #
 # Prereqs:
 #   - `make cc-flink-reports-up` has succeeded — Terraform owns both
@@ -24,7 +24,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 if [ $# -eq 0 ]; then
     echo "Usage: $(basename "$0") <send|hop|sink> <args...>"
-    echo "Example: $(basename "$0") sink iso-final"
+    echo "Example: $(basename "$0") sink iso_final"
     exit 2
 fi
 

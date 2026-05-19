@@ -18,7 +18,7 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
   - [3.1. Unit tests (no broker, instant)](#31-unit-tests-no-broker-instant)
   - [3.2 Demo CLI — see one trace propagate live](#32-demo-cli--see-one-trace-propagate-live)
   - [3.3 Integration tests (live Kafka via Minikube)](#33-integration-tests-live-kafka-via-minikube)
-  - [3.4 Flink SQL reports on Minikube](#34-flink-sql-reports-on-minikube)
+  - [3.4 Flink SQL reports on Confluent Platform (Minikube)](#34-flink-sql-reports-on-confluent-platform-minikube)
     - [3.4.1 Format-by-domain](#341-format-by-domain)
   - [3.5 Flink SQL reports on Confluent Cloud (CCAF)](#35-flink-sql-reports-on-confluent-cloud-ccaf)
   - [3.6 Recommended path the first time through](#36-recommended-path-the-first-time-through)
@@ -100,16 +100,16 @@ The fastest way to watch the isotope mechanic. Requires the cluster to be up and
 
 ```bash
 # Terminal A — terminal sink (will print the full 3-hop trail)
-./gradlew :app:run --args="sink iso-final" -q
+./gradlew :app:run --args="sink iso_final" -q
 
-# Terminal B — middle stage: iso-mid → iso-final as svc-C
-./gradlew :app:run --args="hop iso-mid iso-final svc-C" -q
+# Terminal B — middle stage: iso_mid → iso_final as svc-C
+./gradlew :app:run --args="hop iso_mid iso_final svc-C" -q
 
-# Terminal C — first stage: iso-start → iso-mid as svc-B
-./gradlew :app:run --args="hop iso-start iso-mid svc-B" -q
+# Terminal C — first stage: iso_start → iso_mid as svc-B
+./gradlew :app:run --args="hop iso_start iso_mid svc-B" -q
 
 # Terminal D — kick the chain off (run repeatedly to send more)
-./gradlew :app:run --args="send iso-start svc-A 'hello world'" -q
+./gradlew :app:run --args="send iso_start svc-A 'hello world'" -q
 ```
 
 Terminal A's output for each record shows the same `trace_id` across all three hops, `origin = svc-A` (never reassigned), and `hops[]` listing `svc-A → svc-B → svc-C` in order with per-hop timestamps. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
@@ -175,7 +175,7 @@ make flink-reports-up
 
 #### **3.4.1 Format-by-domain**
 
-The demo *event* topics (`iso-start`, `iso-mid`, `iso-final`) still ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's unchanged. The *report* topics ride **Avro+SR** because cp-flink doesn't ship an SR-integrated Protobuf format and CMF (which does) disallows the UDAFs the percentiles report needs. Events from the app are Protobuf; aggregates from Flink are Avro. Two formats by domain — a clean split, not a defect.
+The demo *event* topics (`iso_start`, `iso_mid`, `iso_final`) still ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's unchanged. The *report* topics ride **Avro+SR** because cp-flink doesn't ship an SR-integrated Protobuf format and CMF (which does) disallows the UDAFs the percentiles report needs. Events from the app are Protobuf; aggregates from Flink are Avro. Two formats by domain — a clean split, not a defect.
 
 ### **3.5 Flink SQL reports on Confluent Cloud (CCAF)**
 
@@ -229,10 +229,10 @@ The thin wrapper [scripts/cc-app-run.sh](scripts/cc-app-run.sh) sources the env 
 ```bash
 # Four terminals (same A/B/C/D order as § 3.2). No manual env exports —
 # the wrapper sources cc-cli-env.sh, which pulls everything from terraform.
-scripts/cc-app-run.sh sink iso-final                # A
-scripts/cc-app-run.sh hop iso-mid iso-final svc-C   # B
-scripts/cc-app-run.sh hop iso-start iso-mid svc-B   # C
-scripts/cc-app-run.sh send iso-start svc-A 'hello'  # D
+scripts/cc-app-run.sh sink iso_final                # A
+scripts/cc-app-run.sh hop iso_mid iso_final svc-C   # B
+scripts/cc-app-run.sh hop iso_start iso_mid svc-B   # C
+scripts/cc-app-run.sh send iso_start svc-A 'hello'  # D
 ```
 
 The wrapper hard-fails with a clear message if any of the seven required values is missing, so you'll never silently hand gradle empty `-D` values.
@@ -244,12 +244,12 @@ Terminal A prints the same `trace_id` across all three hops, and the CCAF report
 ```bash
 # 30 records spaced 5s apart ≈ 2.5 minutes of event-time → spans 3+ windows
 for i in {1..30}; do
-  scripts/cc-app-run.sh send iso-start svc-A "burst-$i"
+  scripts/cc-app-run.sh send iso_start svc-A "burst-$i"
   sleep 5
 done
 ```
 
-Wait ~90 seconds after the *last* record before checking `isotope_report_latency_1m` (and friends) — that's the watermark catching up. The `stuck_trace_alerts_1m` sink only fires for traces that go ≥60s of event time without a fresh hop, so the burst above won't trigger it (every trace gets one record and ends — no stalled in-flight state). To exercise `STUCK_TRACE_PTF`: send a single record to `iso-start` and don't run the `svc-B` / `svc-C` hops, then keep sending unrelated records elsewhere so the watermark advances past the stuck trace's `event_time + 60s`.
+Wait ~90 seconds after the *last* record before checking `isotope_report_latency_1m` (and friends) — that's the watermark catching up. The `stuck_trace_alerts_1m` sink only fires for traces that go ≥60s of event time without a fresh hop, so the burst above won't trigger it (every trace gets one record and ends — no stalled in-flight state). To exercise `STUCK_TRACE_PTF`: send a single record to `iso_start` and don't run the `svc-B` / `svc-C` hops, then keep sending unrelated records elsewhere so the watermark advances past the stuck trace's `event_time + 60s`.
 
 > **Tip — auto-source after apply.** `make cc-flink-reports-up` runs in its own subshell, so it can't export env vars back into yours. Add this to your `~/.zshrc` / `~/.bashrc` for a one-liner that applies and exports:
 > ```bash

@@ -7,7 +7,7 @@
 -- with `x-isotope-*` headers decoded). Writes to the
 -- `stuck_trace_alerts_1m` table (Kafka sink, Avro+SR; see
 -- cp/05_report_sinks.fql). Schema auto-registers in SR on first write
--- under subject `isotope-report-stuck-trace-1m-value`.
+-- under subject `isotope_report_stuck_trace_1m-value`.
 --
 -- Depends on:
 --   - the `isotope` view (shared/05_isotope_view.fql)
@@ -40,7 +40,7 @@
 --     StuckTracePTF.eval() when that lands.
 -- =====================================================================
 
-SET 'pipeline.name' = 'isotope-report-stuck-trace-1m';
+SET 'pipeline.name' = 'isotope_report_stuck_trace_1m';
 
 INSERT INTO stuck_trace_alerts_1m
 SELECT

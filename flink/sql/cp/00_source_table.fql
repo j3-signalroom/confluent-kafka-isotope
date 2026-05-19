@@ -9,9 +9,9 @@
 -- After this file is applied, the shared/ DDL files are environment-agnostic
 -- and can be applied verbatim.
 --
--- Reads every topic matching `topic-pattern` below — defaults to `iso-.*`
--- which captures everything the demo CLI creates (iso-start, iso-mid,
--- iso-final). Adjust the pattern, or switch to `'topic' = '<name>'`, for
+-- Reads every topic matching `topic-pattern` below — defaults to `iso_.*`
+-- which captures everything the demo CLI creates (iso_start, iso_mid,
+-- iso_final). Adjust the pattern, or switch to `'topic' = '<name>'`, for
 -- your real pipeline. The Flink Kafka source connector handles broker
 -- topic discovery and adds new topics dynamically as they appear.
 -- =====================================================================
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS isotope_raw (
     WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
 ) WITH (
     'connector'                     = 'kafka',
-    'topic-pattern'                 = 'iso-.*',
+    'topic-pattern'                 = 'iso_.*',
     'properties.bootstrap.servers'  = 'kafka:9071',
     'properties.group.id'           = 'isotope-flink-reports',
     'scan.startup.mode'             = 'earliest-offset',

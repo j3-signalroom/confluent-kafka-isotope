@@ -28,23 +28,23 @@ JAR_POD_PATH=/opt/flink/lib/isotope-flink-udf.jar
 # Sink topics — all 6 reports run on this session cluster, all written
 # as SR-framed Avro (auto-registered on first write).
 SINK_TOPICS=(
-    isotope-report-latency-1m
-    isotope-report-topology-1m
-    isotope-report-hop-distribution-1m
-    isotope-report-coverage-1m
-    isotope-report-stuck-trace-1m
-    isotope-report-latency-percentiles-1m
+    isotope_report_latency_1m
+    isotope_report_topology_1m
+    isotope_report_hop_distribution_1m
+    isotope_report_coverage_1m
+    isotope_report_stuck_trace_1m
+    isotope_report_latency_percentiles_1m
 )
 
 # Pipeline names — must match the `SET 'pipeline.name'` values in each
 # cp/{10,20,30,40,60,70}_*.fql so we can find and cancel the jobs.
 JOB_NAMES=(
-    isotope-report-latency-1m
-    isotope-report-topology-1m
-    isotope-report-hop-distribution-1m
-    isotope-report-coverage-1m
-    isotope-report-stuck-trace-1m
-    isotope-report-latency-percentiles-1m
+    isotope_report_latency_1m
+    isotope_report_topology_1m
+    isotope_report_hop_distribution_1m
+    isotope_report_coverage_1m
+    isotope_report_stuck_trace_1m
+    isotope_report_latency_percentiles_1m
 )
 
 ACTION="${1:-up}"
@@ -349,7 +349,7 @@ if [ "${ACTION}" = "up" ]; then
     echo "    Flink SQL> SELECT * FROM latency_percentiles_flat_1m;"
     echo ""
     echo "Feed traffic via the demo CLI (any iso-* topic name works):"
-    echo "    ./gradlew :app:run --args=\"send iso-start svc-A 'hello'\" -q"
+    echo "    ./gradlew :app:run --args=\"send iso_start svc-A 'hello'\" -q"
 else
     # 1. Cancel each named streaming job via the Flink REST API.
     echo "→ Cancelling streaming jobs by pipeline.name ..."

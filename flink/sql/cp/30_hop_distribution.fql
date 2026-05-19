@@ -13,7 +13,7 @@
 -- Sinks into `hop_distribution_1m` (Kafka, Avro+SR).
 -- =====================================================================
 
-SET 'pipeline.name' = 'isotope-report-hop-distribution-1m';
+SET 'pipeline.name' = 'isotope_report_hop_distribution_1m';
 
 INSERT INTO hop_distribution_1m
 SELECT

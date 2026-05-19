@@ -113,10 +113,10 @@ public final class App {
               app sink <topic>
 
             Examples (after `make kafka-pf-up`):
-              ./gradlew :app:run --args="send iso-start svc-A 'hello'"
-              ./gradlew :app:run --args="hop  iso-start iso-mid   svc-B"
-              ./gradlew :app:run --args="hop  iso-mid   iso-final svc-C"
-              ./gradlew :app:run --args="sink iso-final"
+              ./gradlew :app:run --args="send iso_start svc-A 'hello'"
+              ./gradlew :app:run --args="hop  iso_start iso_mid   svc-B"
+              ./gradlew :app:run --args="hop  iso_mid   iso_final svc-C"
+              ./gradlew :app:run --args="sink iso_final"
 
             Endpoints (override via -Dkafka.bootstrap=... -Dschema.registry.url=...):
               kafka.bootstrap     = localhost:30092
