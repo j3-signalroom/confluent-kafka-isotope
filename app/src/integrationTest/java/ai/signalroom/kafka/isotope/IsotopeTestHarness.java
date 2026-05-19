@@ -115,17 +115,8 @@ final class IsotopeTestHarness {
         return p;
     }
 
-    /** Consumer with no interceptor — keeps assertions independent of consumer-side code. */
-    static KafkaConsumer<byte[], DemoEvent> bareConsumer(String groupId) {
-        return new KafkaConsumer<>(baseConsumerProps(groupId));
-    }
-
-    /** Consumer that loads the isotope interceptor. */
     static KafkaConsumer<byte[], DemoEvent> consumer(String groupId) {
-        Properties p = baseConsumerProps(groupId);
-        p.put(ConsumerConfig.INTERCEPTOR_CLASSES_CONFIG,
-            IsotopeConsumerInterceptor.class.getName());
-        return new KafkaConsumer<>(p);
+        return new KafkaConsumer<>(baseConsumerProps(groupId));
     }
 
     private static Properties baseConsumerProps(String groupId) {
