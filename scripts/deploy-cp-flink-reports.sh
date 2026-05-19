@@ -168,16 +168,16 @@ if [ "${ACTION}" = "up" ]; then
     #
     # All 6 reports run on the session cluster.
     UP_FILES=(
-        flink/sql/cp/00_source_table.fql
-        flink/sql/cp/01_register_functions.fql
-        flink/sql/cp/05_isotope_view.fql
-        flink/sql/cp/05_report_sinks.fql
-        flink/sql/cp/10_latency_report.fql
-        flink/sql/cp/20_topology_report.fql
-        flink/sql/cp/30_hop_distribution.fql
-        flink/sql/cp/40_coverage_report.fql
-        flink/sql/cp/60_stuck_trace_report.fql
-        flink/sql/cp/70_latency_percentiles_report.fql
+        scripts/flink/sql/cp/00_source_table.fql
+        scripts/flink/sql/cp/01_register_functions.fql
+        scripts/flink/sql/cp/05_isotope_view.fql
+        scripts/flink/sql/cp/05_report_sinks.fql
+        scripts/flink/sql/cp/10_latency_report.fql
+        scripts/flink/sql/cp/20_topology_report.fql
+        scripts/flink/sql/cp/30_hop_distribution.fql
+        scripts/flink/sql/cp/40_coverage_report.fql
+        scripts/flink/sql/cp/60_stuck_trace_report.fql
+        scripts/flink/sql/cp/70_latency_percentiles_report.fql
     )
 
     # File used by the deploy session itself (source + functions + views
@@ -192,10 +192,10 @@ if [ "${ACTION}" = "up" ]; then
     trap 'rm -f "${COMBINED}" "${SINKS_INIT}"' EXIT
 
     SINKS_INIT_FILES=(
-        flink/sql/cp/00_source_table.fql
-        flink/sql/cp/01_register_functions.fql
-        flink/sql/cp/05_isotope_view.fql
-        flink/sql/cp/05_report_sinks.fql
+        scripts/flink/sql/cp/00_source_table.fql
+        scripts/flink/sql/cp/01_register_functions.fql
+        scripts/flink/sql/cp/05_isotope_view.fql
+        scripts/flink/sql/cp/05_report_sinks.fql
     )
     for f in "${UP_FILES[@]}"; do
         printf -- '-- ===== %s =====\n' "$f" >> "${COMBINED}"
@@ -363,7 +363,7 @@ else
     # use a persistent catalog and (b) it's the documented teardown for
     # the FQL contract.
     echo "→ Applying teardown FQL ..."
-    copy_to_pod flink/sql/cp/99_teardown.fql "${JM_POD}" /tmp/99_teardown.fql
+    copy_to_pod scripts/flink/sql/cp/99_teardown.fql "${JM_POD}" /tmp/99_teardown.fql
     kubectl exec -n "${NAMESPACE}" "${JM_POD}" -- \
         bash -lc "/opt/flink/bin/sql-client.sh -f /tmp/99_teardown.fql" \
         || echo "→ Teardown FQL hit non-fatal errors (probably already-dropped objects)."

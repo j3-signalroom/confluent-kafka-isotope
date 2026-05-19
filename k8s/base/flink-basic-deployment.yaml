@@ -60,7 +60,7 @@ spec:
               mountPath: /flink-lib
         # 3) Download Apache Flink's SR-integrated Avro format. The
         # isotope-report-*-1m sink tables declared by
-        # flink/sql/cp/05_report_sinks.fql use 'value.format' =
+        # scripts/flink/sql/cp/05_report_sinks.fql use 'value.format' =
         # 'avro-confluent', which auto-registers each sink's schema in
         # Schema Registry under `<topic>-value`. Control Center
         # deserializes these topics natively. The jar is an uber-jar

@@ -31,7 +31,7 @@ locals {
   ]
 
   # Sink topics for the six Flink SQL reports. Names mirror CP's sink topic
-  # names (flink/sql/cp/{10,20,30,40,60,70}_*.fql) so report consumers see the
+  # names (scripts/flink/sql/cp/{10,20,30,40,60,70}_*.fql) so report consumers see the
   # same topic layout regardless of runtime.
   isotope_report_topics = [
     "isotope_report_latency_1m",
