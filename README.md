@@ -12,16 +12,16 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
 
 **Table of Contents**
 <!-- toc -->
-- [1.0 How the isotope is carried](#10-how-the-isotope-is-carried)
-- [2.0 Repo layout](#20-repo-layout)
-- [3.0 Running](#30-running)
-  - [3.1. Unit tests (no broker, instant)](#31-unit-tests-no-broker-instant)
-  - [3.2 Demo CLI — see one trace propagate live](#32-demo-cli--see-one-trace-propagate-live)
-  - [3.3 Integration tests (live Kafka via Minikube)](#33-integration-tests-live-kafka-via-minikube)
-  - [3.4 Flink SQL reports on Confluent Platform (Minikube)](#34-flink-sql-reports-on-confluent-platform-minikube)
-    - [3.4.1 Format-by-domain](#341-format-by-domain)
-  - [3.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)](#35-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)
-  - [3.6 Recommended path the first time through](#36-recommended-path-the-first-time-through)
+- [**1.0 How the isotope is carried**](#10-how-the-isotope-is-carried)
+- [**2.0 Repo layout**](#20-repo-layout)
+- [**3.0 Running**](#30-running)
+  - [**3.1. Unit tests (no broker, instant)**](#31-unit-tests-no-broker-instant)
+  - [**3.2 Demo CLI — see one trace propagate live**](#32-demo-cli--see-one-trace-propagate-live)
+  - [**3.3 Integration tests (live Kafka via Minikube)**](#33-integration-tests-live-kafka-via-minikube)
+  - [**3.4 Flink SQL reports on Confluent Platform for Apache Flink (Minikube)**](#34-flink-sql-reports-on-confluent-platform-for-apache-flink-minikube)
+    - [**3.4.1 Format-by-domain**](#341-format-by-domain)
+  - [**3.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**](#35-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)
+  - [**3.6 Recommended path the first time through**](#36-recommended-path-the-first-time-through)
 <!-- tocstop -->
 
 ---
@@ -82,7 +82,7 @@ Makefile                                cp-up / flink-up / kafka-pf-up / ...
 ```bash
 ./gradlew test                       # both subprojects
 # or scoped:
-./gradlew :app:test                  # IsotopeCodecTest        — JSON roundtrip, hop eviction, header size, UUIDv7 properties (10 tests)
+./gradlew :app:test                  # IsotopeCodecTest           — JSON roundtrip, hop eviction, header size, UUIDv7 properties (10 tests)
 ./gradlew :ptf:test                  # LatencyPercentilesUDAFTest — T-Digest accumulator semantics
 ```
 
@@ -154,7 +154,7 @@ The integration tests cover:
 | `ConsumerInterceptorIT` | `IsotopeContext.adoptFromRecord` extracts isotope into thread-local on tagged records; clears the thread-local for untagged records |
 | `ThreeStageHopPropagationIT` | `svc-A → topic-AB → svc-B → topic-BC → svc-C` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `svc-A`, this = `svc-B`, hop count = 2) at the terminal |
 
-### **3.4 Flink SQL reports on Minikube**
+### **3.4 Flink SQL reports on Confluent Platform for Apache Flink (Minikube)**
 
 The four Phase-1 reports plus the Phase-2 PTF and UDAF reports — six in total — run against a Flink session cluster managed by the Confluent Flink Kubernetes Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see **[§ 3.5](#35-flink-sql-reports-on-confluent-cloud-ccaf)** for that path; this section is the local-Minikube path.
 
@@ -273,11 +273,7 @@ Runs `terraform destroy -auto-approve` — deletes every resource above, includi
 ### **3.6 Recommended path the first time through**
 
 1. `./gradlew test` — proves the codec + UDAF logic without any cluster.
-2. `make cp-up && make kafka-pf-up && ./gradlew :app:integrationTest` —
-   proves the broker + SR + interceptor + Protobuf path end-to-end.
-3. The 3-stage demo CLI walkthrough above — visually shows the trace
-   accumulating hops.
-4. `make flink-up && make flink-reports-up && make flink-sql` — reports
-   populate as you drive traffic via the demo CLI (see § 3.2).
-5. (Optional) `make cc-flink-reports-up` — the CCAF parallel; see § 3.5
-   for prereqs and the SASL-config caveat for the demo CLI.
+2. `make cp-up && make kafka-pf-up && ./gradlew :app:integrationTest` — proves the broker + SR + interceptor + Protobuf path end-to-end.
+3. The 3-stage demo CLI walkthrough above — visually shows the trace accumulating hops.
+4. `make flink-up && make flink-reports-up && make flink-sql` — reports populate as you drive traffic via the demo CLI (see § 3.2).
+5. (Optional) `make cc-flink-reports-up` — the CCAF parallel; see § 3.5 for prereqs and the SASL-config caveat for the demo CLI.

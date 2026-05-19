@@ -166,6 +166,10 @@ if [ "${create_action}" = true ]; then
     print_info "Next step — source the helper in your own shell to export the env vars:"
     print_info "    source scripts/cc-cli-env.sh"
     print_info "Then drive the 3-stage demo (see README § 3.5)."
+
+    print_info "Creating the Terraform visualization..."
+    terraform graph | dot -Tpng > "$TERRAFORM_DIR/terraform.png"
+    print_info "Terraform visualization created at: $TERRAFORM_DIR/terraform.png"
 else
     print_step "terraform destroy"
     terraform destroy -auto-approve -input=false
