@@ -34,15 +34,26 @@ import java.util.Properties;
 import java.util.UUID;
 
 /**
- * Demo CLI. Two modes:
+ * Demo CLI. Four modes:
  *
  *   send <topic> <service> <payload>
  *      Produces a single SR-framed Protobuf DemoEvent to <topic>, tagged
  *      by IsotopeProducerInterceptor with the trace headers.
  *
+ *   hop <in-topic> <out-topic> <service>
+ *      Consume-then-produce stage. Adopts the inbound isotope, emits a
+ *      consume-edge marker to iso_consume_events, then produces the same
+ *      DemoEvent to <out-topic> tagged as <service>.
+ *
+ *   consume <topic> <service>
+ *      Terminal-consumer stage. Subscribes to <topic>, emits a
+ *      consume-edge marker to iso_consume_events as <service>, and
+ *      pretty-prints the isotope trail. Use this for the final node of
+ *      a bipartite-topology demo (svc-D in svc-A → svc-B → svc-C → svc-D).
+ *
  *   sink <topic>
- *      Subscribes to <topic> and pretty-prints the isotope trail for
- *      every arriving record, until interrupted.
+ *      Passive peek tool — pretty-prints the isotope trail but does NOT
+ *      emit a consume-edge marker. Use for ad-hoc inspection.
  *
  * Reads kafka.bootstrap / schema.registry.url system properties; defaults
  * are wired for the local Minikube setup once `make kafka-pf-up` is up.
@@ -105,25 +116,28 @@ public final class App {
     public static void main(String[] args) throws Exception {
         if (args.length == 0) { usage(); System.exit(2); }
         switch (args[0]) {
-            case "send" -> send(args);
-            case "hop"  -> hop(args);
-            case "sink" -> sink(args);
-            default     -> { usage(); System.exit(2); }
+            case "send"    -> send(args);
+            case "hop"     -> hop(args);
+            case "consume" -> consume(args);
+            case "sink"    -> sink(args);
+            default        -> { usage(); System.exit(2); }
         }
     }
 
     private static void usage() {
         System.err.println("""
             Usage:
-              app send <topic>     <service> <payload>
-              app hop  <in-topic>  <out-topic> <service>
-              app sink <topic>
+              app send    <topic>     <service>   <payload>
+              app hop     <in-topic>  <out-topic> <service>
+              app consume <topic>     <service>
+              app sink    <topic>
 
             Examples (after `make kafka-pf-up`):
-              ./gradlew :app:run --args="send iso_start svc-A 'hello'"
-              ./gradlew :app:run --args="hop  iso_start iso_mid   svc-B"
-              ./gradlew :app:run --args="hop  iso_mid   iso_final svc-C"
-              ./gradlew :app:run --args="sink iso_final"
+              ./gradlew :app:run --args="send    iso_start svc-A 'hello'"
+              ./gradlew :app:run --args="hop     iso_start iso_mid   svc-B"
+              ./gradlew :app:run --args="hop     iso_mid   iso_final svc-C"
+              ./gradlew :app:run --args="consume iso_final svc-D"
+              ./gradlew :app:run --args="sink    iso_final"
 
             Endpoints (override via -Dkafka.bootstrap=... -Dschema.registry.url=...):
               kafka.bootstrap     = localhost:30092
@@ -203,6 +217,25 @@ public final class App {
         }
     }
 
+    /**
+     * Builds the byte-array Kafka producer used by hop/consume modes to
+     * emit consume-edge markers to {@link IsotopeContext#CONSUME_EVENTS_TOPIC}.
+     * Deliberately has NO isotope producer interceptor — markers carry the
+     * inbound record's scalar headers verbatim plus
+     * {@link Isotope#HEADER_CONSUMER_SERVICE}; the interceptor would otherwise
+     * append a spurious hop describing the marker emission itself.
+     */
+    private static KafkaProducer<byte[], byte[]> markerProducer() {
+        Properties p = new Properties();
+        p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP);
+        p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,   ByteArraySerializer.class.getName());
+        p.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        // Best-effort: don't block the host pipeline on broker acks for markers.
+        p.put(ProducerConfig.LINGER_MS_CONFIG, "5");
+        applyKafkaSecurity(p);
+        return new KafkaProducer<>(p);
+    }
+
     // -- hop ------------------------------------------------------------
 
     /**
@@ -226,6 +259,7 @@ public final class App {
 
         ensureTopic(inTopic);
         ensureTopic(outTopic);
+        ensureTopic(IsotopeContext.CONSUME_EVENTS_TOPIC);
 
         Properties cp = new Properties();
         cp.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP);
@@ -255,13 +289,15 @@ public final class App {
         System.out.printf("→ hopping %s → %s as %s (Ctrl-C to stop)%n", inTopic, outTopic, service);
 
         try (KafkaConsumer<byte[], DemoEvent> consumer = new KafkaConsumer<>(cp);
-             KafkaProducer<byte[], DemoEvent> producer = new KafkaProducer<>(pp)) {
+             KafkaProducer<byte[], DemoEvent> producer = new KafkaProducer<>(pp);
+             KafkaProducer<byte[], byte[]>    markers  = markerProducer()) {
             consumer.subscribe(List.of(inTopic));
             while (true) {
                 ConsumerRecords<byte[], DemoEvent> batch = consumer.poll(Duration.ofSeconds(2));
                 for (ConsumerRecord<byte[], DemoEvent> rec : batch) {
                     try {
                         IsotopeContext.adoptFromRecord(rec);
+                        IsotopeContext.recordConsume(rec, service, markers);
                         RecordMetadata md = producer
                             .send(new ProducerRecord<>(outTopic, rec.key(), rec.value()))
                             .get();
@@ -270,6 +306,51 @@ public final class App {
                     } finally {
                         IsotopeContext.clear();
                     }
+                }
+            }
+        }
+    }
+
+    // -- consume --------------------------------------------------------
+
+    /**
+     * Terminal-consumer stage. Subscribes to {@code topic}, emits a
+     * consume-edge marker to {@link IsotopeContext#CONSUME_EVENTS_TOPIC} as
+     * {@code service} for every arriving record, and pretty-prints the
+     * isotope trail. Unlike {@link #hop}, does not re-produce the record
+     * downstream — this is what makes the consumer "terminal" and the
+     * marker the only way it shows up in the bipartite topology graph.
+     */
+    private static void consume(String[] args) throws Exception {
+        if (args.length < 3) { usage(); System.exit(2); }
+        String topic   = args[1];
+        String service = args[2];
+
+        ensureTopic(topic);
+        ensureTopic(IsotopeContext.CONSUME_EVENTS_TOPIC);
+
+        Properties p = new Properties();
+        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP);
+        p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,   ByteArrayDeserializer.class.getName());
+        p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaProtobufDeserializer.class.getName());
+        p.put(AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, SCHEMA_REGISTRY_URL);
+        p.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
+            DemoEvent.class.getName());
+        p.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-consume-" + service + "-" + UUID.randomUUID());
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        applyKafkaSecurity(p);
+        applySchemaRegistryAuth(p);
+
+        System.out.printf("→ consuming %s as %s (Ctrl-C to stop)%n", topic, service);
+        try (KafkaConsumer<byte[], DemoEvent> consumer = new KafkaConsumer<>(p);
+             KafkaProducer<byte[], byte[]>   markers  = markerProducer()) {
+            consumer.subscribe(List.of(topic));
+            while (true) {
+                ConsumerRecords<byte[], DemoEvent> batch = consumer.poll(Duration.ofSeconds(2));
+                for (ConsumerRecord<byte[], DemoEvent> rec : batch) {
+                    IsotopeContext.recordConsume(rec, service, markers);
+                    print(rec);
                 }
             }
         }

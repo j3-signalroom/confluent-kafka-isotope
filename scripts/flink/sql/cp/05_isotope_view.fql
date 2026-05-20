@@ -34,4 +34,10 @@ SELECT
         `event_time`
     ) AS latency_ms
 FROM isotope_raw
-WHERE `headers`['x-isotope-trace-id'] IS NOT NULL;
+WHERE `headers`['x-isotope-trace-id']        IS NOT NULL
+  -- Exclude consume-edge markers (records on iso_consume_events). They
+  -- forward all six produce-side scalar headers, but additionally carry
+  -- x-isotope-consumer-service. Filtering by its absence keeps this view
+  -- restricted to genuine produced records; consume markers feed the
+  -- separate consume_events view (see 06_consume_events_view.fql).
+  AND `headers`['x-isotope-consumer-service'] IS NULL;

@@ -234,8 +234,40 @@ resource "confluent_flink_statement" "alter_iso_final_add_headers" {
   ]
 }
 
+resource "confluent_flink_statement" "alter_iso_consume_events_add_headers" {
+  statement = <<-EOT
+    ALTER TABLE `iso_consume_events`
+        ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [
+    confluent_kafka_topic.isotope_event["iso_consume_events"],
+    confluent_flink_compute_pool.isotope,
+  ]
+}
+
 # ---------------------------------------------------------------------------
-# Statement 4 — `isotope_raw` view over the three iso_* topics.
+# Statement 4 — `isotope_raw` view over the iso_* topics, including
+# iso_consume_events. The downstream `isotope` view filters to records
+# without x-isotope-consumer-service (real produces); `consume_events`
+# filters to records *with* it (consume-edge markers).
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "isotope_raw_view" {
@@ -254,7 +286,12 @@ resource "confluent_flink_statement" "isotope_raw_view" {
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `iso_final`;
+    FROM `iso_final`
+    UNION ALL
+    SELECT
+        `$rowtime` AS `event_time`,
+        `headers`  AS `headers`
+    FROM `iso_consume_events`;
   EOT
 
   properties    = local.flink_statement_properties
@@ -278,6 +315,7 @@ resource "confluent_flink_statement" "isotope_raw_view" {
     confluent_flink_statement.alter_iso_start_add_headers,
     confluent_flink_statement.alter_iso_mid_add_headers,
     confluent_flink_statement.alter_iso_final_add_headers,
+    confluent_flink_statement.alter_iso_consume_events_add_headers,
   ]
 }
 
@@ -304,7 +342,8 @@ resource "confluent_flink_statement" "isotope_view" {
             `event_time`
         ) AS latency_ms
     FROM isotope_raw
-    WHERE `headers`['x-isotope-trace-id'] IS NOT NULL;
+    WHERE `headers`['x-isotope-trace-id']         IS NOT NULL
+      AND `headers`['x-isotope-consumer-service'] IS NULL;
   EOT
 
   properties    = local.flink_statement_properties
@@ -328,7 +367,51 @@ resource "confluent_flink_statement" "isotope_view" {
 }
 
 # ---------------------------------------------------------------------------
-# Statements 6-11 — 6 sink tables. SR-framed Protobuf format is requested
+# Statement 5b — `consume_events` typed view (header decoder, consume side).
+# Filters isotope_raw to records with x-isotope-consumer-service — the marker
+# header IsotopeContext.recordConsume() adds — so this view's rows are the
+# inbound edges of the bipartite topology graph.
+# ---------------------------------------------------------------------------
+
+resource "confluent_flink_statement" "consume_events_view" {
+  statement = <<-EOT
+    CREATE VIEW IF NOT EXISTS consume_events AS
+    SELECT
+        CAST(`headers`['x-isotope-trace-id']                       AS STRING) AS trace_id,
+        CAST(CAST(`headers`['x-isotope-origin-ts']    AS STRING)   AS BIGINT) AS origin_ts_ms,
+        CAST(`headers`['x-isotope-origin-service']                 AS STRING) AS origin_service,
+        CAST(`headers`['x-isotope-this-service']                   AS STRING) AS producer_service,
+        CAST(`headers`['x-isotope-this-topic']                     AS STRING) AS consumed_topic,
+        CAST(`headers`['x-isotope-consumer-service']               AS STRING) AS consumer_service,
+        CAST(CAST(`headers`['x-isotope-hop-count']    AS STRING)   AS INT)    AS hop_count_at_consume,
+        `event_time`
+    FROM isotope_raw
+    WHERE `headers`['x-isotope-consumer-service'] IS NOT NULL
+      AND `headers`['x-isotope-trace-id']         IS NOT NULL;
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [confluent_flink_statement.isotope_raw_view]
+}
+
+# ---------------------------------------------------------------------------
+# Statements 6-12 — 7 sink tables. SR-framed Protobuf format is requested
 # via `sql.tables.kafka.{value,key}.format` statement-level properties
 # (see local.flink_statement_sink_properties). CCAF derives the Protobuf
 # schema from the column types and registers it in SR under subject
@@ -385,6 +468,43 @@ resource "confluent_flink_statement" "isotope_report_topology_1m" {
         `topic`            STRING,
         `records`          BIGINT,
         `distinct_traces`  BIGINT
+    ) WITH (
+        'value.format' = 'proto-registry'
+    );
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [confluent_flink_compute_pool.isotope]
+}
+
+resource "confluent_flink_statement" "isotope_report_bipartite_topology_1m" {
+  statement = <<-EOT
+    CREATE TABLE IF NOT EXISTS isotope_report_bipartite_topology_1m (
+        `window_start`      BIGINT,
+        `window_end`        BIGINT,
+        `edge_type`         STRING,
+        `producer_service`  STRING,
+        `topic`             STRING,
+        `consumer_service`  STRING,
+        `origin_service`    STRING,
+        `records`           BIGINT,
+        `distinct_traces`   BIGINT
     ) WITH (
         'value.format' = 'proto-registry'
     );
@@ -647,6 +767,74 @@ resource "confluent_flink_statement" "insert_topology_report" {
   depends_on = [
     confluent_flink_statement.isotope_view,
     confluent_flink_statement.isotope_report_topology_1m,
+  ]
+}
+
+resource "confluent_flink_statement" "insert_bipartite_topology_report" {
+  statement = <<-EOT
+    INSERT INTO isotope_report_bipartite_topology_1m
+    SELECT
+        UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+        UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        CAST('produce' AS STRING)                             AS `edge_type`,
+        `this_service`                                        AS `producer_service`,
+        `this_topic`                                          AS `topic`,
+        CAST(NULL AS STRING)                                  AS `consumer_service`,
+        `origin_service`,
+        COUNT(*)                                              AS `records`,
+        COUNT(DISTINCT trace_id)                              AS `distinct_traces`
+    FROM TABLE(
+        TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+    )
+    GROUP BY
+        `window_start`,
+        `window_end`,
+        `origin_service`,
+        `this_service`,
+        `this_topic`
+    UNION ALL
+    SELECT
+        UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+        UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        CAST('consume' AS STRING)                             AS `edge_type`,
+        CAST(NULL AS STRING)                                  AS `producer_service`,
+        `consumed_topic`                                      AS `topic`,
+        `consumer_service`,
+        `origin_service`,
+        COUNT(*)                                              AS `records`,
+        COUNT(DISTINCT trace_id)                              AS `distinct_traces`
+    FROM TABLE(
+        TUMBLE(TABLE consume_events, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+    )
+    GROUP BY
+        `window_start`,
+        `window_end`,
+        `origin_service`,
+        `consumer_service`,
+        `consumed_topic`;
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [compute_pool]
+  }
+
+  depends_on = [
+    confluent_flink_statement.isotope_view,
+    confluent_flink_statement.consume_events_view,
+    confluent_flink_statement.isotope_report_bipartite_topology_1m,
   ]
 }
 

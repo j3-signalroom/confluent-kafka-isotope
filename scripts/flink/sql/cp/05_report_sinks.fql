@@ -76,6 +76,32 @@ CREATE TABLE IF NOT EXISTS topology_report_1m (
     'properties.group.id'                = 'isotope-report-reader'
 );
 
+-- Bipartite-topology report. One row per (window, edge_type, edge endpoints).
+-- For `edge_type = 'produce'`: producer_service is set, consumer_service is NULL.
+-- For `edge_type = 'consume'`: consumer_service is set, producer_service is NULL.
+-- The topic column is always set; together with edge_type it places the row
+-- on one side or the other of the bipartite service↔topic graph.
+CREATE TABLE IF NOT EXISTS bipartite_topology_report_1m (
+    `window_start`      BIGINT,
+    `window_end`        BIGINT,
+    `edge_type`         STRING,
+    `producer_service`  STRING,
+    `topic`             STRING,
+    `consumer_service`  STRING,
+    `origin_service`    STRING,
+    `records`           BIGINT,
+    `distinct_traces`   BIGINT
+) WITH (
+    'connector'                          = 'kafka',
+    'topic'                              = 'isotope_report_bipartite_topology_1m',
+    'properties.bootstrap.servers'       = 'kafka:9071',
+    'value.format'                       = 'avro-confluent',
+    'value.avro-confluent.url'           = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'                   = 'fixed',
+    'scan.startup.mode'                  = 'earliest-offset',
+    'properties.group.id'                = 'isotope-report-reader'
+);
+
 CREATE TABLE IF NOT EXISTS hop_distribution_1m (
     `window_start`    BIGINT,
     `window_end`      BIGINT,

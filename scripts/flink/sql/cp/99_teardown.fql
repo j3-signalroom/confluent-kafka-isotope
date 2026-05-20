@@ -13,10 +13,12 @@
 DROP TABLE    IF EXISTS latency_percentiles_flat_1m;
 DROP TABLE    IF EXISTS coverage_report_1m;
 DROP TABLE    IF EXISTS hop_distribution_1m;
+DROP TABLE    IF EXISTS bipartite_topology_report_1m;
 DROP TABLE    IF EXISTS topology_report_1m;
 DROP TABLE    IF EXISTS latency_report_1m;
 
--- Upstream typed view → source table.
+-- Upstream typed views → source table.
+DROP VIEW     IF EXISTS consume_events;
 DROP VIEW     IF EXISTS isotope;
 DROP TABLE    IF EXISTS isotope_raw;
 
