@@ -30,7 +30,7 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
 ## **1.0 How the isotope is carried**
 
 - **Header `x-isotope`** (JSON bytes) carries the full hop history, forwarded by every hop:
-  - `t` — 16-byte **UUIDv7** trace ID (RFC 9562): 48-bit ms timestamp in the high bits + 74 bits random. Stable for the life of the trace,and lexicographic byte order matches creation order — sort trace IDs and you get chronological order for free.
+  - `t` — 16-byte **UUIDv7** trace ID ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562)): 48-bit ms timestamp in the high bits + 74 bits random. Stable for the life of the trace,and lexicographic byte order matches creation order — sort trace IDs and you get chronological order for free.
   - `o` — origin timestamp (ms) — same value as the timestamp embedded in the UUIDv7 trace ID; kept as its own field for typed access from Flink SQL without needing to decode the UUID bytes.
   - `s` — origin service name (set once, never reassigned)
   - `h` — ordered list of hops, each `{s: service, t: topic, m: tsMs}`
