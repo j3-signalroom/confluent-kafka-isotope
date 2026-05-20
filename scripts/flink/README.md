@@ -1,10 +1,22 @@
 # Flink SQL reports
 
-Seven reports that read the isotope-tagged stream and surface what's
-flowing where, how fast, and how reliably. Each runs as a long-lived
-`INSERT INTO <report>_1m SELECT …` streaming job. The aggregation
-logic is identical across runtimes; only the source/sink DDL and
-function-registration glue differ.
+Seven reports that read two streams of isotope metadata — the
+**produce side** (the `x-isotope-*` headers stamped on every event
+topic record by `IsotopeProducerInterceptor`) and the **consume
+side** (the value-less marker records on `iso_consume_events`
+emitted by `IsotopeContext.recordConsume`) — and surface what's
+flowing where, how fast, and how reliably. Each report runs as a
+long-lived `INSERT INTO <report>_1m SELECT …` streaming job. The
+aggregation logic is identical across runtimes; only the
+source/sink DDL and function-registration glue differ.
+
+The headline addition is the `bipartite_topology` report: it unions
+the produce and consume views to render the pipeline as a literal
+[**bipartite graph**](https://en.wikipedia.org/wiki/Bipartite_graph)
+from graph theory — services in one vertex set, topics in the other,
+edges crossing between them in both directions. See [root README §1.0
+"Background — why 'bipartite'?"](../../README.md#10-how-the-isotope-is-carried)
+for the full motivation.
 
 | Runtime | Reports | Sink format | Where the SQL lives |
 |---|---|---|---|
@@ -12,6 +24,24 @@ function-registration glue differ.
 | **Confluent Cloud for Apache Flink (CCAF)** | 6 (no percentiles — UDAFs disallowed) | `proto-registry` (SR-framed Protobuf) | Inlined as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — applied by [scripts/deploy-cc-flink-reports.sh](../deploy-cc-flink-reports.sh) |
 
 Control Center deserializes both sink formats natively.
+
+## What each report computes
+
+Every report aggregates over a `TUMBLE(event_time, INTERVAL '1' MINUTE)`
+window. The "Source view" column names the typed view (or views) the
+report reads from; the views in turn filter the single `isotope_raw`
+source table by the presence/absence of the
+`x-isotope-consumer-service` header.
+
+| Report | Source view | What it computes | Runtimes |
+|---|---|---|---|
+| `latency`            | `isotope`                 | avg / min / max end-to-end latency by `origin_service × current_topic` | CP, CCAF |
+| `topology`           | `isotope`                 | produce-edge counts per `(producer_service, topic)` per minute | CP, CCAF |
+| `bipartite_topology` | `isotope` ∪ `consume_events` | full bipartite graph: produce edges + consume edges per minute | CP, CCAF |
+| `hop_distribution`   | `isotope`                 | record counts bucketed by `hop_count` per topic per minute | CP, CCAF |
+| `coverage`           | `isotope`                 | distinct traces per topic per minute | CP, CCAF |
+| `stuck_trace`        | `isotope`                 | alerts (via `STUCK_TRACE_PTF`) for traces idle ≥60s of event time | CP, CCAF |
+| `latency_percentiles`| `isotope`                 | p50 / p95 / p99 (via `LATENCY_PERCENTILES` UDAF, T-Digest) | CP only |
 
 ## Format-by-runtime, not by domain
 
@@ -115,6 +145,6 @@ make cc-flink-reports-down CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
                            # terraform destroy: deletes the environment and everything in it
 ```
 
-See the [root README §3.5](../../README.md) for the full CCAF
+See the [root README §4.5](../../README.md#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF
 walkthrough, including the multi-window sustained-traffic pattern
 required to see tumbling-window aggregates emit.

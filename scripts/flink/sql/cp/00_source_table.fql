@@ -10,10 +10,15 @@
 -- and can be applied verbatim.
 --
 -- Reads every topic matching `topic-pattern` below — defaults to `iso_.*`
--- which captures everything the demo CLI creates (iso_start, iso_mid,
--- iso_final). Adjust the pattern, or switch to `'topic' = '<name>'`, for
--- your real pipeline. The Flink Kafka source connector handles broker
--- topic discovery and adds new topics dynamically as they appear.
+-- which captures everything the demo CLI creates: the three event topics
+-- (iso_start, iso_mid, iso_final) carrying isotope-stamped DemoEvent
+-- records, plus iso_consume_events carrying the value-less consume-edge
+-- markers that `IsotopeContext.recordConsume` emits. Downstream typed
+-- views (05_isotope_view, 06_consume_events_view) partition this single
+-- source by presence/absence of the `x-isotope-consumer-service` header.
+-- Adjust the pattern, or switch to `'topic' = '<name>'`, for your real
+-- pipeline. The Flink Kafka source connector handles broker topic
+-- discovery and adds new topics dynamically as they appear.
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS isotope_raw (
