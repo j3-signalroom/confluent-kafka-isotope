@@ -1,0 +1,34 @@
+-- =====================================================================
+-- Typed view of the consume-edge stream
+--
+-- Decodes the consume-edge markers that consumers emit to the
+-- iso_consume_events topic via IsotopeContext.recordConsume(). Each marker
+-- forwards the producer-side scalar headers from the inbound record AND
+-- adds `x-isotope-consumer-service` — the field this view keys off to
+-- distinguish a marker from a regular produced record.
+--
+-- Columns mirror `isotope` where they overlap, plus:
+--   - `consumer_service`  : the service that emitted this marker (i.e.
+--                            the downstream node of the consume edge).
+--   - `consumed_topic`    : alias for the most-recent-hop topic, which is
+--                            the topic the marker's emitter consumed FROM.
+--   - `producer_service`  : the upstream node of the consume edge.
+--
+-- Reads from the same isotope_raw source table as `isotope`. The two
+-- views partition that source by the presence/absence of
+-- x-isotope-consumer-service.
+-- =====================================================================
+
+CREATE VIEW IF NOT EXISTS consume_events AS
+SELECT
+    CAST(`headers`['x-isotope-trace-id']                          AS STRING) AS trace_id,
+    CAST(CAST(`headers`['x-isotope-origin-ts']      AS STRING)    AS BIGINT) AS origin_ts_ms,
+    CAST(`headers`['x-isotope-origin-service']                    AS STRING) AS origin_service,
+    CAST(`headers`['x-isotope-this-service']                      AS STRING) AS producer_service,
+    CAST(`headers`['x-isotope-this-topic']                        AS STRING) AS consumed_topic,
+    CAST(`headers`['x-isotope-consumer-service']                  AS STRING) AS consumer_service,
+    CAST(CAST(`headers`['x-isotope-hop-count']      AS STRING)    AS INT)    AS hop_count_at_consume,
+    `event_time`
+FROM isotope_raw
+WHERE `headers`['x-isotope-consumer-service'] IS NOT NULL
+  AND `headers`['x-isotope-trace-id']         IS NOT NULL;

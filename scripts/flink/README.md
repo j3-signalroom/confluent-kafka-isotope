@@ -1,6 +1,6 @@
 # Flink SQL reports
 
-Six reports that read the isotope-tagged stream and surface what's
+Seven reports that read the isotope-tagged stream and surface what's
 flowing where, how fast, and how reliably. Each runs as a long-lived
 `INSERT INTO <report>_1m SELECT …` streaming job. The aggregation
 logic is identical across runtimes; only the source/sink DDL and
@@ -8,8 +8,8 @@ function-registration glue differ.
 
 | Runtime | Reports | Sink format | Where the SQL lives |
 |---|---|---|---|
-| **Confluent Platform Flink** (cp-flink 2.1.2 session cluster on Minikube) | 6 (latency, topology, hop-distribution, coverage, stuck-trace, latency-percentiles) | `avro-confluent` (SR-framed Avro) | [scripts/flink/sql/cp/](sql/cp/) — applied by [scripts/deploy-cp-flink-reports.sh](../deploy-cp-flink-reports.sh) |
-| **Confluent Cloud for Apache Flink (CCAF)** | 5 (no percentiles — UDAFs disallowed) | `proto-registry` (SR-framed Protobuf) | Inlined as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — applied by [scripts/deploy-cc-flink-reports.sh](../deploy-cc-flink-reports.sh) |
+| **Confluent Platform Flink** (cp-flink 2.1.2 session cluster on Minikube) | 7 (latency, topology, bipartite-topology, hop-distribution, coverage, stuck-trace, latency-percentiles) | `avro-confluent` (SR-framed Avro) | [scripts/flink/sql/cp/](sql/cp/) — applied by [scripts/deploy-cp-flink-reports.sh](../deploy-cp-flink-reports.sh) |
+| **Confluent Cloud for Apache Flink (CCAF)** | 6 (no percentiles — UDAFs disallowed) | `proto-registry` (SR-framed Protobuf) | Inlined as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — applied by [scripts/deploy-cc-flink-reports.sh](../deploy-cc-flink-reports.sh) |
 
 Control Center deserializes both sink formats natively.
 
@@ -44,10 +44,12 @@ SR-Protobuf gap doesn't apply.
 scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
   00_source_table.fql                   CREATE TABLE with 'connector' = 'kafka' (reads iso_.*)
   01_register_functions.fql             CREATE FUNCTION … USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar'
-  05_isotope_view.fql                   Typed view; decodes x-isotope-* header scalars
+  05_isotope_view.fql                   Typed view; decodes x-isotope-* header scalars (produces only)
+  06_consume_events_view.fql            Typed view of iso_consume_events markers (consume edges)
   05_report_sinks.fql                   CREATE TABLE for each isotope_report_*_1m Kafka sink (avro-confluent)
   10_latency_report.fql                 INSERT INTO: avg/min/max latency by origin × topic
   20_topology_report.fql                INSERT INTO: produce-edge counts per minute
+  25_bipartite_topology_report.fql      INSERT INTO: produce ∪ consume edges (bipartite graph) per minute
   30_hop_distribution.fql               INSERT INTO: hop-count buckets per topic per minute
   40_coverage_report.fql                INSERT INTO: distinct traces per topic per minute
   60_stuck_trace_report.fql             INSERT INTO: stuck-trace alerts via STUCK_TRACE_PTF
@@ -55,13 +57,13 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
   99_teardown.fql                       DROP TABLE/VIEW/FUNCTION (companion to flink-reports-down)
 ```
 
-CCAF runs the same five non-percentile reports, but the SQL lives
+CCAF runs the same six non-percentile reports, but the SQL lives
 inline as `confluent_flink_statement` resources in
 [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf)
-— 16 statements: ALTER (×3) + view + typed view + 5 sinks +
-`STUCK_TRACE_PTF` registration + 5 INSERTs. The JAR is uploaded as a
-`confluent_flink_artifact` and referenced via
-`USING JAR 'confluent-artifact://<id>'`.
+— 20 statements: ALTER (×4) + raw view + typed produce view + typed
+consume view + 6 sinks + `STUCK_TRACE_PTF` registration + 6 INSERTs.
+The JAR is uploaded as a `confluent_flink_artifact` and referenced
+via `USING JAR 'confluent-artifact://<id>'`.
 
 ## Wire-format detail (CP only)
 
@@ -95,7 +97,7 @@ CP, `confluent-artifact://` reference on CCAF).
 
 ```bash
 make flink-up           # cert-manager → CFK Flink Operator → CMF → session cluster
-make flink-reports-up   # build PTF JAR, copy to JM, create sink topics, submit 6 INSERT INTO jobs
+make flink-reports-up   # build PTF JAR, copy to JM, create sink topics, submit 7 INSERT INTO jobs
 make flink-sql          # interactive SQL Client (auto-loads sink DDL so SELECT * works)
 make flink-reports-down # cancel jobs, drop tables, delete sink topics + SR subjects
 make flink-down         # tear down cluster + operator + cert-manager
@@ -105,7 +107,7 @@ make flink-down         # tear down cluster + operator + cert-manager
 
 ```bash
 make cc-flink-reports-up   CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
-                           # terraform apply: env + cluster + topics + compute pool + artifact + 16 statements
+                           # terraform apply: env + cluster + topics + compute pool + artifact + 20 statements
                            # also regenerates terraform/terraform.png via `terraform graph | dot`
 source scripts/cc-cli-env.sh          # exports BOOTSTRAP / SR_URL / KAFKA_KEY / KAFKA_SECRET / SR_KEY / SR_SECRET / JAAS
 scripts/cc-app-run.sh send iso_start svc-A 'hello'   # drives traffic with the SASL config

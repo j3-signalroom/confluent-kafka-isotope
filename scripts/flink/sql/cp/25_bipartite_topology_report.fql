@@ -1,0 +1,68 @@
+-- =====================================================================
+-- Bipartite-topology report — per-minute counts of records flowing across
+-- every (service, topic) edge in both directions:
+--
+--   Produce edges: `service → topic`   (from the `isotope` view; one row
+--                                       per produced record per minute)
+--   Consume edges: `topic → service`   (from the `consume_events` view;
+--                                       one row per consume-marker)
+--
+-- UNION ALL stitches them into a single bipartite table. The
+-- `edge_type` column ('produce' | 'consume') tells query authors which
+-- side of the graph each row belongs to; `producer_service` is the
+-- relevant endpoint on produce rows, `consumer_service` on consume rows.
+--
+-- Caveats:
+--   1. Consume-side visibility depends on consumers actually calling
+--      IsotopeContext.recordConsume() — the App.java `sink` mode is a
+--      passive peek tool and intentionally does NOT emit markers. Use
+--      `hop` or `consume` for nodes that should appear in the graph.
+--   2. `producer_service` on a produce row is the most-recent-hop
+--      service, not necessarily the trace's origin (which is in
+--      `origin_service`).
+--
+-- Sinks into `bipartite_topology_report_1m` (Kafka, Avro+SR).
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope_report_bipartite_topology_1m';
+
+INSERT INTO bipartite_topology_report_1m
+SELECT
+    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    CAST('produce' AS STRING)                             AS `edge_type`,
+    `this_service`                                        AS `producer_service`,
+    `this_topic`                                          AS `topic`,
+    CAST(NULL AS STRING)                                  AS `consumer_service`,
+    `origin_service`,
+    COUNT(*)                                              AS `records`,
+    COUNT(DISTINCT trace_id)                              AS `distinct_traces`
+FROM TABLE(
+    TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `this_service`,
+    `this_topic`
+UNION ALL
+SELECT
+    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    CAST('consume' AS STRING)                             AS `edge_type`,
+    CAST(NULL AS STRING)                                  AS `producer_service`,
+    `consumed_topic`                                      AS `topic`,
+    `consumer_service`,
+    `origin_service`,
+    COUNT(*)                                              AS `records`,
+    COUNT(DISTINCT trace_id)                              AS `distinct_traces`
+FROM TABLE(
+    TUMBLE(TABLE consume_events, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `origin_service`,
+    `consumer_service`,
+    `consumed_topic`;

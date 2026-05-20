@@ -1,6 +1,6 @@
 # Confluent Kafka Isotope
 
-An example of using a Kafka **producer interceptor** to tag every message with a tracer — an *isotope* — that carries through every hop of a multi-topic pipeline. Consume-then-produce services adopt the inbound trace into thread-local with one explicit call (`IsotopeContext.adoptFromRecord(record)`) between consume and produce; the next `send()` then appends a fresh hop automatically. Apache Flink consumes the tagged records and reports on what the isotopes reveal: **end-to-end latency**, **hop topology**, **drop/duplication rates**, and **pipeline coverage**.
+An example of using a Kafka **producer interceptor** to tag every message with a tracer — an *isotope* — that carries through every hop of a multi-topic pipeline. Consume-then-produce services adopt the inbound trace into thread-local with one explicit call (`IsotopeContext.adoptFromRecord(record)`) between consume and produce; the next `send()` then appends a fresh hop automatically. For full **bipartite-topology visibility** (services *and* terminal consumers), consumers also call `IsotopeContext.recordConsume(record, service, producer)` to emit a best-effort consume-edge marker to the `iso_consume_events` topic. Apache Flink consumes the tagged records and reports on what the isotopes reveal: **end-to-end latency**, **hop topology** (produce-side and the full **bipartite service↔topic↔service graph**), **drop/duplication rates**, and **pipeline coverage**.
 
 A **portability requirement** runs through this project: the same isotope mechanism must work against both **Confluent Cloud for Apache Flink (CCAF)** (managed) and **Confluent Platform for Apache Flink** (self-managed) — both used here via Table API SQL plus uploaded UDF/PTF JARs (no DataStream code on either side). Three decisions follow from that: tagging happens in a Kafka **producer interceptor** (the one extension point both runtimes share via the broker), the on-wire **header** format is **JSON** (so Flink SQL can read the scalar fields with `CAST(headers[…] AS STRING)` and no UDF), and the optional stateful reports (`LatencyPercentilesUDAF`, `StuckTracePTF`) ship as a single JAR that registers identically on either runtime.
 
@@ -47,7 +47,9 @@ A producer with the isotope interceptor loaded appends one hop on every `send()`
 
 The exact call sites in `kafka-clients` 4.2.0: `KafkaProducer.send` invokes `interceptors.onSend` ([line 950](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L950)) and `AppendCallbacks.onCompletion` invokes `interceptors.onAcknowledgement` ([line 1600](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1600)). Exceptions thrown by the interceptor are caught and logged by the client's fan-out wrapper — they never break the `send` call.
 
-**Consumer-side adoption is explicit, not an interceptor.** A `ConsumerInterceptor.onConsume` sees a whole batch from `poll()`, but the application processes records one at a time, so a thread-local snapshot from the batch would be ambiguous. Instead, services call `IsotopeContext.adoptFromRecord(record)` per record between consume and produce. The next `send()` then sees that thread-local and appends a new hop. This project ships no consumer interceptor at all — the producer interceptor plus per-record adoption is the entire mechanism.
+**Consumer-side adoption is explicit, not an interceptor.** A `ConsumerInterceptor.onConsume` sees a whole batch from `poll()`, but the application processes records one at a time, so a thread-local snapshot from the batch would be ambiguous. Instead, services call `IsotopeContext.adoptFromRecord(record)` per record between consume and produce. The next `send()` then sees that thread-local and appends a new hop. This project ships no consumer interceptor at all — the producer interceptor plus per-record adoption is the entire **produce-side** mechanism.
+
+**Consume-side markers (optional, for bipartite topology).** The produce-side `hops[]` chain encodes the consume edges for intermediate services (svc-B consuming from topic-AB is implied by svc-B's next produced hop), but **terminal consumers** — services that consume but never produce — leave no trace and are invisible to the topology report. To make them visible, consumers call `IsotopeContext.recordConsume(record, service, markerProducer)` between consume and process. The call forwards the inbound record's six scalar `x-isotope-*` headers to a value-less marker record on `iso_consume_events`, adding one new header — `x-isotope-consumer-service` — that names the consumer. The bipartite-topology Flink report unions these markers with the existing produce-side view to emit edges in both directions: `producer → topic` (from `isotope`) and `topic → consumer` (from `consume_events`). Markers are fire-and-forget: a dropped marker leaves a hole in the topology graph but never disrupts the consume/produce pipeline.
 
 ## **2.0 Architecture**
 
@@ -56,19 +58,23 @@ A bird's-eye view of the moving parts. The JVM library in [app/](app/) registers
 ```mermaid
 flowchart TB
     subgraph App["app/ — JVM library + demo CLI"]
-        Svc["App.java<br/>send · hop · sink modes<br/>(or your real services)"]
+        Svc["App.java<br/>send · hop · consume · sink modes<br/>(or your real services)"]
         IPI["IsotopeProducerInterceptor<br/>stamps UUIDv7 trace ID<br/>+ appends hop on every send()"]
         Adopt["IsotopeContext.adoptFromRecord()<br/>explicit per-record adoption<br/>between consume and produce"]
+        Mark["IsotopeContext.recordConsume()<br/>emits consume-edge marker<br/>to iso_consume_events"]
         Svc -- "producer.interceptor.classes" --> IPI
         Svc -- "calls per record" --> Adopt
+        Svc -- "calls per record (for bipartite)" --> Mark
     end
 
-    subgraph Kafka["Kafka event topics — Protobuf+SR DemoEvent values; isotope rides in record headers"]
+    subgraph Kafka["Kafka event topics — Protobuf+SR DemoEvent values + iso_consume_events markers; isotope rides in record headers"]
         T1[("iso_start")] --> T2[("iso_mid")] --> T3[("iso_final")]
+        TC[("iso_consume_events<br/>value-less consume markers")]
     end
 
     IPI -- "produce (x-isotope JSON + 6 scalar headers)" --> Kafka
     Kafka -- "consume + adopt" --> Adopt
+    Mark -- "produce (forwarded headers + x-isotope-consumer-service)" --> TC
 
     subgraph PTF["ptf/ — isotope-flink-udf shadow JAR"]
         UDAF["LatencyPercentilesUDAF<br/>T-Digest p50/p95/p99"]
@@ -79,12 +85,12 @@ flowchart TB
         direction LR
         subgraph CP["Minikube · cp-flink 2.1.2"]
             SQLCP["scripts/flink/sql/cp/*.fql"]
-            JCP["6 × INSERT INTO TUMBLE(1 MIN)<br/>Avro+SR sinks"]
+            JCP["7 × INSERT INTO TUMBLE(1 MIN)<br/>Avro+SR sinks"]
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/setup-confluent-flink.tf<br/>16 × confluent_flink_statement"]
-            JCC["5 × INSERT INTO TUMBLE(1 MIN)<br/>Protobuf+SR sinks<br/>(no UDAF — CCAF restriction)"]
+            TFSQL["terraform/setup-confluent-flink.tf<br/>20 × confluent_flink_statement"]
+            JCC["6 × INSERT INTO TUMBLE(1 MIN)<br/>Protobuf+SR sinks<br/>(no UDAF — CCAF restriction)"]
             TFSQL --> JCC
         end
     end
@@ -94,7 +100,7 @@ flowchart TB
     PTF -. "CREATE FUNCTION" .-> CP
     PTF -. "CREATE FUNCTION" .-> CC
 
-    R["report sink topics<br/>latency · topology · hop_distribution ·<br/>coverage · stuck_trace · latency_percentiles*<br/>(* CP only — CCAF rejects UDAFs)"]
+    R["report sink topics<br/>latency · topology · bipartite_topology ·<br/>hop_distribution · coverage · stuck_trace ·<br/>latency_percentiles*<br/>(* CP only — CCAF rejects UDAFs)"]
     JCP --> R
     JCC --> R
 
@@ -121,13 +127,15 @@ app/                                    isotope JVM library + demo CLI + tests
   src/main/java/ai/signalroom/kafka/isotope/
     Isotope.java                        POJO + JSON codec + Hop + fromHeaders()
                                         + UUIDv7 helpers (uuidV7Bytes / uuidV7String)
-    IsotopeContext.java                 ThreadLocal + adoptFromRecord()
+    IsotopeContext.java                 ThreadLocal + adoptFromRecord() +
+                                        recordConsume() (emits consume-edge markers)
     IsotopeProducerInterceptor.java     stamps/appends x-isotope + 6 scalar
                                         reporting headers on send()
-    App.java                            demo CLI — send / hop / sink modes
-  src/test/java/.../                    IsotopeCodecTest (no broker needed)
+    App.java                            demo CLI — send / hop / consume / sink modes
+  src/test/java/.../                    IsotopeCodecTest, IsotopeContextRecordConsumeTest
+                                        (no broker needed)
   src/integrationTest/java/.../         BrokerSmokeIT, ProducerInterceptorIT,
-                                        ThreeStageHopPropagationIT,
+                                        ThreeStageHopPropagationIT, BipartiteTopologyIT,
                                         IsotopeTestHarness — live-broker tests; produce/consume
                                         DemoEvent via SR-framed Protobuf
                                         (need Minikube CP + SR port-forwarded)
@@ -156,8 +164,9 @@ scripts/
   flink/README.md                       Flink SQL reports — runtime split (CP=6 reports/Avro+SR,
                                         CCAF=5 reports/Protobuf+SR), layout, operations
   flink/sql/cp/                         CP Flink SQL: 00_source_table, 01_register_functions,
-                                        05_isotope_view, 05_report_sinks (avro-confluent),
-                                        10/20/30/40/60/70 INSERT INTO reports, 99_teardown
+                                        05_isotope_view, 06_consume_events_view,
+                                        05_report_sinks (avro-confluent),
+                                        10/20/25/30/40/60/70 INSERT INTO reports, 99_teardown
                                         (CCAF SQL is inlined under terraform/setup-confluent-flink.tf.)
 terraform/                              CCAF infrastructure-as-code (`make cc-flink-reports-up`)
   providers.tf                          Confluent provider — cloud key/secret vars
@@ -168,10 +177,10 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
   setup-confluent-kafka.tf              Kafka cluster + Kafka API key rotation module
                                         (iac-confluent-api_key_rotation-tf_module)
   setup-confluent-flink.tf              service account + 6 role bindings, compute pool,
-                                        artifact upload, SR API key rotation, and 16 inline
-                                        `confluent_flink_statement` resources: 3 ALTER TABLE
-                                        + 2 VIEW + 5 sink CREATE TABLE + 1 CREATE FUNCTION
-                                        (PTF; UDAF skipped — CCAF rejects UDAFs) + 5 INSERT INTO
+                                        artifact upload, SR API key rotation, and 20 inline
+                                        `confluent_flink_statement` resources: 4 ALTER TABLE
+                                        + 3 VIEW + 6 sink CREATE TABLE + 1 CREATE FUNCTION
+                                        (PTF; UDAF skipped — CCAF rejects UDAFs) + 6 INSERT INTO
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
   terraform.png                         rendered resource graph (embedded in § 4.5)
@@ -186,25 +195,27 @@ Makefile                                cp-up / flink-up / kafka-pf-up / flink-r
 ```bash
 ./gradlew test                       # both subprojects
 # or scoped:
-./gradlew :app:test                  # IsotopeCodecTest           — JSON roundtrip, hop eviction, header size, UUIDv7 properties (10 tests)
+./gradlew :app:test                  # IsotopeCodecTest (10) + IsotopeContextRecordConsumeTest (4) — JSON roundtrip, hop eviction, UUIDv7 properties, consume-marker emission (14 tests)
 ./gradlew :ptf:test                  # LatencyPercentilesUDAFTest — T-Digest accumulator semantics
 ```
 
 ### **4.2 Demo CLI — see one trace propagate live**
 
-The fastest way to watch the isotope mechanic. Requires the cluster to be up and the Kafka + SR forwards running (see step 3 below for the bring-up commands). The CLI has three modes:
+The fastest way to watch the isotope mechanic. Requires the cluster to be up and the Kafka + SR forwards running (see step 3 below for the bring-up commands). The CLI has four modes:
 
 | Mode | Args | What it does |
 |---|---|---|
-| `send` | `<topic> <service> <payload>` | Produces one isotope-tagged `DemoEvent` to `<topic>`, then exits. Auto-creates the topic. |
-| `hop`  | `<in-topic> <out-topic> <service>` | Consumes records from `<in-topic>`, adopts the isotope into thread-local, re-produces the same `DemoEvent` to `<out-topic>` as `<service>` (which appends a new hop). Runs until Ctrl-C. |
-| `sink` | `<topic>` | Subscribes to `<topic>` and pretty-prints the full isotope trail for every arriving record. Runs until Ctrl-C. |
+| `send`    | `<topic> <service> <payload>`       | Produces one isotope-tagged `DemoEvent` to `<topic>`, then exits. Auto-creates the topic. |
+| `hop`     | `<in-topic> <out-topic> <service>`  | Consumes records from `<in-topic>`, adopts the isotope into thread-local, **emits a consume-edge marker to `iso_consume_events` as `<service>`**, then re-produces the same `DemoEvent` to `<out-topic>` (which appends a new hop). Runs until Ctrl-C. |
+| `consume` | `<topic> <service>`                 | Terminal-consumer mode for bipartite-topology demos. Subscribes to `<topic>`, **emits a consume-edge marker to `iso_consume_events` as `<service>`**, and pretty-prints the isotope trail. No downstream produce. Runs until Ctrl-C. |
+| `sink`    | `<topic>`                           | Passive peek tool — pretty-prints the isotope trail but does NOT emit a consume marker. Use for ad-hoc inspection; use `consume` to make a node visible in the bipartite-topology report. Runs until Ctrl-C. |
 
-**A 3-stage chain in four terminals:**
+**A 4-stage chain (full bipartite graph) in five terminals:**
 
 ```bash
-# Terminal A — terminal sink (will print the full 3-hop trail)
-./gradlew :app:run --args="sink iso_final" -q
+# Terminal A — terminal consumer (will print the full 3-hop trail AND emit a
+#              consume-edge marker so svc-D shows up in the bipartite report)
+./gradlew :app:run --args="consume iso_final svc-D" -q
 
 # Terminal B — middle stage: iso_mid → iso_final as svc-C
 ./gradlew :app:run --args="hop iso_mid iso_final svc-C" -q
@@ -216,7 +227,7 @@ The fastest way to watch the isotope mechanic. Requires the cluster to be up and
 ./gradlew :app:run --args="send iso_start svc-A 'hello world'" -q
 ```
 
-Terminal A's output for each record shows the same `trace_id` across all three hops, `origin = svc-A` (never reassigned), and `hops[]` listing `svc-A → svc-B → svc-C` in order with per-hop timestamps. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
+Terminal A's output for each record shows the same `trace_id` across all three hops, `origin = svc-A` (never reassigned), and `hops[]` listing `svc-A → svc-B → svc-C` in order with per-hop timestamps. The bipartite-topology report sees all six edges: produce edges `svc-A → iso_start`, `svc-B → iso_mid`, `svc-C → iso_final` and consume edges `iso_start → svc-B`, `iso_mid → svc-C`, `iso_final → svc-D`. Swap `consume` for `sink` if you only want to inspect records without recording the terminal edge. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
 
 ### **4.3 Integration tests (live Kafka via Minikube)**
 
@@ -256,10 +267,11 @@ The integration tests cover:
 | `BrokerSmokeIT` | AdminClient can create/list/delete a topic via the NodePort port-forward |
 | `ProducerInterceptorIT` | A consumer sees the `x-isotope` JSON header + all 6 scalar reporting headers with the expected origin/hop values, and the Protobuf round-trip preserves `DemoEvent.source` / `payload` |
 | `ThreeStageHopPropagationIT` | `svc-A → topic-AB → svc-B → topic-BC → svc-C` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `svc-A`, this = `svc-B`, hop count = 2) at the terminal; consume-then-produce hops use `IsotopeContext.adoptFromRecord` to carry the trace forward |
+| `BipartiteTopologyIT` | The 4-stage `svc-A → topic-AB → svc-B → topic-BC → svc-C → topic-CD → svc-D` chain emits exactly three consume-edge markers to a per-test markers topic — one per consume edge. Every marker carries the trace ID, forwarded `x-isotope-*` scalars describing the upstream producer, and the new `x-isotope-consumer-service` naming the downstream consumer. Asserts the `(consumer_service, consumed_topic)` set is exactly `{(svc-B, topic-AB), (svc-C, topic-BC), (svc-D, topic-CD)}` |
 
 ### **4.4 Flink SQL reports on Confluent Platform for Apache Flink (Minikube)**
 
-The four pure-SQL reports plus the two JAR-backed reports (one PTF, one UDAF) — six in total — run against a Flink session cluster managed by the Confluent Flink Kubernetes Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see **[§ 4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)** for that path; this section is the local-Minikube path.
+The five pure-SQL reports plus the two JAR-backed reports (one PTF, one UDAF) — seven in total — run against a Flink session cluster managed by the Confluent Flink Kubernetes Operator. Same FQL files deploy to Confluent Cloud for Apache Flink — see **[§ 4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)** for that path; this section is the local-Minikube path.
 
 **Bring up Flink:**
 
@@ -268,21 +280,21 @@ make flink-up                # cert-manager → CFK Flink Operator → CMF → s
                              # (~5 min the first time)
 ```
 
-**Deploy the reports** — all 6 reports run on the cp-flink session cluster (Flink 2.1.2). Sink topics use Apache Flink's [`avro-confluent`](https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/avro-confluent/) format — SR-framed Avro, auto-registered on first write — so Control Center renders the report rows natively.
+**Deploy the reports** — all 7 reports run on the cp-flink session cluster (Flink 2.1.2). Sink topics use Apache Flink's [`avro-confluent`](https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/avro-confluent/) format — SR-framed Avro, auto-registered on first write — so Control Center renders the report rows natively.
 
 ```bash
 make flink-reports-up
 ```
 
-`flink-reports-up` builds the PTF/UDAF shadow JAR if missing, copies it into the JobManager pod, pre-creates the 6 sink Kafka topics, then applies the source + view + sink DDL and submits 6 `INSERT INTO` streaming jobs (one per report). On first write to each sink, Apache Flink's `flink-sql-avro-confluent-registry` format registers a fresh Avro schema in SR under subject `<topic>-value`. **Control Center deserializes all 6 report topics natively** — no `.proto` files in the repo for the reports, no hand-installed format jars beyond the one init-container download.
+`flink-reports-up` builds the PTF/UDAF shadow JAR if missing, copies it into the JobManager pod, pre-creates the 7 sink Kafka topics, then applies the source + view + sink DDL and submits 7 `INSERT INTO` streaming jobs (one per report). On first write to each sink, Apache Flink's `flink-sql-avro-confluent-registry` format registers a fresh Avro schema in SR under subject `<topic>-value`. **Control Center deserializes all 7 report topics natively** — no `.proto` files in the repo for the reports, no hand-installed format jars beyond the one init-container download.
 
 #### **4.4.1 Format-by-domain**
 
-The demo *event* topics (`iso_start`, `iso_mid`, `iso_final`) still ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's unchanged. The *report* topics ride **Avro+SR** because cp-flink doesn't ship an SR-integrated Protobuf format and CMF (which does) disallows the UDAFs the percentiles report needs. Events from the app are Protobuf; aggregates from Flink are Avro. Two formats by domain — a clean split, not a defect.
+The demo *event* topics (`iso_start`, `iso_mid`, `iso_final`) still ride **Protobuf+SR** via the Java app's `DemoEvent` schema — that's unchanged. The consume-edge marker topic `iso_consume_events` has **null value + scalar headers only** (Flink reads the headers via a `MAP<STRING, BYTES>` virtual column; there's nothing to deserialize). The *report* topics ride **Avro+SR** because cp-flink doesn't ship an SR-integrated Protobuf format and CMF (which does) disallows the UDAFs the percentiles report needs. Events from the app are Protobuf; aggregates from Flink are Avro; consume markers are headers-only. Format by domain — a clean split, not a defect.
 
 ### **4.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**
 
-CCAF parallel of [§ 4.4](#44-flink-sql-reports-on-confluent-platform-for-apache-flink-minikube), driven by Terraform under [terraform/](terraform/). One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, 3 pre-created isotope event topics (report sink topics are created on the fly by the Flink `CREATE TABLE` statements — see the comment in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf) for why pre-creating them via `confluent_kafka_topic` would conflict with CCAF's Topic Catalog auto-import), a Flink compute pool, two rotating service-account API key pairs (one for Kafka, one for Schema Registry), the PTF/UDAF JAR uploaded as a Flink artifact, and 16 long-lived `confluent_flink_statement` resources broken down as **3 ALTER TABLE** (add scalar headers on the event topics) + **2 VIEW** (raw + typed) + **5 sink CREATE TABLE** + **1 CREATE FUNCTION** (PTF only — the UDAF is intentionally skipped, see the limitation note below) + **5 INSERT INTO** streaming jobs. The Terraform shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version, same `iac-confluent-api_key_rotation-tf_module`, same DROP-then-CREATE statement pattern.
+CCAF parallel of [§ 4.4](#44-flink-sql-reports-on-confluent-platform-for-apache-flink-minikube), driven by Terraform under [terraform/](terraform/). One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, 4 pre-created event topics (the three demo topics `iso_start` / `iso_mid` / `iso_final` plus the consume-edge marker topic `iso_consume_events`; report sink topics are created on the fly by the Flink `CREATE TABLE` statements — see the comment in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf) for why pre-creating them via `confluent_kafka_topic` would conflict with CCAF's Topic Catalog auto-import), a Flink compute pool, two rotating service-account API key pairs (one for Kafka, one for Schema Registry), the PTF/UDAF JAR uploaded as a Flink artifact, and 20 long-lived `confluent_flink_statement` resources broken down as **4 ALTER TABLE** (add scalar headers on the event topics) + **3 VIEW** (raw + typed produce + typed consume) + **6 sink CREATE TABLE** + **1 CREATE FUNCTION** (PTF only — the UDAF is intentionally skipped, see the limitation note below) + **6 INSERT INTO** streaming jobs. The Terraform shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version, same `iac-confluent-api_key_rotation-tf_module`, same DROP-then-CREATE statement pattern.
 
 **Prereqs:**
 
@@ -307,11 +319,11 @@ The wrapper script ([scripts/deploy-cc-flink-reports.sh](scripts/deploy-cc-flink
 |---|---|---|
 | `confluent_environment` | `confluent-kafka-isotope` | ESSENTIALS stream-governance package |
 | `confluent_kafka_cluster` | `kafka-isotope` | Standard, single-zone, AWS us-east-1 by default |
-| `confluent_kafka_topic` × 3 | `iso_{start,mid,final}` | Only the event topics are pre-created. The 5 `isotope_report_*_1m` sink topics are created on first deploy by their `CREATE TABLE` statement (CCAF's Topic Catalog auto-imports any pre-existing topic as `(key BYTES, val BYTES)`, which would silently no-op the typed `CREATE TABLE`). `terraform destroy` cleans them up via the environment cascade. |
+| `confluent_kafka_topic` × 4 | `iso_{start,mid,final}` + `iso_consume_events` | Only the event topics + the consume-marker topic are pre-created. The 6 `isotope_report_*_1m` sink topics are created on first deploy by their `CREATE TABLE` statement (CCAF's Topic Catalog auto-imports any pre-existing topic as `(key BYTES, val BYTES)`, which would silently no-op the typed `CREATE TABLE`). `terraform destroy` cleans them up via the environment cascade. |
 | `confluent_service_account` + 6 role bindings | `isotope-flink-sql-runner` | FlinkDeveloper (org) + ResourceOwner on topic=\* / transactional-id=\* / group=\* / SR subject=\* + Assigner on the service account |
-| `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for 5 INSERTs + ad-hoc SELECTs |
+| `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for 6 INSERTs + ad-hoc SELECTs |
 | `confluent_flink_artifact` | `isotope-flink-udf` | Uploads `ptf/build/libs/isotope-flink-udf.jar` |
-| `confluent_flink_statement` × 16 | (see file) | 3 ALTER TABLE (event-topic scalar headers) + 2 VIEW (raw + typed) + 5 sink CREATE TABLE + 1 CREATE FUNCTION (PTF only; UDAF skipped) + 5 INSERT INTO |
+| `confluent_flink_statement` × 20 | (see file) | 4 ALTER TABLE (event-topic scalar headers) + 3 VIEW (raw + typed produce + typed consume) + 6 sink CREATE TABLE + 1 CREATE FUNCTION (PTF only; UDAF skipped) + 6 INSERT INTO |
 
 **Useful outputs:**
 
@@ -325,16 +337,16 @@ terraform -chdir=terraform output -raw kafka_api_secret  # sensitive
 
 **Format-by-runtime (not -by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
 
-**CCAF UDAF limitation.** CCAF currently rejects all `CREATE FUNCTION` statements for user-defined aggregate functions ("aggregate functions are not supported"). The `LATENCY_PERCENTILES` UDAF therefore deploys on CP only; the percentile report (`latency_percentiles_flat_1m`) does not exist on CCAF. The other JAR-backed function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not a UDAF), works on both runtimes. The JAR itself is portable — `LatencyPercentilesUDAF` ships with a byte[]-based accumulator and is ready to register when Confluent lifts the restriction. The five CCAF reports are: `latency` (avg/min/max), `topology`, `hop_distribution`, `coverage`, `stuck_trace`.
+**CCAF UDAF limitation.** CCAF currently rejects all `CREATE FUNCTION` statements for user-defined aggregate functions ("aggregate functions are not supported"). The `LATENCY_PERCENTILES` UDAF therefore deploys on CP only; the percentile report (`latency_percentiles_flat_1m`) does not exist on CCAF. The other JAR-backed function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not a UDAF), works on both runtimes. The JAR itself is portable — `LatencyPercentilesUDAF` ships with a byte[]-based accumulator and is ready to register when Confluent lifts the restriction. The six CCAF reports are: `latency` (avg/min/max), `topology` (produce-side), `bipartite_topology` (full service↔topic↔service graph), `hop_distribution`, `coverage`, `stuck_trace`.
 
-**Driving traffic — the 3-stage demo against CCAF.** [App.java](app/src/main/java/ai/signalroom/kafka/isotope/App.java) reads four optional `-D` properties (`kafka.security.protocol`, `kafka.sasl.mechanism`, `kafka.sasl.jaas.config`, `schema.registry.basic.auth.user.info`) that default to plaintext-no-auth for Minikube. [scripts/cc-cli-env.sh](scripts/cc-cli-env.sh) pulls the Kafka + Schema-Registry credentials from `terraform output` (both keys are rotated by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf)) and builds the JAAS string.
+**Driving traffic — the 4-stage demo against CCAF.** [App.java](app/src/main/java/ai/signalroom/kafka/isotope/App.java) reads four optional `-D` properties (`kafka.security.protocol`, `kafka.sasl.mechanism`, `kafka.sasl.jaas.config`, `schema.registry.basic.auth.user.info`) that default to plaintext-no-auth for Minikube. [scripts/cc-cli-env.sh](scripts/cc-cli-env.sh) pulls the Kafka + Schema-Registry credentials from `terraform output` (both keys are rotated by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf)) and builds the JAAS string.
 
-The thin wrapper [scripts/cc-app-run.sh](scripts/cc-app-run.sh) sources the env helper then invokes `./gradlew :app:run` with the six `-D` flags — pass it the same `send` / `hop` / `sink` args you'd give App.java:
+The thin wrapper [scripts/cc-app-run.sh](scripts/cc-app-run.sh) sources the env helper then invokes `./gradlew :app:run` with the six `-D` flags — pass it the same `send` / `hop` / `consume` / `sink` args you'd give App.java:
 
 ```bash
 # Four terminals (same A/B/C/D order as § 4.2). No manual env exports —
 # the wrapper sources cc-cli-env.sh, which pulls everything from terraform.
-scripts/cc-app-run.sh sink iso_final                # A
+scripts/cc-app-run.sh consume iso_final svc-D       # A — terminal consumer (emits marker)
 scripts/cc-app-run.sh hop iso_mid iso_final svc-C   # B
 scripts/cc-app-run.sh hop iso_start iso_mid svc-B   # C
 scripts/cc-app-run.sh send iso_start svc-A 'hello'  # D
@@ -342,9 +354,9 @@ scripts/cc-app-run.sh send iso_start svc-A 'hello'  # D
 
 The wrapper hard-fails with a clear message if any of the seven required values is missing, so you'll never silently hand gradle empty `-D` values.
 
-Terminal A prints the same `trace_id` across all three hops, and the CCAF report INSERTs populate as you fire Terminal D — `SELECT * FROM isotope_report_latency_1m` etc. in the Cloud Console SQL workspace.
+Terminal A prints the same `trace_id` across all three hops, and the CCAF report INSERTs populate as you fire Terminal D — `SELECT * FROM isotope_report_latency_1m`, `SELECT * FROM isotope_report_bipartite_topology_1m`, etc. in the Cloud Console SQL workspace. The bipartite report shows all six edges of the chain (3 produce + 3 consume).
 
-**Sustained traffic — required to see report rows.** The five INSERT INTO jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, and a tumbling window only emits when the watermark advances past `window_end`. A handful of records bursted from Terminal D within a single 1-minute interval will sit in one open window forever (the most-recent record is the watermark, and it never gets older than itself). Spread traffic across **multiple** windows so the watermark crosses each boundary:
+**Sustained traffic — required to see report rows.** The six INSERT INTO jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, and a tumbling window only emits when the watermark advances past `window_end`. A handful of records bursted from Terminal D within a single 1-minute interval will sit in one open window forever (the most-recent record is the watermark, and it never gets older than itself). Spread traffic across **multiple** windows so the watermark crosses each boundary:
 
 ```bash
 # 30 records spaced 5s apart ≈ 2.5 minutes of event-time → spans 3+ windows

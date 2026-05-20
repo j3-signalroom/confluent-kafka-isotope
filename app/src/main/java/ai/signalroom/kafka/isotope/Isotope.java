@@ -32,12 +32,18 @@ public final class Isotope {
     // IsotopeProducerInterceptor. All values are UTF-8 strings so that
     // Flink SQL can do `CAST(headers['x-isotope-…'] AS STRING)` (and
     // CAST(... AS BIGINT) for the numeric ones) without a UDF.
-    public static final String HEADER_TRACE_ID       = "x-isotope-trace-id";
-    public static final String HEADER_ORIGIN_TS      = "x-isotope-origin-ts";
-    public static final String HEADER_ORIGIN_SERVICE = "x-isotope-origin-service";
-    public static final String HEADER_THIS_SERVICE   = "x-isotope-this-service";
-    public static final String HEADER_THIS_TOPIC     = "x-isotope-this-topic";
-    public static final String HEADER_HOP_COUNT      = "x-isotope-hop-count";
+    public static final String HEADER_TRACE_ID        = "x-isotope-trace-id";
+    public static final String HEADER_ORIGIN_TS       = "x-isotope-origin-ts";
+    public static final String HEADER_ORIGIN_SERVICE  = "x-isotope-origin-service";
+    public static final String HEADER_THIS_SERVICE    = "x-isotope-this-service";
+    public static final String HEADER_THIS_TOPIC      = "x-isotope-this-topic";
+    public static final String HEADER_HOP_COUNT       = "x-isotope-hop-count";
+
+    // Consume-side marker header. Written by IsotopeContext.recordConsume()
+    // when a consumer emits a marker to the iso_consume_events topic, on top
+    // of the six forwarded headers above. Its presence is what Flink uses to
+    // distinguish a consume-event marker from a regular produced record.
+    public static final String HEADER_CONSUMER_SERVICE = "x-isotope-consumer-service";
 
     // Bounded ring for the hop list — a payload guard, not a routing cap.
     // On overflow the oldest hop is evicted and `truncated` latches true;

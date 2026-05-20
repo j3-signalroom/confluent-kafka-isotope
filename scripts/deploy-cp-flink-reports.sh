@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy (or tear down) all six Flink reports (pure-SQL + JAR-backed)
+# Deploy (or tear down) all seven Flink reports (pure-SQL + JAR-backed)
 # against the CP Flink session cluster running on Minikube.
 #
 # As of the protobuf-sink refactor, each report is a Kafka sink topic
@@ -25,11 +25,12 @@ NAMESPACE=confluent
 JAR_HOST_PATH=ptf/build/libs/isotope-flink-udf.jar
 JAR_POD_PATH=/opt/flink/lib/isotope-flink-udf.jar
 
-# Sink topics — all 6 reports run on this session cluster, all written
+# Sink topics — all 7 reports run on this session cluster, all written
 # as SR-framed Avro (auto-registered on first write).
 SINK_TOPICS=(
     isotope_report_latency_1m
     isotope_report_topology_1m
+    isotope_report_bipartite_topology_1m
     isotope_report_hop_distribution_1m
     isotope_report_coverage_1m
     isotope_report_stuck_trace_1m
@@ -37,10 +38,11 @@ SINK_TOPICS=(
 )
 
 # Pipeline names — must match the `SET 'pipeline.name'` values in each
-# cp/{10,20,30,40,60,70}_*.fql so we can find and cancel the jobs.
+# cp/{10,20,25,30,40,60,70}_*.fql so we can find and cancel the jobs.
 JOB_NAMES=(
     isotope_report_latency_1m
     isotope_report_topology_1m
+    isotope_report_bipartite_topology_1m
     isotope_report_hop_distribution_1m
     isotope_report_coverage_1m
     isotope_report_stuck_trace_1m
@@ -166,14 +168,16 @@ if [ "${ACTION}" = "up" ]; then
     # `isotope`, and the sink table) only resolve if they're all in the
     # same session.
     #
-    # All 6 reports run on the session cluster.
+    # All 7 reports run on the session cluster.
     UP_FILES=(
         scripts/flink/sql/cp/00_source_table.fql
         scripts/flink/sql/cp/01_register_functions.fql
         scripts/flink/sql/cp/05_isotope_view.fql
+        scripts/flink/sql/cp/06_consume_events_view.fql
         scripts/flink/sql/cp/05_report_sinks.fql
         scripts/flink/sql/cp/10_latency_report.fql
         scripts/flink/sql/cp/20_topology_report.fql
+        scripts/flink/sql/cp/25_bipartite_topology_report.fql
         scripts/flink/sql/cp/30_hop_distribution.fql
         scripts/flink/sql/cp/40_coverage_report.fql
         scripts/flink/sql/cp/60_stuck_trace_report.fql
@@ -195,6 +199,7 @@ if [ "${ACTION}" = "up" ]; then
         scripts/flink/sql/cp/00_source_table.fql
         scripts/flink/sql/cp/01_register_functions.fql
         scripts/flink/sql/cp/05_isotope_view.fql
+        scripts/flink/sql/cp/06_consume_events_view.fql
         scripts/flink/sql/cp/05_report_sinks.fql
     )
     for f in "${UP_FILES[@]}"; do
@@ -288,7 +293,7 @@ if [ "${ACTION}" = "up" ]; then
                 *)                    MISSING+=("${name} [state=${state}]") ;;
             esac
         done
-        # All five jobs are RUNNING → done early.
+        # All expected jobs are RUNNING → done early.
         if [ "${#MISSING[@]}" -eq 0 ] && [ "${#FAILED[@]}" -eq 0 ]; then
             break
         fi
@@ -339,10 +344,11 @@ if [ "${ACTION}" = "up" ]; then
     echo "  pipeline.name = its sink topic name; check the Flink UI ('make flink-ui')"
     echo "  for live status."
     echo ""
-    echo "✔ Reports registered (6/6). Try interactively:"
+    echo "✔ Reports registered (7/7). Try interactively:"
     echo "    make flink-sql"
     echo "    Flink SQL> SELECT * FROM latency_report_1m;"
     echo "    Flink SQL> SELECT * FROM topology_report_1m;"
+    echo "    Flink SQL> SELECT * FROM bipartite_topology_report_1m;"
     echo "    Flink SQL> SELECT * FROM hop_distribution_1m;"
     echo "    Flink SQL> SELECT * FROM coverage_report_1m;"
     echo "    Flink SQL> SELECT * FROM stuck_trace_alerts_1m;"
