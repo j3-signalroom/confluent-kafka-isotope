@@ -42,7 +42,7 @@ A producer with the isotope interceptor loaded appends one hop on every `send()`
 
 **How the producer interceptor gets invoked.** Application code never calls `onSend` / `onAcknowledgement` directly — the Kafka client invokes them by reflection once two things are in place:
 
-1. **Register the class in producer config.** Put `IsotopeProducerInterceptor.class.getName()` under `interceptor.classes` ([App.java:185](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L185), [App.java:250](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L250), [IsotopeTestHarness.java:96](app/src/integrationTest/java/ai/signalroom/kafka/isotope/IsotopeTestHarness.java#L96)). The `KafkaProducer` constructor instantiates the interceptor and owns its lifecycle.
+1. **Register the class in producer config.** Put `IsotopeProducerInterceptor.class.getName()` under `interceptor.classes` ([App.java:199](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L199), [App.java:284](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L284), [IsotopeTestHarness.java:96](app/src/integrationTest/java/ai/signalroom/kafka/isotope/IsotopeTestHarness.java#L96)). The `KafkaProducer` constructor instantiates the interceptor and owns its lifecycle.
 2. **Call `producer.send(...)` as normal.** Every `send()` triggers `onSend` (caller thread, before serialization) and later `onAcknowledgement` (producer I/O thread, after broker ack or failure).
 
 The exact call sites in `kafka-clients` 4.2.0: `KafkaProducer.send` invokes `interceptors.onSend` ([line 950](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L950)) and `AppendCallbacks.onCompletion` invokes `interceptors.onAcknowledgement` ([line 1600](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1600)). Exceptions thrown by the interceptor are caught and logged by the client's fan-out wrapper — they never break the `send` call.
@@ -107,7 +107,7 @@ flowchart TB
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator<br/>Makefile: cp-up · flink-up · kafka-pf-up"]
-        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 16 statements<br/>Makefile: cc-flink-reports-up"]
+        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 20 statements<br/>Makefile: cc-flink-reports-up"]
     end
 
     K8S -. provisions .-> Kafka
@@ -161,8 +161,8 @@ scripts/
                                         SR_URL / KAFKA_KEY / KAFKA_SECRET / JAAS / ...
   cc-app-run.sh                         thin wrapper around `./gradlew :app:run` that
                                         sources cc-cli-env.sh and injects the six -D flags
-  flink/README.md                       Flink SQL reports — runtime split (CP=6 reports/Avro+SR,
-                                        CCAF=5 reports/Protobuf+SR), layout, operations
+  flink/README.md                       Flink SQL reports — runtime split (CP=7 reports/Avro+SR,
+                                        CCAF=6 reports/Protobuf+SR), layout, operations
   flink/sql/cp/                         CP Flink SQL: 00_source_table, 01_register_functions,
                                         05_isotope_view, 06_consume_events_view,
                                         05_report_sinks (avro-confluent),
