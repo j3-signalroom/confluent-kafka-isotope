@@ -13,6 +13,10 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
 **Table of Contents**
 <!-- toc -->
 - [**1.0 How the isotope is carried**](#10-how-the-isotope-is-carried)
+  - [**1.1 How the producer interceptor gets invoked**](#11-how-the-producer-interceptor-gets-invoked)
+  - [**1.2 Using the Kafka client interceptor vs explicit library calls**](#12-using-the-kafka-client-interceptor-vs-explicit-library-calls)
+  - [**1.3 Why explicit calls for consume-side markers?**](#13-why-explicit-calls-for-consume-side-markers)
+  - [**1.4 Why "bipartite"?**](#14-why-bipartite)
 - [**2.0 Architecture**](#20-architecture)
 - [**3.0 Repo layout**](#30-repo-layout)
 - [**4.0 Running**](#40-running)
@@ -40,6 +44,7 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
 
 A producer with the isotope interceptor loaded appends one hop on every `send()`. A consume-then-produce service calls `IsotopeContext.adoptFromRecord(record)` between consume and produce so the trace ID and origin survive the hop.
 
+### **1.1 How the producer interceptor gets invoked**
 **How the producer interceptor gets invoked.** Application code never calls `onSend` / `onAcknowledgement` directly — the Kafka client invokes them by reflection once two things are in place:
 
 1. **Register the class in producer config.** Put `IsotopeProducerInterceptor.class.getName()` under `interceptor.classes` ([App.java:199](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L199), [App.java:284](app/src/main/java/ai/signalroom/kafka/isotope/App.java#L284), [IsotopeTestHarness.java:96](app/src/integrationTest/java/ai/signalroom/kafka/isotope/IsotopeTestHarness.java#L96)). The `KafkaProducer` constructor instantiates the interceptor and owns its lifecycle.
@@ -47,10 +52,13 @@ A producer with the isotope interceptor loaded appends one hop on every `send()`
 
 The exact call sites in `kafka-clients` 4.2.0: `KafkaProducer.send` invokes `interceptors.onSend` ([line 950](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L950)) and `AppendCallbacks.onCompletion` invokes `interceptors.onAcknowledgement` ([line 1600](https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/producer/KafkaProducer.java#L1600)). Exceptions thrown by the interceptor are caught and logged by the client's fan-out wrapper — they never break the `send` call.
 
+### **1.2 Using the Kafka client interceptor vs explicit library calls**
 **This project uses one Kafka client interceptor, and it's a `ProducerInterceptor` — not a `ConsumerInterceptor`.** A `ConsumerInterceptor.onConsume` sees a whole batch from `poll()`, but the application processes records one at a time, so a thread-local snapshot from the batch would be ambiguous about which record is being handled. An earlier `IsotopeConsumerInterceptor` was tried and removed for exactly that reason (see [#30](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/30)). The consume side instead runs on **explicit per-record library calls**: services call `IsotopeContext.adoptFromRecord(record)` between consume and produce to carry the trace through a hop (the next `send()` then sees that thread-local and appends a new hop), and `IsotopeContext.recordConsume(record, service, markerProducer)` to emit a consume-edge marker (see the next paragraph). So: **producer interceptor for produce-side stamping; explicit per-record calls for everything consume-side**.
 
+### **1.3 Why explicit calls for consume-side markers?**
 **Consume-side markers — the other half of the bipartite graph.** The produce-side `hops[]` chain captures `producer → topic` edges and implicitly captures consume edges for *intermediate* services (svc-B consuming from topic-AB is implied by svc-B's next produced hop), but **terminal consumers** — services that consume but never produce — would otherwise be invisible. The bipartite story closes that gap with one library call: consumers call `IsotopeContext.recordConsume(record, service, markerProducer)` between consume and process, which forwards the inbound record's six scalar `x-isotope-*` headers to a value-less marker record on `iso_consume_events` and adds one new header — `x-isotope-consumer-service` — that names the consumer. The `bipartite_topology` Flink report unions these markers with the produce-side view to emit edges in both directions: `producer → topic` (from `isotope`) and `topic → consumer` (from `consume_events`). Markers are fire-and-forget: a dropped marker leaves a hole in the topology graph but never disrupts the consume/produce pipeline.
 
+### **1.4 Why "bipartite"?**
 **Background — why "bipartite"?** The resulting topology report is an example of a [**bipartite graph**](https://en.wikipedia.org/wiki/Bipartite_graph) from graph theory (a sub-field of discrete mathematics). A graph is *bipartite* when its vertices partition into two disjoint sets such that every edge connects a vertex in one set to a vertex in the other — edges never run within a set. Here the two sets are **services** (`svc-A`, `svc-B`, …) and **topics** (`iso_start`, `iso_mid`, `iso_final`, `iso_consume_events`); every edge is either a **produce edge** (`service → topic`, from the isotope's `hops[]`) or a **consume edge** (`topic → service`, from the `iso_consume_events` markers). Kafka's pub/sub model guarantees the bipartite shape: services never connect directly to other services, and topics never connect directly to other topics — every interaction flows through the opposite set. Before consume-side markers existed, only produce edges were captured, so the topology view collapsed into a **unipartite** `service → service → service` chain with topics hidden as edge labels and terminal consumers omitted entirely. With both edge directions now wired, topics become first-class nodes alongside services, and the `bipartite_topology` report renders the full graph — every produce *and* consume edge, in both directions.
 
 ## **2.0 Architecture**
@@ -191,6 +199,8 @@ Makefile                                cp-up / flink-up / kafka-pf-up / flink-r
 ```
 
 ## **4.0 Running**
+
+Cheapest-first order if you're new: `./gradlew test` (§ 4.1) → local CP via Minikube (§ 4.2–4.4) → CCAF in the cloud (§ 4.5). Skip ahead if you only care about one runtime.
 
 ### **4.1. Unit tests (no broker, instant)**
 
@@ -377,11 +387,3 @@ make cc-flink-reports-down CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SE
 ```
 
 Runs `terraform destroy -auto-approve` — deletes every resource above, including the environment itself. Safe to run repeatedly.
-
-### **4.6 Recommended path the first time through**
-
-1. `./gradlew test` — proves the codec + UDAF logic without any cluster.
-2. `make cp-up && make kafka-pf-up && ./gradlew :app:integrationTest` — proves the broker + SR + interceptor + Protobuf path end-to-end.
-3. The 4-stage demo CLI walkthrough above — visually shows the trace accumulating hops.
-4. `make flink-up && make flink-reports-up && make flink-sql` — reports populate as you drive traffic via the demo CLI (see [§ 4.2](#42-demo-cli--see-one-trace-propagate-live)).
-5. (Optional) `make cc-flink-reports-up` — the CCAF parallel; see [§ 4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for prereqs and the SASL-config caveat for the demo CLI.
