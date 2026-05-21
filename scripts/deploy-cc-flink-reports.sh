@@ -162,14 +162,21 @@ if [ "${create_action}" = true ]; then
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/cc-cli-env.sh" || print_warn "cc-cli-env.sh exited non-zero (see above)"
 
-    echo
-    print_info "Next step — source the helper in your own shell to export the env vars:"
-    print_info "    source scripts/cc-cli-env.sh"
-    print_info "Then drive the 3-stage demo (see README § 3.5)."
-
-    print_info "Creating the Terraform visualization..."
     terraform graph | dot -Tpng > "$TERRAFORM_DIR/terraform.png"
-    print_info "Terraform visualization created at: $TERRAFORM_DIR/terraform.png"
+
+    echo
+    print_info "Next step — drive the 4-stage demo (see README § 4.5):"
+    print_info "    scripts/cc-app-run.sh consume iso_final svc-D"
+    print_info "    scripts/cc-app-run.sh hop iso_mid iso_final svc-C"
+    print_info "    scripts/cc-app-run.sh hop iso_start iso_mid svc-B"
+    print_info "    scripts/cc-app-run.sh send iso_start svc-A 'hello'"
+
+    echo
+    print_info "Produce 30 records spaced 5 seconds apart ≈ 2.5 minutes of event-time → spans 3+ windows:" 
+    print_info "    for i in {1..30}; do"
+    print_info "        scripts/cc-app-run.sh send iso_start svc-A \"burst-\$i\""
+    print_info "        sleep 5"
+    print_info "    done"
 else
     print_step "terraform destroy"
     terraform destroy -auto-approve -input=false
