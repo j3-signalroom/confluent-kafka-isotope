@@ -212,7 +212,7 @@ The fastest way to watch the isotope mechanic. Requires the cluster to be up and
 | `consume` | `<topic> <service>`                 | Terminal-consumer mode for bipartite-topology demos. Subscribes to `<topic>`, **emits a consume-edge marker to `iso_consume_events` as `<service>`**, and pretty-prints the isotope trail. No downstream produce. Runs until Ctrl-C. |
 | `sink`    | `<topic>`                           | Passive peek tool — pretty-prints the isotope trail but does NOT emit a consume marker. Use for ad-hoc inspection; use `consume` to make a node visible in the bipartite-topology report. Runs until Ctrl-C. |
 
-**A 4-stage chain (full bipartite graph) in five terminals:**
+**A 4-stage chain (full bipartite graph) in four terminals:**
 
 ```bash
 # Terminal A — terminal consumer (will print the full 3-hop trail AND emit a
@@ -382,6 +382,6 @@ Runs `terraform destroy -auto-approve` — deletes every resource above, includi
 
 1. `./gradlew test` — proves the codec + UDAF logic without any cluster.
 2. `make cp-up && make kafka-pf-up && ./gradlew :app:integrationTest` — proves the broker + SR + interceptor + Protobuf path end-to-end.
-3. The 3-stage demo CLI walkthrough above — visually shows the trace accumulating hops.
+3. The 4-stage demo CLI walkthrough above — visually shows the trace accumulating hops.
 4. `make flink-up && make flink-reports-up && make flink-sql` — reports populate as you drive traffic via the demo CLI (see [§ 4.2](#42-demo-cli--see-one-trace-propagate-live)).
 5. (Optional) `make cc-flink-reports-up` — the CCAF parallel; see [§ 4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for prereqs and the SASL-config caveat for the demo CLI.
