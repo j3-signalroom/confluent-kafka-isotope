@@ -45,11 +45,11 @@ Generic verbs (raw App.java passthrough):
   consume <topic> <service>
   sink    <topic>
 
-Example (full 4-terminal demo):
-  scripts/cc-app-run.sh ship      &   # terminal A
-  scripts/cc-app-run.sh fulfill   &   # terminal B
-  scripts/cc-app-run.sh enrich    &   # terminal C
-  scripts/cc-app-run.sh place 'hello' # terminal D
+Example (full 4-terminal demo, in pipeline order):
+  scripts/cc-app-run.sh place 'hello' # terminal A — kick the chain off
+  scripts/cc-app-run.sh enrich    &   # terminal B
+  scripts/cc-app-run.sh fulfill   &   # terminal C
+  scripts/cc-app-run.sh ship      &   # terminal D — terminal consumer (emits marker)
 EOF
     exit 2
 fi

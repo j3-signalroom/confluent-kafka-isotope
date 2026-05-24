@@ -16,12 +16,11 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 /**
  * Unit tests for {@link IsotopeContext#recordConsume}. Uses Kafka's
@@ -59,7 +58,7 @@ class IsotopeContextRecordConsumeTest {
 
     @Test
     void emitsMarkerWithForwardedHeadersAndConsumerServiceAdded() {
-        MockProducer<byte[], byte[]> mock = new MockProducer<byte[], byte[]>(
+        MockProducer<byte[], byte[]> mock = new MockProducer<>(
             true, null, new ByteArraySerializer(), new ByteArraySerializer());
 
         ConsumerRecord<byte[], byte[]> inbound =
@@ -89,7 +88,7 @@ class IsotopeContextRecordConsumeTest {
 
     @Test
     void noOpWhenInboundRecordHasNoTraceId() {
-        MockProducer<byte[], byte[]> mock = new MockProducer<byte[], byte[]>(
+        MockProducer<byte[], byte[]> mock = new MockProducer<>(
             true, null, new ByteArraySerializer(), new ByteArraySerializer());
 
         ConsumerRecord<byte[], byte[]> untagged = new ConsumerRecord<>(
@@ -106,7 +105,7 @@ class IsotopeContextRecordConsumeTest {
 
     @Test
     void nullConsumerServiceDefaultsToUnknown() {
-        MockProducer<byte[], byte[]> mock = new MockProducer<byte[], byte[]>(
+        MockProducer<byte[], byte[]> mock = new MockProducer<>(
             true, null, new ByteArraySerializer(), new ByteArraySerializer());
 
         ConsumerRecord<byte[], byte[]> inbound =
@@ -121,7 +120,7 @@ class IsotopeContextRecordConsumeTest {
 
     @Test
     void overloadWithCustomTopicEmitsToThatTopic() {
-        MockProducer<byte[], byte[]> mock = new MockProducer<byte[], byte[]>(
+        MockProducer<byte[], byte[]> mock = new MockProducer<>(
             true, null, new ByteArraySerializer(), new ByteArraySerializer());
         String custom = "alt_consume_events";
 
