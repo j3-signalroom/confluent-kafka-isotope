@@ -354,11 +354,11 @@ if [ "${ACTION}" = "up" ]; then
     echo "    Flink SQL> SELECT * FROM stuck_trace_alerts_1m;"
     echo "    Flink SQL> SELECT * FROM latency_percentiles_flat_1m;"
     echo ""
-    echo "Feed traffic via the demo CLI (pipeline-position verbs):"
-    echo "    ./gradlew :app:run --args=\"ship\"          -q   # terminal A"
-    echo "    ./gradlew :app:run --args=\"fulfill\"       -q   # terminal B"
-    echo "    ./gradlew :app:run --args=\"enrich\"        -q   # terminal C"
-    echo "    ./gradlew :app:run --args=\"place 'hello'\" -q   # terminal D"
+    echo "Feed traffic via the demo CLI (pipeline-position verbs, run in pipeline order):"
+    echo "    ./gradlew :app:run --args=\"place 'hello'\" -q   # terminal A — kick the chain off"
+    echo "    ./gradlew :app:run --args=\"enrich\"        -q   # terminal B"
+    echo "    ./gradlew :app:run --args=\"fulfill\"       -q   # terminal C"
+    echo "    ./gradlew :app:run --args=\"ship\"          -q   # terminal D — terminal consumer (emits marker)"
 else
     # 1. Cancel each named streaming job via the Flink REST API.
     echo "→ Cancelling streaming jobs by pipeline.name ..."

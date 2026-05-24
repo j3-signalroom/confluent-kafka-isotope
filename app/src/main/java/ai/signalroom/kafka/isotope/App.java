@@ -149,11 +149,11 @@ public final class App {
               app consume <topic>     <service>
               app sink    <topic>
 
-            4-terminal demo (after `make kafka-pf-up`):
-              ./gradlew :app:run --args="ship"             # terminal A (emits marker)
-              ./gradlew :app:run --args="fulfill"          # terminal B
-              ./gradlew :app:run --args="enrich"           # terminal C
-              ./gradlew :app:run --args="place 'hello'"    # terminal D
+            4-terminal demo (after `make kafka-pf-up`), in pipeline order:
+              ./gradlew :app:run --args="place 'hello'"    # terminal A — kick the chain off
+              ./gradlew :app:run --args="enrich"           # terminal B
+              ./gradlew :app:run --args="fulfill"          # terminal C
+              ./gradlew :app:run --args="ship"             # terminal D — terminal consumer (emits marker)
 
             Endpoints (override via -Dkafka.bootstrap=... -Dschema.registry.url=...):
               kafka.bootstrap     = localhost:30092

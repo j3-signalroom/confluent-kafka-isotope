@@ -166,10 +166,10 @@ if [ "${create_action}" = true ]; then
 
     echo
     print_info "Next step — drive the 4-stage demo (see README § 4.5):"
-    print_info "    scripts/cc-app-run.sh ship             # terminal consumer (emits marker)"
-    print_info "    scripts/cc-app-run.sh fulfill"
+    print_info "    scripts/cc-app-run.sh place 'hello'    # kick the chain off"
     print_info "    scripts/cc-app-run.sh enrich"
-    print_info "    scripts/cc-app-run.sh place 'hello'"
+    print_info "    scripts/cc-app-run.sh fulfill"
+    print_info "    scripts/cc-app-run.sh ship             # terminal consumer (emits marker)"
 
     echo
     print_info "Produce 30 records spaced 5 seconds apart ≈ 2.5 minutes of event-time → spans 3+ windows:"

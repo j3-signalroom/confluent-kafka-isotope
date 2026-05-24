@@ -226,25 +226,25 @@ The fastest way to watch the isotope mechanic. Requires the cluster to be up and
 | `consume` | `<topic> <service>`                 | Generic terminal-consume; emits a consume-edge marker and pretty-prints the trail. Runs until Ctrl-C. |
 | `sink`    | `<topic>`                           | Passive peek — pretty-prints the isotope trail but does NOT emit a consume marker. Use for ad-hoc inspection. Runs until Ctrl-C. |
 
-**A 4-stage chain (full bipartite graph) in four terminals:**
+**A 4-stage chain (full bipartite graph) in four terminals.** Run them in pipeline order — `place` produces, then `enrich` / `fulfill` / `ship` each pick up where the previous stage left off:
 
 ```bash
-# Terminal A — terminal consumer (prints the full 3-hop trail AND emits a
+# Terminal A — kick the chain off (run repeatedly to send more)
+./gradlew :app:run --args="place 'hello world'" -q
+
+# Terminal B — first hop: orders.placed → orders.enriched
+./gradlew :app:run --args="enrich" -q
+
+# Terminal C — middle hop: orders.enriched → orders.fulfilled
+./gradlew :app:run --args="fulfill" -q
+
+# Terminal D — terminal consumer (prints the full 3-hop trail AND emits a
 #              consume-edge marker so shipping-notification-service shows up
 #              in the bipartite report)
 ./gradlew :app:run --args="ship" -q
-
-# Terminal B — middle stage: orders.enriched → orders.fulfilled
-./gradlew :app:run --args="fulfill" -q
-
-# Terminal C — first stage: orders.placed → orders.enriched
-./gradlew :app:run --args="enrich" -q
-
-# Terminal D — kick the chain off (run repeatedly to send more)
-./gradlew :app:run --args="place 'hello world'" -q
 ```
 
-Terminal A's output for each record shows the same `trace_id` across all three hops, `origin = order-intake-service` (never reassigned), and `hops[]` listing `order-intake-service → order-enrichment-service → order-fulfillment-service` in order with per-hop timestamps. The bipartite-topology report sees all six edges: produce edges `order-intake-service → orders.placed`, `order-enrichment-service → orders.enriched`, `order-fulfillment-service → orders.fulfilled` and consume edges `orders.placed → order-enrichment-service`, `orders.enriched → order-fulfillment-service`, `orders.fulfilled → shipping-notification-service`. Swap `consume` for `sink` if you only want to inspect records without recording the terminal edge. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
+Terminal D's output for each record shows the same `trace_id` across all three hops, `origin = order-intake-service` (never reassigned), and `hops[]` listing `order-intake-service → order-enrichment-service → order-fulfillment-service` in order with per-hop timestamps. The bipartite-topology report sees all six edges: produce edges `order-intake-service → orders.placed`, `order-enrichment-service → orders.enriched`, `order-fulfillment-service → orders.fulfilled` and consume edges `orders.placed → order-enrichment-service`, `orders.enriched → order-fulfillment-service`, `orders.fulfilled → shipping-notification-service`. Swap `consume` for `sink` if you only want to inspect records without recording the terminal edge. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
 
 ### **4.3 Integration tests (live Kafka via Minikube)**
 
@@ -361,19 +361,20 @@ terraform -chdir=terraform output -raw kafka_api_secret  # sensitive
 The thin wrapper [scripts/cc-app-run.sh](scripts/cc-app-run.sh) sources the env helper then invokes `./gradlew :app:run` with the six `-D` flags. It accepts two argument styles: **pipeline-position verbs** (`place` / `enrich` / `fulfill` / `ship`) that encode the orders.* topic chain so the 4-terminal demo is one word per terminal, and the **generic `send` / `hop` / `consume` / `sink` passthrough** for ad-hoc inspection on topics outside the demo. Run the script with no args for the full verb list.
 
 ```bash
-# Four terminals (same A/B/C/D order as § 4.2). No manual env exports —
-# the wrapper sources cc-cli-env.sh, which pulls everything from terraform.
-scripts/cc-app-run.sh ship             # A — terminal consumer (emits marker)
-scripts/cc-app-run.sh fulfill          # B
-scripts/cc-app-run.sh enrich           # C
-scripts/cc-app-run.sh place 'hello'    # D
+# Four terminals in pipeline order — same A/B/C/D order as § 4.2. No manual
+# env exports — the wrapper sources cc-cli-env.sh, which pulls everything
+# from terraform.
+scripts/cc-app-run.sh place 'hello'    # A — kick the chain off
+scripts/cc-app-run.sh enrich           # B
+scripts/cc-app-run.sh fulfill          # C
+scripts/cc-app-run.sh ship             # D — terminal consumer (emits marker)
 ```
 
 The wrapper hard-fails with a clear message if any of the seven required values is missing, so you'll never silently hand gradle empty `-D` values.
 
-Terminal A prints the same `trace_id` across all three hops, and the CCAF report INSERTs populate as you fire Terminal D — `SELECT * FROM isotope_report_latency_1m`, `SELECT * FROM isotope_report_bipartite_topology_1m`, etc. in the Cloud Console SQL workspace. The bipartite report shows all six edges of the chain (3 produce + 3 consume).
+Terminal D prints the same `trace_id` across all three hops, and the CCAF report INSERTs populate as you fire Terminal A — `SELECT * FROM isotope_report_latency_1m`, `SELECT * FROM isotope_report_bipartite_topology_1m`, etc. in the Cloud Console SQL workspace. The bipartite report shows all six edges of the chain (3 produce + 3 consume).
 
-**Sustained traffic — required to see report rows.** The six INSERT INTO jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, and a tumbling window only emits when the watermark advances past `window_end`. A handful of records bursted from Terminal D within a single 1-minute interval will sit in one open window forever (the most-recent record is the watermark, and it never gets older than itself). Spread traffic across **multiple** windows so the watermark crosses each boundary:
+**Sustained traffic — required to see report rows.** The six INSERT INTO jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, and a tumbling window only emits when the watermark advances past `window_end`. A handful of records bursted from Terminal A within a single 1-minute interval will sit in one open window forever (the most-recent record is the watermark, and it never gets older than itself). Spread traffic across **multiple** windows so the watermark crosses each boundary:
 
 ```bash
 # 30 records spaced 5s apart ≈ 2.5 minutes of event-time → spans 3+ windows
