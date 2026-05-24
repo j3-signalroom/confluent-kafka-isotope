@@ -23,15 +23,16 @@ locals {
   cluster_display_name = "kafka-isotope"
 
   # Canonical isotope event topics. The demo CLI writes DemoEvent (SR-Protobuf)
-  # to iso_start / iso_mid / iso_final; the source view inlined in
-  # setup-confluent-flink.tf UNIONs them. iso_consume_events carries
-  # consume-edge markers (no value, scalar isotope headers + a
-  # x-isotope-consumer-service header) written by IsotopeContext.recordConsume.
+  # to orders.placed / orders.enriched / orders.fulfilled; the source view
+  # inlined in setup-confluent-flink.tf UNIONs them.
+  # platform.observability.consume_events carries consume-edge markers (no
+  # value, scalar isotope headers + a x-isotope-consumer-service header) written
+  # by IsotopeContext.recordConsume.
   isotope_event_topics = [
-    "iso_start",
-    "iso_mid",
-    "iso_final",
-    "iso_consume_events",
+    "orders.placed",
+    "orders.enriched",
+    "orders.fulfilled",
+    "platform.observability.consume_events",
   ]
 
   # Sink topics for the seven Flink SQL reports. Names mirror CP's sink topic

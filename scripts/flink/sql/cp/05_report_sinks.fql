@@ -22,7 +22,7 @@
 --     wrapper, but Avro+SR gets us Control Center decoding with zero
 --     custom code.
 --
--- A deliberate consequence: the demo *event* topics (`iso_start`, etc.)
+-- A deliberate consequence: the demo *event* topics (`orders.placed`, etc.)
 -- still ride Protobuf+SR (DemoEvent, see app/src/main/proto/), but the
 -- *report* topics ride Avro+SR. Format-by-domain — events from the app,
 -- aggregates from Flink — is a clean split, not a defect.

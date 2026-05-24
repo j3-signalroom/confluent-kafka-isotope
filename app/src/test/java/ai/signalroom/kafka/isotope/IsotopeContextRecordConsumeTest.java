@@ -63,9 +63,9 @@ class IsotopeContextRecordConsumeTest {
             true, null, new ByteArraySerializer(), new ByteArraySerializer());
 
         ConsumerRecord<byte[], byte[]> inbound =
-            taggedRecord("0192abcd-deadbeef", "svc-A", "svc-A", IN_TOPIC, 1);
+            taggedRecord("0192abcd-deadbeef", "order-intake-service", "order-intake-service", IN_TOPIC, 1);
 
-        IsotopeContext.recordConsume(inbound, "svc-B", mock);
+        IsotopeContext.recordConsume(inbound, "order-enrichment-service", mock);
 
         List<ProducerRecord<byte[], byte[]>> sent = mock.history();
         assertEquals(1, sent.size(), "exactly one marker should be emitted");
@@ -78,13 +78,13 @@ class IsotopeContextRecordConsumeTest {
         // Forwarded headers
         assertEquals("0192abcd-deadbeef", headerString(marker, Isotope.HEADER_TRACE_ID));
         assertEquals("1700000000000",     headerString(marker, Isotope.HEADER_ORIGIN_TS));
-        assertEquals("svc-A",             headerString(marker, Isotope.HEADER_ORIGIN_SERVICE));
-        assertEquals("svc-A",             headerString(marker, Isotope.HEADER_THIS_SERVICE));
+        assertEquals("order-intake-service",             headerString(marker, Isotope.HEADER_ORIGIN_SERVICE));
+        assertEquals("order-intake-service",             headerString(marker, Isotope.HEADER_THIS_SERVICE));
         assertEquals(IN_TOPIC,            headerString(marker, Isotope.HEADER_THIS_TOPIC));
         assertEquals("1",                 headerString(marker, Isotope.HEADER_HOP_COUNT));
 
         // Newly stamped consumer service
-        assertEquals("svc-B", headerString(marker, Isotope.HEADER_CONSUMER_SERVICE));
+        assertEquals("order-enrichment-service", headerString(marker, Isotope.HEADER_CONSUMER_SERVICE));
     }
 
     @Test
@@ -98,7 +98,7 @@ class IsotopeContextRecordConsumeTest {
             0, 0, new byte[0], new byte[0],
             new RecordHeaders(), java.util.Optional.empty());
 
-        IsotopeContext.recordConsume(untagged, "svc-B", mock);
+        IsotopeContext.recordConsume(untagged, "order-enrichment-service", mock);
 
         assertTrue(mock.history().isEmpty(),
             "no marker should be emitted for untagged records");
@@ -110,7 +110,7 @@ class IsotopeContextRecordConsumeTest {
             true, null, new ByteArraySerializer(), new ByteArraySerializer());
 
         ConsumerRecord<byte[], byte[]> inbound =
-            taggedRecord("0192abcd-deadbeef", "svc-A", "svc-A", IN_TOPIC, 1);
+            taggedRecord("0192abcd-deadbeef", "order-intake-service", "order-intake-service", IN_TOPIC, 1);
 
         IsotopeContext.recordConsume(inbound, null, mock);
 
@@ -126,9 +126,9 @@ class IsotopeContextRecordConsumeTest {
         String custom = "alt_consume_events";
 
         ConsumerRecord<byte[], byte[]> inbound =
-            taggedRecord("0192abcd-deadbeef", "svc-A", "svc-A", IN_TOPIC, 1);
+            taggedRecord("0192abcd-deadbeef", "order-intake-service", "order-intake-service", IN_TOPIC, 1);
 
-        IsotopeContext.recordConsume(inbound, "svc-B", mock, custom);
+        IsotopeContext.recordConsume(inbound, "order-enrichment-service", mock, custom);
 
         assertEquals(custom, mock.history().get(0).topic());
     }

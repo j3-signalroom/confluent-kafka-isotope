@@ -36,19 +36,19 @@ import org.junit.jupiter.api.Test;
 /**
  * Exercises the bipartite-topology marker pipeline end-to-end.
  *
- *   svc-A → topic-AB → svc-B → topic-BC → svc-C → topic-CD → svc-D
+ *   order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service → topic-CD → shipping-notification-service
  *
  * For every consume edge (B↔AB, C↔BC, D↔CD), the consumer calls
  * {@link IsotopeContext#recordConsume} which emits a marker to a
  * per-test {@code iso-consume-events-*} topic. Assertions:
  *   - Exactly three markers land — one per consume edge.
  *   - Trace ID is identical across all three markers (and matches the
- *     trace produced by svc-A on stage 1).
+ *     trace produced by order-intake-service on stage 1).
  *   - Each marker carries the forwarded x-isotope-* scalars describing
  *     the UPSTREAM producer (this_service / this_topic) and a new
  *     x-isotope-consumer-service naming the DOWNSTREAM consumer.
  *   - The three (consumer_service, consumed_topic) pairs are exactly
- *     {(svc-B, topic-AB), (svc-C, topic-BC), (svc-D, topic-CD)} — i.e.
+ *     {(order-enrichment-service, topic-AB), (order-fulfillment-service, topic-BC), (shipping-notification-service, topic-CD)} — i.e.
  *     the inbound edges of the bipartite graph.
  */
 class BipartiteTopologyIT {
@@ -65,58 +65,58 @@ class BipartiteTopologyIT {
             try (KafkaProducer<byte[], byte[]> markers = bytesProducer()) {
                 IsotopeContext.clear();
 
-                // Stage 1: svc-A produces the trace seed onto topic-AB.
+                // Stage 1: order-intake-service produces the trace seed onto topic-AB.
                 byte[] traceId;
-                try (KafkaProducer<byte[], DemoEvent> prodA = IsotopeTestHarness.producer("svc-A")) {
-                    DemoEvent eventA = IsotopeTestHarness.newDemoEvent("svc-A", "stage-1");
+                try (KafkaProducer<byte[], DemoEvent> prodA = IsotopeTestHarness.producer("order-intake-service")) {
+                    DemoEvent eventA = IsotopeTestHarness.newDemoEvent("order-intake-service", "stage-1");
                     prodA.send(new ProducerRecord<>(topicAB, "k".getBytes(), eventA)).get();
                 }
 
-                // Stage 2: svc-B consumes, marks consume edge, produces to topic-BC.
+                // Stage 2: order-enrichment-service consumes, marks consume edge, produces to topic-BC.
                 try (KafkaConsumer<byte[], DemoEvent> consB =
                          IsotopeTestHarness.consumer("grp-B-" + topicAB)) {
                     consB.subscribe(List.of(topicAB));
                     ConsumerRecords<byte[], DemoEvent> batch = consB.poll(IsotopeTestHarness.POLL_TIMEOUT);
-                    assertEquals(1, batch.count(), "svc-B should see svc-A's record");
+                    assertEquals(1, batch.count(), "order-enrichment-service should see order-intake-service's record");
                     ConsumerRecord<byte[], DemoEvent> recAtB = batch.iterator().next();
                     IsotopeContext.adoptFromRecord(recAtB);
-                    IsotopeContext.recordConsume(recAtB, "svc-B", markers, markersTopic);
+                    IsotopeContext.recordConsume(recAtB, "order-enrichment-service", markers, markersTopic);
                     traceId = IsotopeContext.current().traceId();
 
                     try (KafkaProducer<byte[], DemoEvent> prodB =
-                             IsotopeTestHarness.producer("svc-B")) {
+                             IsotopeTestHarness.producer("order-enrichment-service")) {
                         prodB.send(new ProducerRecord<>(topicBC, "k".getBytes(),
-                            IsotopeTestHarness.newDemoEvent("svc-B", "stage-2"))).get();
+                            IsotopeTestHarness.newDemoEvent("order-enrichment-service", "stage-2"))).get();
                     }
                     IsotopeContext.clear();
                 }
 
-                // Stage 3: svc-C consumes, marks consume edge, produces to topic-CD.
+                // Stage 3: order-fulfillment-service consumes, marks consume edge, produces to topic-CD.
                 try (KafkaConsumer<byte[], DemoEvent> consC =
                          IsotopeTestHarness.consumer("grp-C-" + topicBC)) {
                     consC.subscribe(List.of(topicBC));
                     ConsumerRecords<byte[], DemoEvent> batch = consC.poll(IsotopeTestHarness.POLL_TIMEOUT);
-                    assertEquals(1, batch.count(), "svc-C should see svc-B's record");
+                    assertEquals(1, batch.count(), "order-fulfillment-service should see order-enrichment-service's record");
                     ConsumerRecord<byte[], DemoEvent> recAtC = batch.iterator().next();
                     IsotopeContext.adoptFromRecord(recAtC);
-                    IsotopeContext.recordConsume(recAtC, "svc-C", markers, markersTopic);
+                    IsotopeContext.recordConsume(recAtC, "order-fulfillment-service", markers, markersTopic);
 
                     try (KafkaProducer<byte[], DemoEvent> prodC =
-                             IsotopeTestHarness.producer("svc-C")) {
+                             IsotopeTestHarness.producer("order-fulfillment-service")) {
                         prodC.send(new ProducerRecord<>(topicCD, "k".getBytes(),
-                            IsotopeTestHarness.newDemoEvent("svc-C", "stage-3"))).get();
+                            IsotopeTestHarness.newDemoEvent("order-fulfillment-service", "stage-3"))).get();
                     }
                     IsotopeContext.clear();
                 }
 
-                // Stage 4: svc-D terminal-consumes, marks consume edge, does not produce.
+                // Stage 4: shipping-notification-service terminal-consumes, marks consume edge, does not produce.
                 try (KafkaConsumer<byte[], DemoEvent> consD =
                          IsotopeTestHarness.consumer("grp-D-" + topicCD)) {
                     consD.subscribe(List.of(topicCD));
                     ConsumerRecords<byte[], DemoEvent> batch = consD.poll(IsotopeTestHarness.POLL_TIMEOUT);
-                    assertEquals(1, batch.count(), "svc-D should see svc-C's record");
+                    assertEquals(1, batch.count(), "shipping-notification-service should see order-fulfillment-service's record");
                     ConsumerRecord<byte[], DemoEvent> recAtD = batch.iterator().next();
-                    IsotopeContext.recordConsume(recAtD, "svc-D", markers, markersTopic);
+                    IsotopeContext.recordConsume(recAtD, "shipping-notification-service", markers, markersTopic);
                 }
 
                 markers.flush();
@@ -136,12 +136,12 @@ class BipartiteTopologyIT {
                 assertEquals(3, seen.size(),
                     "exactly three consume-edge markers should have been emitted");
 
-                String traceIdHex = new Isotope(traceId, 0L, "svc-A",
+                String traceIdHex = new Isotope(traceId, 0L, "order-intake-service",
                     java.util.List.of(), false).traceIdHex();
                 Set<String> expectedEdges = new HashSet<>();
-                expectedEdges.add("svc-B|" + topicAB);
-                expectedEdges.add("svc-C|" + topicBC);
-                expectedEdges.add("svc-D|" + topicCD);
+                expectedEdges.add("order-enrichment-service|" + topicAB);
+                expectedEdges.add("order-fulfillment-service|" + topicBC);
+                expectedEdges.add("shipping-notification-service|" + topicCD);
 
                 Set<String> actualEdges = new HashSet<>();
                 Map<String, String> consumerToProducer = new HashMap<>();
@@ -152,7 +152,7 @@ class BipartiteTopologyIT {
                     assertEquals(traceIdHex,
                         IsotopeTestHarness.stringHeader(marker.headers(), Isotope.HEADER_TRACE_ID),
                         "every marker carries the same trace id");
-                    assertEquals("svc-A",
+                    assertEquals("order-intake-service",
                         IsotopeTestHarness.stringHeader(marker.headers(), Isotope.HEADER_ORIGIN_SERVICE));
 
                     String consumer = IsotopeTestHarness.stringHeader(
@@ -170,10 +170,10 @@ class BipartiteTopologyIT {
                     consumerToProducer.put(consumer, producer);
                 }
                 assertEquals(expectedEdges, actualEdges,
-                    "consume edges must be exactly {(B,AB), (C,BC), (D,CD)}");
-                assertEquals("svc-A", consumerToProducer.get("svc-B"));
-                assertEquals("svc-B", consumerToProducer.get("svc-C"));
-                assertEquals("svc-C", consumerToProducer.get("svc-D"));
+                    "consume edges must be exactly the three (consumer,topic) pairs for stages 2-4");
+                assertEquals("order-intake-service", consumerToProducer.get("order-enrichment-service"));
+                assertEquals("order-enrichment-service", consumerToProducer.get("order-fulfillment-service"));
+                assertEquals("order-fulfillment-service", consumerToProducer.get("shipping-notification-service"));
 
                 // Trace-id byte equality on the first marker for good measure.
                 ConsumerRecord<byte[], byte[]> any = seen.get(0);

@@ -5,11 +5,18 @@
 # :app:run` with the right `-D` flags. The arguments after the script
 # name are forwarded to App.java as `--args`.
 #
-# Usage:
-#   scripts/cc-app-run.sh sink iso_final
-#   scripts/cc-app-run.sh hop iso_mid iso_final svc-C
-#   scripts/cc-app-run.sh hop iso_start iso_mid svc-B
-#   scripts/cc-app-run.sh send iso_start svc-A 'hello world'
+# Usage — pipeline-position verbs (recommended):
+#   scripts/cc-app-run.sh place [PAYLOAD]   # produce to orders.placed
+#   scripts/cc-app-run.sh enrich            # hop orders.placed   → orders.enriched
+#   scripts/cc-app-run.sh fulfill           # hop orders.enriched → orders.fulfilled
+#   scripts/cc-app-run.sh ship              # terminal-consume orders.fulfilled
+#
+# Generic verbs (raw App.java passthrough — for ad-hoc inspection or pipelines
+# that don't fit the orders.* shape):
+#   scripts/cc-app-run.sh send    <topic> <service> <payload>
+#   scripts/cc-app-run.sh hop     <in-topic> <out-topic> <service>
+#   scripts/cc-app-run.sh consume <topic> <service>
+#   scripts/cc-app-run.sh sink    <topic>
 #
 # Prereqs:
 #   - `make cc-flink-reports-up` has succeeded — Terraform owns both
@@ -23,11 +30,34 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 if [ $# -eq 0 ]; then
-    echo "Usage: $(basename "$0") <send|hop|sink> <args...>"
-    echo "Example: $(basename "$0") sink iso_final"
+    cat <<EOF
+Usage: $(basename "$0") <verb> [args]
+
+Pipeline-position verbs (recommended):
+  place [PAYLOAD]   send orders.placed as order-intake-service (default payload: hello)
+  enrich            hop  orders.placed   → orders.enriched   as order-enrichment-service
+  fulfill           hop  orders.enriched → orders.fulfilled  as order-fulfillment-service
+  ship              terminal-consume orders.fulfilled        as shipping-notification-service
+
+Generic verbs (raw App.java passthrough):
+  send    <topic> <service> <payload>
+  hop     <in-topic> <out-topic> <service>
+  consume <topic> <service>
+  sink    <topic>
+
+Example (full 4-terminal demo):
+  scripts/cc-app-run.sh ship      &   # terminal A
+  scripts/cc-app-run.sh fulfill   &   # terminal B
+  scripts/cc-app-run.sh enrich    &   # terminal C
+  scripts/cc-app-run.sh place 'hello' # terminal D
+EOF
     exit 2
 fi
 
+# Verb dispatch (place/enrich/fulfill/ship + send/hop/consume/sink) is
+# handled inside App.java, so all positional args pass straight through to
+# `--args` below — this script's only job is the CCAF auth flags.
+#
 # Source the env helper. It sets BOOTSTRAP, SR_URL, KAFKA_KEY,
 # KAFKA_SECRET, SR_KEY, SR_SECRET, JAAS — and echoes a masked summary.
 # shellcheck disable=SC1091

@@ -8,9 +8,10 @@
 --      full bipartite (producer, consumer) graph requires also
 --      instrumenting consumers.
 --   2. `this_service` / `this_topic` are the *most recent hop's*
---      identity. For a record on topic-BC produced by svc-B,
---      this_service='svc-B', this_topic='topic-BC'; the upstream
---      origin is still visible via `origin_service`.
+--      identity. For a record on orders.enriched produced by
+--      order-enrichment-service, this_service='order-enrichment-service',
+--      this_topic='orders.enriched'; the upstream origin is still visible
+--      via `origin_service`.
 --
 -- Sinks into `topology_report_1m` (Kafka, Avro+SR).
 -- =====================================================================

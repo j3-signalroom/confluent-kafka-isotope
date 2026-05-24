@@ -166,15 +166,15 @@ if [ "${create_action}" = true ]; then
 
     echo
     print_info "Next step — drive the 4-stage demo (see README § 4.5):"
-    print_info "    scripts/cc-app-run.sh consume iso_final svc-D"
-    print_info "    scripts/cc-app-run.sh hop iso_mid iso_final svc-C"
-    print_info "    scripts/cc-app-run.sh hop iso_start iso_mid svc-B"
-    print_info "    scripts/cc-app-run.sh send iso_start svc-A 'hello'"
+    print_info "    scripts/cc-app-run.sh ship             # terminal consumer (emits marker)"
+    print_info "    scripts/cc-app-run.sh fulfill"
+    print_info "    scripts/cc-app-run.sh enrich"
+    print_info "    scripts/cc-app-run.sh place 'hello'"
 
     echo
-    print_info "Produce 30 records spaced 5 seconds apart ≈ 2.5 minutes of event-time → spans 3+ windows:" 
+    print_info "Produce 30 records spaced 5 seconds apart ≈ 2.5 minutes of event-time → spans 3+ windows:"
     print_info "    for i in {1..30}; do"
-    print_info "        scripts/cc-app-run.sh send iso_start svc-A \"burst-\$i\""
+    print_info "        scripts/cc-app-run.sh place \"burst-\$i\""
     print_info "        sleep 5"
     print_info "    done"
 else
