@@ -142,14 +142,14 @@ resource "confluent_flink_artifact" "isotope_udf" {
 }
 
 # ---------------------------------------------------------------------------
-# Statements 1-3 — ALTER TABLE on each iso_* topic to expose Kafka record
-# headers as a column. CCAF's auto-imported topic tables do not include
-# `headers` by default; the source view below references it.
+# Statements 1-4 — ALTER TABLE on each isotope event topic to expose Kafka
+# record headers as a column. CCAF's auto-imported topic tables do not
+# include `headers` by default; the source view below references it.
 # ---------------------------------------------------------------------------
 
-resource "confluent_flink_statement" "alter_iso_start_add_headers" {
+resource "confluent_flink_statement" "alter_orders_placed_add_headers" {
   statement = <<-EOT
-    ALTER TABLE `iso_start`
+    ALTER TABLE `orders.placed`
         ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
   EOT
 
@@ -171,14 +171,14 @@ resource "confluent_flink_statement" "alter_iso_start_add_headers" {
   }
 
   depends_on = [
-    confluent_kafka_topic.isotope_event["iso_start"],
+    confluent_kafka_topic.isotope_event["orders.placed"],
     confluent_flink_compute_pool.isotope,
   ]
 }
 
-resource "confluent_flink_statement" "alter_iso_mid_add_headers" {
+resource "confluent_flink_statement" "alter_orders_enriched_add_headers" {
   statement = <<-EOT
-    ALTER TABLE `iso_mid`
+    ALTER TABLE `orders.enriched`
         ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
   EOT
 
@@ -200,14 +200,14 @@ resource "confluent_flink_statement" "alter_iso_mid_add_headers" {
   }
 
   depends_on = [
-    confluent_kafka_topic.isotope_event["iso_mid"],
+    confluent_kafka_topic.isotope_event["orders.enriched"],
     confluent_flink_compute_pool.isotope,
   ]
 }
 
-resource "confluent_flink_statement" "alter_iso_final_add_headers" {
+resource "confluent_flink_statement" "alter_orders_fulfilled_add_headers" {
   statement = <<-EOT
-    ALTER TABLE `iso_final`
+    ALTER TABLE `orders.fulfilled`
         ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
   EOT
 
@@ -229,14 +229,14 @@ resource "confluent_flink_statement" "alter_iso_final_add_headers" {
   }
 
   depends_on = [
-    confluent_kafka_topic.isotope_event["iso_final"],
+    confluent_kafka_topic.isotope_event["orders.fulfilled"],
     confluent_flink_compute_pool.isotope,
   ]
 }
 
-resource "confluent_flink_statement" "alter_iso_consume_events_add_headers" {
+resource "confluent_flink_statement" "alter_consume_events_add_headers" {
   statement = <<-EOT
-    ALTER TABLE `iso_consume_events`
+    ALTER TABLE `platform.observability.consume_events`
         ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
   EOT
 
@@ -258,14 +258,14 @@ resource "confluent_flink_statement" "alter_iso_consume_events_add_headers" {
   }
 
   depends_on = [
-    confluent_kafka_topic.isotope_event["iso_consume_events"],
+    confluent_kafka_topic.isotope_event["platform.observability.consume_events"],
     confluent_flink_compute_pool.isotope,
   ]
 }
 
 # ---------------------------------------------------------------------------
-# Statement 4 — `isotope_raw` view over the iso_* topics, including
-# iso_consume_events. The downstream `isotope` view filters to records
+# Statement 5 — `isotope_raw` view over the isotope event topics, including
+# the consume-marker topic. The downstream `isotope` view filters to records
 # without x-isotope-consumer-service (real produces); `consume_events`
 # filters to records *with* it (consume-edge markers).
 # ---------------------------------------------------------------------------
@@ -276,22 +276,22 @@ resource "confluent_flink_statement" "isotope_raw_view" {
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `iso_start`
+    FROM `orders.placed`
     UNION ALL
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `iso_mid`
+    FROM `orders.enriched`
     UNION ALL
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `iso_final`
+    FROM `orders.fulfilled`
     UNION ALL
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `iso_consume_events`;
+    FROM `platform.observability.consume_events`;
   EOT
 
   properties    = local.flink_statement_properties
@@ -312,10 +312,10 @@ resource "confluent_flink_statement" "isotope_raw_view" {
   }
 
   depends_on = [
-    confluent_flink_statement.alter_iso_start_add_headers,
-    confluent_flink_statement.alter_iso_mid_add_headers,
-    confluent_flink_statement.alter_iso_final_add_headers,
-    confluent_flink_statement.alter_iso_consume_events_add_headers,
+    confluent_flink_statement.alter_orders_placed_add_headers,
+    confluent_flink_statement.alter_orders_enriched_add_headers,
+    confluent_flink_statement.alter_orders_fulfilled_add_headers,
+    confluent_flink_statement.alter_consume_events_add_headers,
   ]
 }
 

@@ -28,7 +28,7 @@
 #     "-Dschema.registry.url=$SR_URL"
 #     "-Dschema.registry.basic.auth.user.info=$SR_KEY:$SR_SECRET"
 #   )
-#   ./gradlew :app:run --args="sink iso_final" -q "${JVM_PROPS[@]}"
+#   ./gradlew :app:run --args="sink orders.fulfilled" -q "${JVM_PROPS[@]}"
 #   # ... and so on for the three hop / send terminals.
 #
 # NOTE: requires App.java to read the SASL_SSL + SR-basic-auth system

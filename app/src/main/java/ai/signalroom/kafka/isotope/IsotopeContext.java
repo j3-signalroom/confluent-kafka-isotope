@@ -35,7 +35,7 @@ import java.nio.charset.StandardCharsets;
 public final class IsotopeContext {
 
     /** Default topic that {@link #recordConsume} writes markers to. */
-    public static final String CONSUME_EVENTS_TOPIC = "iso_consume_events";
+    public static final String CONSUME_EVENTS_TOPIC = "platform.observability.consume_events";
 
     private static final ThreadLocal<Isotope> CURRENT = new ThreadLocal<>();
 

@@ -26,14 +26,14 @@ import org.junit.jupiter.api.Test;
 /**
  * Exercises the full producer→consumer→producer→consumer chain.
  *
- *   svc-A → topic-AB → svc-B → topic-BC → svc-C
+ *   order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service
  *
  * Assertions:
  *   - The trace ID is constant across all three stages.
- *   - The originService stays "svc-A" (set on the first hop) even at svc-C.
- *   - At svc-C the isotope carries exactly two hops:
- *       hop[0] = {service: svc-A, topic: topic-AB}
- *       hop[1] = {service: svc-B, topic: topic-BC}
+ *   - The originService stays "order-intake-service" (set on the first hop) even at order-fulfillment-service.
+ *   - At order-fulfillment-service the isotope carries exactly two hops:
+ *       hop[0] = {service: order-intake-service, topic: topic-AB}
+ *       hop[1] = {service: order-enrichment-service, topic: topic-BC}
  *   - Hop timestamps are monotonically non-decreasing.
  */
 class ThreeStageHopPropagationIT {
@@ -47,43 +47,43 @@ class ThreeStageHopPropagationIT {
             try {
                 IsotopeContext.clear();
 
-                // Stage 1: svc-A produces to topic-AB.
-                try (KafkaProducer<byte[], DemoEvent> prodA = IsotopeTestHarness.producer("svc-A")) {
-                    DemoEvent eventA = IsotopeTestHarness.newDemoEvent("svc-A", "stage-1");
+                // Stage 1: order-intake-service produces to topic-AB.
+                try (KafkaProducer<byte[], DemoEvent> prodA = IsotopeTestHarness.producer("order-intake-service")) {
+                    DemoEvent eventA = IsotopeTestHarness.newDemoEvent("order-intake-service", "stage-1");
                     prodA.send(new ProducerRecord<>(topicAB, "k".getBytes(), eventA)).get();
                 }
 
-                // Stage 2: svc-B consumes topic-AB, adopts the isotope, produces to topic-BC.
+                // Stage 2: order-enrichment-service consumes topic-AB, adopts the isotope, produces to topic-BC.
                 ConsumerRecord<byte[], DemoEvent> recAtB;
                 try (KafkaConsumer<byte[], DemoEvent> consB =
                          IsotopeTestHarness.consumer("grp-B-" + topicAB)) {
                     consB.subscribe(List.of(topicAB));
                     ConsumerRecords<byte[], DemoEvent> batch = consB.poll(IsotopeTestHarness.POLL_TIMEOUT);
                     assertEquals(1, batch.count(),
-                        "svc-B should see exactly the one record svc-A produced");
+                        "order-enrichment-service should see exactly the one record order-intake-service produced");
                     recAtB = batch.iterator().next();
                     IsotopeContext.adoptFromRecord(recAtB);
                 }
 
                 Isotope isoAtB = IsotopeContext.current();
-                assertNotNull(isoAtB, "svc-B should have adopted the isotope from topic-AB");
+                assertNotNull(isoAtB, "order-enrichment-service should have adopted the isotope from topic-AB");
                 assertEquals(1, isoAtB.hops().size(), "after stage 1, only one hop should exist");
                 byte[] traceId = isoAtB.traceId();
 
-                try (KafkaProducer<byte[], DemoEvent> prodB = IsotopeTestHarness.producer("svc-B")) {
-                    DemoEvent eventB = IsotopeTestHarness.newDemoEvent("svc-B", "stage-2");
+                try (KafkaProducer<byte[], DemoEvent> prodB = IsotopeTestHarness.producer("order-enrichment-service")) {
+                    DemoEvent eventB = IsotopeTestHarness.newDemoEvent("order-enrichment-service", "stage-2");
                     prodB.send(new ProducerRecord<>(topicBC, "k".getBytes(), eventB)).get();
                 }
                 IsotopeContext.clear();
 
-                // Stage 3: svc-C consumes topic-BC and inspects the isotope.
+                // Stage 3: order-fulfillment-service consumes topic-BC and inspects the isotope.
                 Isotope isoAtC;
                 try (KafkaConsumer<byte[], DemoEvent> consC =
                          IsotopeTestHarness.consumer("grp-C-" + topicBC)) {
                     consC.subscribe(List.of(topicBC));
                     ConsumerRecords<byte[], DemoEvent> batch = consC.poll(IsotopeTestHarness.POLL_TIMEOUT);
                     assertEquals(1, batch.count(),
-                        "svc-C should see exactly the one record svc-B produced");
+                        "order-fulfillment-service should see exactly the one record order-enrichment-service produced");
 
                     ConsumerRecord<byte[], DemoEvent> recAtC = batch.iterator().next();
                     Headers hs = recAtC.headers();
@@ -92,13 +92,13 @@ class ThreeStageHopPropagationIT {
                     isoAtC = Isotope.fromJsonBytes(h.value());
 
                     // Scalar reporting headers carry the *current* hop's view:
-                    // origin remains svc-A, but this-service / this-topic reflect
-                    // the producer that wrote this very record (svc-B → topic-BC).
+                    // origin remains order-intake-service, but this-service / this-topic reflect
+                    // the producer that wrote this very record (order-enrichment-service → topic-BC).
                     assertEquals(isoAtC.traceIdHex(),
                         IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_TRACE_ID));
-                    assertEquals("svc-A",
+                    assertEquals("order-intake-service",
                         IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_ORIGIN_SERVICE));
-                    assertEquals("svc-B",
+                    assertEquals("order-enrichment-service",
                         IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_THIS_SERVICE));
                     assertEquals(topicBC,
                         IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_THIS_TOPIC));
@@ -109,7 +109,7 @@ class ThreeStageHopPropagationIT {
                 // Trace identity preserved.
                 assertArrayEquals(traceId, isoAtC.traceId(),
                     "trace id must be stable across hops");
-                assertEquals("svc-A", isoAtC.originService(),
+                assertEquals("order-intake-service", isoAtC.originService(),
                     "originService is set once at trace creation and never reassigned");
 
                 // Hops are ordered: A→AB then B→BC.
@@ -117,10 +117,10 @@ class ThreeStageHopPropagationIT {
                 Isotope.Hop hop0 = isoAtC.hops().get(0);
                 Isotope.Hop hop1 = isoAtC.hops().get(1);
 
-                assertEquals("svc-A", hop0.service());
+                assertEquals("order-intake-service", hop0.service());
                 assertEquals(topicAB, hop0.topic());
 
-                assertEquals("svc-B", hop1.service());
+                assertEquals("order-enrichment-service", hop1.service());
                 assertEquals(topicBC, hop1.topic());
 
                 // Latency-sanity: hop timestamps non-decreasing.

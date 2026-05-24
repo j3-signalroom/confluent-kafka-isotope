@@ -21,8 +21,8 @@ class IsotopeCodecTest {
 
     @Test
     void newTraceHasIdServiceAndEmptyHops() {
-        Isotope iso = Isotope.newTrace("svc-A");
-        assertEquals("svc-A", iso.originService());
+        Isotope iso = Isotope.newTrace("order-intake-service");
+        assertEquals("order-intake-service", iso.originService());
         assertEquals(16, iso.traceId().length);
         assertEquals(0, iso.hops().size());
         assertFalse(iso.truncated());
@@ -33,7 +33,7 @@ class IsotopeCodecTest {
 
     @Test
     void traceIdIsUuidV7WithCorrectVersionAndVariantBits() {
-        Isotope iso = Isotope.newTrace("svc-A");
+        Isotope iso = Isotope.newTrace("order-intake-service");
         byte[] id = iso.traceId();
         // byte 6 high nibble must be 0111 (version 7)
         assertEquals(0x70, id[6] & 0xF0, "UUIDv7 version nibble");
@@ -44,7 +44,7 @@ class IsotopeCodecTest {
     @Test
     void traceIdEmbedsCreationTimestampInTopBits() {
         long before = System.currentTimeMillis();
-        Isotope iso = Isotope.newTrace("svc-A");
+        Isotope iso = Isotope.newTrace("order-intake-service");
         long after  = System.currentTimeMillis();
 
         byte[] id = iso.traceId();
@@ -64,9 +64,9 @@ class IsotopeCodecTest {
 
     @Test
     void traceIdsCreatedLaterSortLexicographicallyAfter() throws Exception {
-        Isotope first = Isotope.newTrace("svc-A");
+        Isotope first = Isotope.newTrace("order-intake-service");
         Thread.sleep(2);                                  // ensure ms advance
-        Isotope second = Isotope.newTrace("svc-A");
+        Isotope second = Isotope.newTrace("order-intake-service");
 
         // Hex string comparison must follow chronological order.
         assertTrue(second.traceIdHex().compareTo(first.traceIdHex()) > 0,
@@ -87,9 +87,9 @@ class IsotopeCodecTest {
 
     @Test
     void jsonRoundtripPreservesAllFields() {
-        Isotope iso = Isotope.newTrace("svc-A")
-            .appendHop(new Isotope.Hop("svc-A", "topic-1", 1_000L))
-            .appendHop(new Isotope.Hop("svc-B", "topic-2", 2_000L));
+        Isotope iso = Isotope.newTrace("order-intake-service")
+            .appendHop(new Isotope.Hop("order-intake-service", "topic-1", 1_000L))
+            .appendHop(new Isotope.Hop("order-enrichment-service", "topic-2", 2_000L));
 
         byte[] bytes = iso.toJsonBytes();
         Isotope decoded = Isotope.fromJsonBytes(bytes);
@@ -103,7 +103,7 @@ class IsotopeCodecTest {
 
     @Test
     void hopsBeyondMaxAreEvictedAndFlagSet() {
-        Isotope iso = Isotope.newTrace("svc-A");
+        Isotope iso = Isotope.newTrace("order-intake-service");
         for (int i = 0; i < Isotope.MAX_HOPS + 5; i++) {
             iso.appendHop(new Isotope.Hop("svc-" + i, "topic-" + i, i));
         }
@@ -123,14 +123,14 @@ class IsotopeCodecTest {
 
     @Test
     void fromHeadersDecodesWhenPresent() {
-        Isotope iso = Isotope.newTrace("svc-A")
-            .appendHop(new Isotope.Hop("svc-A", "topic-1", 1_000L));
+        Isotope iso = Isotope.newTrace("order-intake-service")
+            .appendHop(new Isotope.Hop("order-intake-service", "topic-1", 1_000L));
         RecordHeaders headers = new RecordHeaders();
         headers.add(Isotope.HEADER_KEY, iso.toJsonBytes());
 
         Isotope decoded = Isotope.fromHeaders(headers);
         assertNotNull(decoded);
-        assertEquals("svc-A", decoded.originService());
+        assertEquals("order-intake-service", decoded.originService());
         assertEquals(1, decoded.hops().size());
     }
 

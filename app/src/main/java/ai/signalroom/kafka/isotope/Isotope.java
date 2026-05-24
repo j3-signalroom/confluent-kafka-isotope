@@ -40,9 +40,10 @@ public final class Isotope {
     public static final String HEADER_HOP_COUNT       = "x-isotope-hop-count";
 
     // Consume-side marker header. Written by IsotopeContext.recordConsume()
-    // when a consumer emits a marker to the iso_consume_events topic, on top
-    // of the six forwarded headers above. Its presence is what Flink uses to
-    // distinguish a consume-event marker from a regular produced record.
+    // when a consumer emits a marker to the platform.observability.consume_events
+    // topic, on top of the six forwarded headers above. Its presence is what
+    // Flink uses to distinguish a consume-event marker from a regular produced
+    // record.
     public static final String HEADER_CONSUMER_SERVICE = "x-isotope-consumer-service";
 
     // Bounded ring for the hop list — a payload guard, not a routing cap.

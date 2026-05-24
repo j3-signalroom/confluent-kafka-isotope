@@ -42,14 +42,17 @@ import java.util.UUID;
  *
  *   hop <in-topic> <out-topic> <service>
  *      Consume-then-produce stage. Adopts the inbound isotope, emits a
- *      consume-edge marker to iso_consume_events, then produces the same
- *      DemoEvent to <out-topic> tagged as <service>.
+ *      consume-edge marker to platform.observability.consume_events, then
+ *      produces the same DemoEvent to <out-topic> tagged as <service>.
  *
  *   consume <topic> <service>
  *      Terminal-consumer stage. Subscribes to <topic>, emits a
- *      consume-edge marker to iso_consume_events as <service>, and
- *      pretty-prints the isotope trail. Use this for the final node of
- *      a bipartite-topology demo (svc-D in svc-A → svc-B → svc-C → svc-D).
+ *      consume-edge marker to platform.observability.consume_events as
+ *      <service>, and pretty-prints the isotope trail. Use this for the
+ *      final node of a bipartite-topology demo
+ *      (shipping-notification-service in order-intake-service →
+ *      order-enrichment-service → order-fulfillment-service →
+ *      shipping-notification-service).
  *
  *   sink <topic>
  *      Passive peek tool — pretty-prints the isotope trail but does NOT
@@ -116,6 +119,13 @@ public final class App {
     public static void main(String[] args) throws Exception {
         if (args.length == 0) { usage(); System.exit(2); }
         switch (args[0]) {
+            // Pipeline-position verbs — encode the orders.* topic chain so
+            // each terminal of the 4-stage demo is one word.
+            case "place"   -> place(args);
+            case "enrich"  -> enrich();
+            case "fulfill" -> fulfill();
+            case "ship"    -> ship();
+            // Generic verbs — raw topic + service plumbing for ad-hoc use.
             case "send"    -> send(args);
             case "hop"     -> hop(args);
             case "consume" -> consume(args);
@@ -127,17 +137,23 @@ public final class App {
     private static void usage() {
         System.err.println("""
             Usage:
+              # Pipeline-position verbs (recommended for the orders.* demo):
+              app place [payload]     send orders.placed as order-intake-service (default payload: hello)
+              app enrich              hop  orders.placed   → orders.enriched   as order-enrichment-service
+              app fulfill             hop  orders.enriched → orders.fulfilled  as order-fulfillment-service
+              app ship                terminal-consume orders.fulfilled        as shipping-notification-service
+
+              # Generic verbs (raw topic + service for ad-hoc use):
               app send    <topic>     <service>   <payload>
               app hop     <in-topic>  <out-topic> <service>
               app consume <topic>     <service>
               app sink    <topic>
 
-            Examples (after `make kafka-pf-up`):
-              ./gradlew :app:run --args="send    iso_start svc-A 'hello'"
-              ./gradlew :app:run --args="hop     iso_start iso_mid   svc-B"
-              ./gradlew :app:run --args="hop     iso_mid   iso_final svc-C"
-              ./gradlew :app:run --args="consume iso_final svc-D"
-              ./gradlew :app:run --args="sink    iso_final"
+            4-terminal demo (after `make kafka-pf-up`):
+              ./gradlew :app:run --args="ship"             # terminal A (emits marker)
+              ./gradlew :app:run --args="fulfill"          # terminal B
+              ./gradlew :app:run --args="enrich"           # terminal C
+              ./gradlew :app:run --args="place 'hello'"    # terminal D
 
             Endpoints (override via -Dkafka.bootstrap=... -Dschema.registry.url=...):
               kafka.bootstrap     = localhost:30092
@@ -149,8 +165,31 @@ public final class App {
               -Dkafka.sasl.jaas.config=<JAAS line>
               -Dschema.registry.basic.auth.user.info=<sr-key>:<sr-secret>
             `source scripts/cc-cli-env.sh` exports the right values from
-            `terraform output`.
+            `terraform output`. `scripts/cc-app-run.sh` wraps this for CCAF.
             """);
+    }
+
+    // -- pipeline-position verbs ---------------------------------------
+    //
+    // Thin wrappers over send/hop/consume that slot in the canonical
+    // orders.* topic names and service identities. Adding a new stage to
+    // the demo is one new method + one switch case here.
+
+    private static void place(String[] args) throws Exception {
+        String payload = args.length >= 2 ? args[1] : "hello";
+        send(new String[] { "send", "orders.placed", "order-intake-service", payload });
+    }
+
+    private static void enrich() throws Exception {
+        hop(new String[] { "hop", "orders.placed", "orders.enriched", "order-enrichment-service" });
+    }
+
+    private static void fulfill() throws Exception {
+        hop(new String[] { "hop", "orders.enriched", "orders.fulfilled", "order-fulfillment-service" });
+    }
+
+    private static void ship() throws Exception {
+        consume(new String[] { "consume", "orders.fulfilled", "shipping-notification-service" });
     }
 
     // -- helpers --------------------------------------------------------

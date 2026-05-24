@@ -1,5 +1,5 @@
 -- =====================================================================
--- Source table — Confluent Platform Flink (CMF on Minikube)
+-- Source tables — Confluent Platform Flink (CMF on Minikube)
 --
 -- Apply via the Flink SQL Client against the CP Flink session cluster:
 --   make flink-up                              # bring up the cluster
@@ -9,30 +9,36 @@
 -- After this file is applied, the shared/ DDL files are environment-agnostic
 -- and can be applied verbatim.
 --
--- Reads every topic matching `topic-pattern` below — defaults to `iso_.*`
--- which captures everything the demo CLI creates: the three event topics
--- (iso_start, iso_mid, iso_final) carrying isotope-stamped DemoEvent
--- records, plus iso_consume_events carrying the value-less consume-edge
--- markers that `IsotopeContext.recordConsume` emits. Downstream typed
--- views (05_isotope_view, 06_consume_events_view) partition this single
--- source by presence/absence of the `x-isotope-consumer-service` header.
--- Adjust the pattern, or switch to `'topic' = '<name>'`, for your real
--- pipeline. The Flink Kafka source connector handles broker topic
--- discovery and adds new topics dynamically as they appear.
+-- One CREATE TABLE per Kafka topic, then a UNION-ALL view named `isotope_raw`
+-- that downstream views (05_isotope_view, 06_consume_events_view) read from.
+-- This shape mirrors CCAF, where every topic is auto-imported as its own
+-- Flink table and `isotope_raw` is the fan-in view. We use the explicit
+-- per-topic shape on CP too (instead of `topic-pattern = '…'`) so the source
+-- layer stays one-for-one with CCAF and the boundary between business
+-- topics (`orders.*`) and the infra marker topic
+-- (`platform.observability.consume_events`) is visible in the DDL.
+--
+-- The demo CLI writes DemoEvent (SR-Protobuf) to orders.placed /
+-- orders.enriched / orders.fulfilled. platform.observability.consume_events
+-- carries value-less consume-edge markers that
+-- `IsotopeContext.recordConsume` emits.
 -- =====================================================================
 
-CREATE TABLE IF NOT EXISTS isotope_raw (
+-- ---------------------------------------------------------------------
+-- orders.placed — origin-of-trace producer topic.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `orders.placed` (
     -- We don't decode the message value here — the isotope lives in headers,
     -- and reports only need scalar header columns. Treat the value as raw
     -- bytes so this table works for any value format (Avro/JSON/raw).
-    `value`         BYTES,
+    `value`           BYTES,
 
     -- Standard Kafka metadata, exposed as virtual columns for the reports.
-    `headers`       MAP<STRING, BYTES> METADATA FROM 'headers'   VIRTUAL,
-    `event_time`    TIMESTAMP_LTZ(3)   METADATA FROM 'timestamp' VIRTUAL,
-    `kafka_topic`   STRING             METADATA FROM 'topic'     VIRTUAL,
-    `kafka_partition` INT              METADATA FROM 'partition' VIRTUAL,
-    `kafka_offset`  BIGINT             METADATA FROM 'offset'    VIRTUAL,
+    `headers`         MAP<STRING, BYTES> METADATA FROM 'headers'   VIRTUAL,
+    `event_time`      TIMESTAMP_LTZ(3)   METADATA FROM 'timestamp' VIRTUAL,
+    `kafka_topic`     STRING             METADATA FROM 'topic'     VIRTUAL,
+    `kafka_partition` INT                METADATA FROM 'partition' VIRTUAL,
+    `kafka_offset`    BIGINT             METADATA FROM 'offset'    VIRTUAL,
 
     -- 5s watermark allowance: well under the 60s allowance typical
     -- of building-LAN ingest paths, but tight enough that latency reports
@@ -40,9 +46,97 @@ CREATE TABLE IF NOT EXISTS isotope_raw (
     WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
 ) WITH (
     'connector'                     = 'kafka',
-    'topic-pattern'                 = 'iso_.*',
+    'topic'                         = 'orders.placed',
     'properties.bootstrap.servers'  = 'kafka:9071',
     'properties.group.id'           = 'isotope-flink-reports',
     'scan.startup.mode'             = 'earliest-offset',
     'value.format'                  = 'raw'
 );
+
+-- ---------------------------------------------------------------------
+-- orders.enriched — middle hop.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `orders.enriched` (
+    `value`           BYTES,
+    `headers`         MAP<STRING, BYTES> METADATA FROM 'headers'   VIRTUAL,
+    `event_time`      TIMESTAMP_LTZ(3)   METADATA FROM 'timestamp' VIRTUAL,
+    `kafka_topic`     STRING             METADATA FROM 'topic'     VIRTUAL,
+    `kafka_partition` INT                METADATA FROM 'partition' VIRTUAL,
+    `kafka_offset`    BIGINT             METADATA FROM 'offset'    VIRTUAL,
+    WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
+) WITH (
+    'connector'                     = 'kafka',
+    'topic'                         = 'orders.enriched',
+    'properties.bootstrap.servers'  = 'kafka:9071',
+    'properties.group.id'           = 'isotope-flink-reports',
+    'scan.startup.mode'             = 'earliest-offset',
+    'value.format'                  = 'raw'
+);
+
+-- ---------------------------------------------------------------------
+-- orders.fulfilled — terminal hop (shipping-notification-service consumes).
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `orders.fulfilled` (
+    `value`           BYTES,
+    `headers`         MAP<STRING, BYTES> METADATA FROM 'headers'   VIRTUAL,
+    `event_time`      TIMESTAMP_LTZ(3)   METADATA FROM 'timestamp' VIRTUAL,
+    `kafka_topic`     STRING             METADATA FROM 'topic'     VIRTUAL,
+    `kafka_partition` INT                METADATA FROM 'partition' VIRTUAL,
+    `kafka_offset`    BIGINT             METADATA FROM 'offset'    VIRTUAL,
+    WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
+) WITH (
+    'connector'                     = 'kafka',
+    'topic'                         = 'orders.fulfilled',
+    'properties.bootstrap.servers'  = 'kafka:9071',
+    'properties.group.id'           = 'isotope-flink-reports',
+    'scan.startup.mode'             = 'earliest-offset',
+    'value.format'                  = 'raw'
+);
+
+-- ---------------------------------------------------------------------
+-- platform.observability.consume_events — consume-edge marker sideband.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `platform.observability.consume_events` (
+    `value`           BYTES,
+    `headers`         MAP<STRING, BYTES> METADATA FROM 'headers'   VIRTUAL,
+    `event_time`      TIMESTAMP_LTZ(3)   METADATA FROM 'timestamp' VIRTUAL,
+    `kafka_topic`     STRING             METADATA FROM 'topic'     VIRTUAL,
+    `kafka_partition` INT                METADATA FROM 'partition' VIRTUAL,
+    `kafka_offset`    BIGINT             METADATA FROM 'offset'    VIRTUAL,
+    WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
+) WITH (
+    'connector'                     = 'kafka',
+    'topic'                         = 'platform.observability.consume_events',
+    'properties.bootstrap.servers'  = 'kafka:9071',
+    'properties.group.id'           = 'isotope-flink-reports',
+    'scan.startup.mode'             = 'earliest-offset',
+    'value.format'                  = 'raw'
+);
+
+-- ---------------------------------------------------------------------
+-- isotope_raw — fan-in view that downstream typed views read from.
+-- Same shape as the CCAF view in terraform/setup-confluent-flink.tf;
+-- keeping the name and columns identical means 05_isotope_view.fql,
+-- 06_consume_events_view.fql and every report below them are byte-for-byte
+-- portable between CP and CCAF.
+-- ---------------------------------------------------------------------
+CREATE VIEW IF NOT EXISTS isotope_raw AS
+SELECT
+    `event_time` AS `event_time`,
+    `headers`    AS `headers`
+FROM `orders.placed`
+UNION ALL
+SELECT
+    `event_time` AS `event_time`,
+    `headers`    AS `headers`
+FROM `orders.enriched`
+UNION ALL
+SELECT
+    `event_time` AS `event_time`,
+    `headers`    AS `headers`
+FROM `orders.fulfilled`
+UNION ALL
+SELECT
+    `event_time` AS `event_time`,
+    `headers`    AS `headers`
+FROM `platform.observability.consume_events`;
