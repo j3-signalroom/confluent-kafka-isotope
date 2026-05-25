@@ -32,7 +32,6 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
     - [**4.5.2 Format-by-domain + CCAF UDAF limitation**](#452-format-by-domain--ccaf-udaf-limitation)
     - [**4.5.3 Sustained traffic — required to see report rows.**](#453-sustained-traffic--required-to-see-report-rows)
     - [**4.5.4 Teardown**](#454-teardown)
-  - [**4.6 Recommended path the first time through**](#46-recommended-path-the-first-time-through)
 <!-- tocstop -->
 
 ---
