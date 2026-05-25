@@ -25,6 +25,20 @@ NAMESPACE=confluent
 JAR_HOST_PATH=ptf/build/libs/isotope-flink-udf.jar
 JAR_POD_PATH=/opt/flink/lib/isotope-flink-udf.jar
 
+# Source event topics — the 3 demo business topics + the consume-edge
+# marker sideband. Flink's Kafka source can't auto-create topics (only
+# producers can), so on a fresh broker the source coordinator fails its
+# first metadata fetch with UnknownTopicOrPartitionException. Pre-creating
+# here makes `flink-reports-up` self-sufficient regardless of whether the
+# demo CLI has been run yet. NOT deleted by `down`: they hold inbound
+# traffic that exists independently of the reports.
+EVENT_TOPICS=(
+    orders.placed
+    orders.enriched
+    orders.fulfilled
+    platform.observability.consume_events
+)
+
 # Sink topics — all 7 reports run on this session cluster, all written
 # as SR-framed Avro (auto-registered on first write).
 SINK_TOPICS=(
@@ -152,7 +166,16 @@ if [ "${ACTION}" = "up" ]; then
     echo "→ Copying $(basename "${JAR_HOST_PATH}") → ${JM_POD}:${JAR_POD_PATH}"
     copy_to_pod "${JAR_HOST_PATH}" "${JM_POD}" "${JAR_POD_PATH}"
 
-    # 3. Pre-create the sink topics so the SR-framed-protobuf sink can
+    # 3a. Pre-create the source event topics. Flink's Kafka source fails
+    # its first metadata fetch with UnknownTopicOrPartitionException if
+    # the topic doesn't exist yet — and the source can't auto-create.
+    echo "→ Creating ${#EVENT_TOPICS[@]} source event topics on ${KAFKA_POD}..."
+    for topic in "${EVENT_TOPICS[@]}"; do
+        echo "  ↳ ${topic}"
+        create_topic "${topic}"
+    done
+
+    # 3b. Pre-create the sink topics so the SR-framed-protobuf sink can
     # write on first record (avoids relying on broker auto-create, and
     # lets us set partitions/replication explicitly).
     echo "→ Creating ${#SINK_TOPICS[@]} sink topics on ${KAFKA_POD}..."
