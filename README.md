@@ -29,6 +29,7 @@ Kafka topics become the connective tissue between services, while Kafka Intercep
     - [**4.5.2 Format-by-domain + CCAF UDAF limitation**](#452-format-by-domain--ccaf-udaf-limitation)
     - [**4.5.3 Sustained traffic — required to see report rows.**](#453-sustained-traffic--required-to-see-report-rows)
     - [**4.5.4 Teardown**](#454-teardown)
+  - [**5.0 Resources**](#50-resources)
 <!-- tocstop -->
 
 ---
@@ -421,3 +422,6 @@ make cc-flink-reports-down CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SE
 ```
 
 Runs `terraform destroy -auto-approve` — deletes every resource above, including the environment itself. Safe to run repeatedly.
+
+## **5.0 Resources**
+- [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)
