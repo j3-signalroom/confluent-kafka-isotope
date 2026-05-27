@@ -29,7 +29,7 @@ Kafka topics become the connective tissue between services, while Kafka Intercep
     - [**4.5.2 Format-by-domain + CCAF UDAF limitation**](#452-format-by-domain--ccaf-udaf-limitation)
     - [**4.5.3 Sustained traffic — required to see report rows.**](#453-sustained-traffic--required-to-see-report-rows)
     - [**4.5.4 Teardown**](#454-teardown)
-  - [**5.0 Resources**](#50-resources)
+- [**5.0 Resources**](#50-resources)
 <!-- tocstop -->
 
 ---
