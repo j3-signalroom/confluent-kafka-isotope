@@ -87,8 +87,6 @@ public class IsotopeProducerInterceptor<K, V> implements ProducerInterceptor<K, 
 
     @Override
     public void close() {
-        // This method is intentionally empty because this interceptor holds
-        // no resources requiring cleanup.  Furthermore, it is here only to
-        // satisfy the interface. 
+        // No-op: the interceptor holds no resources to release.
     }
 }
