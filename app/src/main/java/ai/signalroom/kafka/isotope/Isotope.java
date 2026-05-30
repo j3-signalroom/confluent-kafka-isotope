@@ -7,13 +7,6 @@
  */
 package ai.signalroom.kafka.isotope;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.kafka.common.header.Header;
-import org.apache.kafka.common.header.Headers;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -24,14 +17,24 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.Headers;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 public final class Isotope {
 
     public static final String HEADER_KEY = "x-isotope";
 
-    // Scalar reporting headers, written alongside HEADER_KEY by
-    // IsotopeProducerInterceptor. All values are UTF-8 strings so that
-    // Flink SQL can do `CAST(headers['x-isotope-…'] AS STRING)` (and
-    // CAST(... AS BIGINT) for the numeric ones) without a UDF.
+    /**
+     * Scalar reporting headers, written alongside {@link #HEADER_KEY} by
+     * {@code IsotopeProducerInterceptor}. All values are UTF-8 strings so
+     * Flink SQL can cast them directly to STRING (or BIGINT for the numeric
+     * ones) without a UDF.
+     */
     public static final String HEADER_TRACE_ID        = "x-isotope-trace-id";
     public static final String HEADER_ORIGIN_TS       = "x-isotope-origin-ts";
     public static final String HEADER_ORIGIN_SERVICE  = "x-isotope-origin-service";
@@ -39,16 +42,20 @@ public final class Isotope {
     public static final String HEADER_THIS_TOPIC      = "x-isotope-this-topic";
     public static final String HEADER_HOP_COUNT       = "x-isotope-hop-count";
 
-    // Consume-side marker header. Written by IsotopeContext.recordConsume()
-    // when a consumer emits a marker to the platform.observability.consume_events
-    // topic, on top of the six forwarded headers above. Its presence is what
-    // Flink uses to distinguish a consume-event marker from a regular produced
-    // record.
+    /**
+     * Consume-side marker header. Written by
+     * {@code IsotopeContext.recordConsume} when a consumer emits a marker to
+     * the {@code platform.observability.consume_events} topic, on top of the
+     * six forwarded headers above. Its presence is what Flink uses to
+     * distinguish a consume-event marker from a regular produced record.
+     */
     public static final String HEADER_CONSUMER_SERVICE = "x-isotope-consumer-service";
 
-    // Bounded ring for the hop list — a payload guard, not a routing cap.
-    // On overflow the oldest hop is evicted and `truncated` latches true;
-    // the trace keeps flowing through as many services as you want.
+    /**
+     * Bounded ring for the hop list &mdash; a payload guard, not a routing cap.
+     * On overflow the oldest hop is evicted and {@code truncated} latches true;
+     * the trace keeps flowing through as many services as you want.
+     */
     public static final int MAX_HOPS = 32;
     public static final int TRACE_ID_BYTES = 16;
 
@@ -86,9 +93,15 @@ public final class Isotope {
      * Builds a 16-byte RFC 9562 UUIDv7: 48-bit Unix-ms timestamp in the
      * high bits, followed by 74 bits of random plus the version (4) and
      * variant (2) bit patches. Lexicographic byte order matches creation
-     * order, which is the property the trace ID benefits from when sorted,
-     * indexed, or browsed chronologically.
+     * order.
+     *
+     * <p>Uses {@link ThreadLocalRandom} rather than {@link java.security.SecureRandom}
+     * because trace IDs are public observability identifiers carried in Kafka
+     * headers, not security tokens. The requirement here is collision avoidance,
+     * not unpredictability, and {@code ThreadLocalRandom} delivers that without
+     * the per-call cost of {@code SecureRandom} on every produced record.
      */
+    @SuppressWarnings("java:S2245")
     static byte[] uuidV7Bytes(long unixMs) {
         byte[] b = new byte[TRACE_ID_BYTES];
         // bytes 0-5: 48-bit timestamp, big-endian
@@ -107,12 +120,17 @@ public final class Isotope {
         return b;
     }
 
-    /** Convenience: a fresh UUIDv7 in canonical {@code xxxxxxxx-…-7xxx-yxxx-…} string form. */
+    /** Convenience: a fresh UUIDv7 in canonical {@code xxxxxxxx-...-7xxx-yxxx-...} string form. */
     public static String uuidV7String() {
         byte[] b = uuidV7Bytes(System.currentTimeMillis());
-        long msb = 0L, lsb = 0L;
-        for (int i = 0; i < 8;  i++) msb = (msb << 8) | (b[i] & 0xFFL);
-        for (int i = 8; i < 16; i++) lsb = (lsb << 8) | (b[i] & 0xFFL);
+        long msb = 0L;
+        long lsb = 0L;
+        for (int i = 0; i < 8;  i++) {
+            msb = (msb << 8) | (b[i] & 0xFFL);
+        }
+        for (int i = 8; i < 16; i++) {
+            lsb = (lsb << 8) | (b[i] & 0xFFL);
+        }
         return new UUID(msb, lsb).toString();
     }
 
@@ -150,7 +168,9 @@ public final class Isotope {
 
     /** Returns the isotope carried by the given headers, or {@code null} if absent. */
     public static Isotope fromHeaders(Headers headers) {
-        if (headers == null) return null;
+        if (headers == null) {
+            return null;
+        }
         Header h = headers.lastHeader(HEADER_KEY);
         return h == null ? null : fromJsonBytes(h.value());
     }
