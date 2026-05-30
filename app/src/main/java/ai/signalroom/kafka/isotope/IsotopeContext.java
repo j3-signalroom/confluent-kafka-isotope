@@ -7,13 +7,13 @@
  */
 package ai.signalroom.kafka.isotope;
 
+import java.nio.charset.StandardCharsets;
+
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeaders;
-
-import java.nio.charset.StandardCharsets;
 
 /**
  * Thread-local handoff for the in-flight isotope between a consumer and a
@@ -24,13 +24,8 @@ import java.nio.charset.StandardCharsets;
  * and append the next hop instead of starting a new trace.
  *
  * <p>For bipartite topology visibility, consumers also call
- * {@link #recordConsume(ConsumerRecord, String, KafkaProducer)} to emit a
- * best-effort consume-edge marker to {@value #CONSUME_EVENTS_TOPIC}. The
- * marker carries the inbound record's scalar isotope headers plus a new
- * {@link Isotope#HEADER_CONSUMER_SERVICE} naming the consumer, so Flink can
- * union produce edges (from the {@code isotope} view) with consume edges
- * (from a {@code consume_events} view over {@value #CONSUME_EVENTS_TOPIC})
- * into a single bipartite (service ↔ topic ↔ service) report.
+ * {@link #recordConsume(ConsumerRecord, String, Producer)} to emit a
+ * best-effort consume-edge marker to {@value #CONSUME_EVENTS_TOPIC}.
  */
 public final class IsotopeContext {
 
@@ -50,8 +45,8 @@ public final class IsotopeContext {
      * installs it as the current thread-local context. Returns the isotope
      * adopted, or {@code null} if the record carried no isotope.
      */
-    public static Isotope adoptFromRecord(ConsumerRecord<?, ?> record) {
-        Isotope iso = Isotope.fromHeaders(record.headers());
+    public static Isotope adoptFromRecord(ConsumerRecord<?, ?> consumerRecord) {
+        Isotope iso = Isotope.fromHeaders(consumerRecord.headers());
         if (iso != null) {
             set(iso);
         } else {
@@ -67,10 +62,10 @@ public final class IsotopeContext {
      * with {@code topic = CONSUME_EVENTS_TOPIC}.
      */
     public static void recordConsume(
-            ConsumerRecord<?, ?> record,
+            ConsumerRecord<?, ?> consumerRecord,
             String consumerService,
             Producer<byte[], byte[]> emitter) {
-        recordConsume(record, consumerService, emitter, CONSUME_EVENTS_TOPIC);
+        recordConsume(consumerRecord, consumerService, emitter, CONSUME_EVENTS_TOPIC);
     }
 
     /**
@@ -81,30 +76,32 @@ public final class IsotopeContext {
      * {@link Isotope#HEADER_CONSUMER_SERVICE} naming the consumer.
      *
      * <p><b>No-op</b> when the inbound record carries no
-     * {@link Isotope#HEADER_TRACE_ID} — untagged records don't belong in the
+     * {@link Isotope#HEADER_TRACE_ID} - untagged records don't belong in the
      * bipartite graph.
      *
-     * <p>Fire-and-forget: the send is async with no callback. A failed marker
-     * leaves a hole in the bipartite report but does not affect the host
-     * application's consume/produce pipeline. The {@link Producer}
-     * lifecycle (creation, configuration, close) is the caller's responsibility.
+     * <p>Fire-and-forget: the send is async with no callback. The
+     * {@link Producer} lifecycle is the caller's responsibility.
      */
     public static void recordConsume(
-            ConsumerRecord<?, ?> record,
+            ConsumerRecord<?, ?> consumerRecord,
             String consumerService,
             Producer<byte[], byte[]> emitter,
             String topic) {
-        if (record == null || record.headers() == null) return;
-        Header traceHeader = record.headers().lastHeader(Isotope.HEADER_TRACE_ID);
-        if (traceHeader == null) return;
+        if (consumerRecord == null || consumerRecord.headers() == null) {
+            return;
+        }
+        Header traceHeader = consumerRecord.headers().lastHeader(Isotope.HEADER_TRACE_ID);
+        if (traceHeader == null) {
+            return;
+        }
 
         RecordHeaders markerHeaders = new RecordHeaders();
-        forwardHeader(record, markerHeaders, Isotope.HEADER_TRACE_ID);
-        forwardHeader(record, markerHeaders, Isotope.HEADER_ORIGIN_TS);
-        forwardHeader(record, markerHeaders, Isotope.HEADER_ORIGIN_SERVICE);
-        forwardHeader(record, markerHeaders, Isotope.HEADER_THIS_SERVICE);
-        forwardHeader(record, markerHeaders, Isotope.HEADER_THIS_TOPIC);
-        forwardHeader(record, markerHeaders, Isotope.HEADER_HOP_COUNT);
+        forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_TRACE_ID);
+        forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_ORIGIN_TS);
+        forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_ORIGIN_SERVICE);
+        forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_THIS_SERVICE);
+        forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_THIS_TOPIC);
+        forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_HOP_COUNT);
         markerHeaders.add(
             Isotope.HEADER_CONSUMER_SERVICE,
             (consumerService == null ? "unknown" : consumerService)
@@ -117,6 +114,8 @@ public final class IsotopeContext {
     private static void forwardHeader(
             ConsumerRecord<?, ?> source, RecordHeaders dest, String key) {
         Header h = source.headers().lastHeader(key);
-        if (h != null) dest.add(key, h.value());
+        if (h != null) {
+            dest.add(key, h.value());
+        }
     }
 }
