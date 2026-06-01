@@ -33,6 +33,12 @@ report reads from; the views in turn filter the single `isotope_raw`
 source table by the presence/absence of the
 `x-isotope-consumer-service` header.
 
+Every report also carries a **`pipeline`** column (decoded from the
+`x-isotope-pipeline` header) as a leading grouping dimension, so rows
+for an `orders` pipeline and a `location` pipeline never aggregate
+together. The "What it computes" column below lists the *additional*
+keys each report groups by, on top of `pipeline`.
+
 | Report | Source view | What it computes | Runtimes |
 |---|---|---|---|
 | `latency`            | `isotope`                 | avg / min / max end-to-end latency by `origin_service × current_topic` | CP, CCAF |

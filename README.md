@@ -48,9 +48,10 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
   - `t` — 16-byte **UUIDv7** trace ID ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562)): 48-bit ms timestamp in the high bits + 74 bits random. Stable for the life of the trace, and lexicographic byte order matches creation order — sort trace IDs and you get chronological order for free. The random bits come from `ThreadLocalRandom`, not `SecureRandom`: a trace ID is a public observability identifier carried in Kafka headers, so the requirement is collision avoidance, not unpredictability — and `ThreadLocalRandom` delivers that without `SecureRandom`'s per-call cost on every produced record.
   - `o` — origin timestamp (ms) — same value as the timestamp embedded in the UUIDv7 trace ID; kept as its own field for typed access from Flink SQL without needing to decode the UUID bytes.
   - `s` — origin service name (set once, never reassigned)
+  - `p` — origin pipeline name (e.g. `orders` vs `location`); like `s`, stamped once at the origin and forwarded unchanged on every hop, so reports can slice traces by which logical pipeline they belong to
   - `h` — ordered list of hops, each `{s: service, t: topic, m: tsMs}`
   - `x` — `true` if the hop list exceeded `MAX_HOPS = 32` and the oldest hop was evicted
-- **Six scalar headers** (UTF-8 strings) carry the most-recent-hop view so
+- **Seven scalar headers** (UTF-8 strings) carry the most-recent-hop view so
   Flink SQL can read them via `CAST(headers['x-isotope-…'] AS STRING)` without parsing the JSON array (no UDF required on either CCAF or CP Flink). See [scripts/flink/README.md](scripts/flink/README.md) for the full header table.
 
 A producer with the isotope interceptor loaded appends one hop on every `send()`. A consume-then-produce service calls `IsotopeContext.adoptFromRecord(record)` between consume and produce so the trace ID and origin survive the hop.
@@ -67,7 +68,7 @@ The exact call sites in `kafka-clients` 4.2.0: `KafkaProducer.send` invokes `int
 **This project uses one Kafka client interceptor, and it's a `ProducerInterceptor` — not a `ConsumerInterceptor`.** A `ConsumerInterceptor.onConsume` sees a whole batch from `poll()`, but the application processes records one at a time, so a thread-local snapshot from the batch would be ambiguous about which record is being handled. An earlier `IsotopeConsumerInterceptor` was tried and removed for exactly that reason (see [#30](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/30)). The consume side instead runs on **explicit per-record library calls**: services call `IsotopeContext.adoptFromRecord(record)` between consume and produce to carry the trace through a hop (the next `send()` then sees that thread-local and appends a new hop), and `IsotopeContext.recordConsume(record, service, markerProducer)` to emit a consume-edge marker (see the next paragraph). So: **producer interceptor for produce-side stamping; explicit per-record calls for everything consume-side**.
 
 ### **1.3 Why explicit calls for consume-side markers?**
-**Consume-side markers — the other half of the bipartite graph.** The produce-side `hops[]` chain captures `producer → topic` edges and implicitly captures consume edges for *intermediate* services (svc-B consuming from topic-AB is implied by svc-B's next produced hop), but **terminal consumers** — services that consume but never produce — would otherwise be invisible. The bipartite story closes that gap with one library call: consumers call `IsotopeContext.recordConsume(record, service, markerProducer)` between consume and process, which forwards the inbound record's six scalar `x-isotope-*` headers to a value-less marker record on `platform.observability.consume_events` and adds one new header — `x-isotope-consumer-service` — that names the consumer. The `bipartite_topology` Flink report unions these markers with the produce-side view to emit edges in both directions: `producer → topic` (from `isotope`) and `topic → consumer` (from `consume_events`). Markers are fire-and-forget: a dropped marker leaves a hole in the topology graph but never disrupts the consume/produce pipeline.
+**Consume-side markers — the other half of the bipartite graph.** The produce-side `hops[]` chain captures `producer → topic` edges and implicitly captures consume edges for *intermediate* services (svc-B consuming from topic-AB is implied by svc-B's next produced hop), but **terminal consumers** — services that consume but never produce — would otherwise be invisible. The bipartite story closes that gap with one library call: consumers call `IsotopeContext.recordConsume(record, service, markerProducer)` between consume and process, which forwards the inbound record's seven scalar `x-isotope-*` headers to a value-less marker record on `platform.observability.consume_events` and adds one new header — `x-isotope-consumer-service` — that names the consumer. The `bipartite_topology` Flink report unions these markers with the produce-side view to emit edges in both directions: `producer → topic` (from `isotope`) and `topic → consumer` (from `consume_events`). Markers are fire-and-forget: a dropped marker leaves a hole in the topology graph but never disrupts the consume/produce pipeline.
 
 ### **1.4 Why "bipartite"?**
 **Background — why "bipartite"?** The resulting topology report is an example of a [**bipartite graph**](https://en.wikipedia.org/wiki/Bipartite_graph) from graph theory (a sub-field of discrete mathematics). A graph is *bipartite* when its vertices partition into two disjoint sets such that every edge connects a vertex in one set to a vertex in the other — edges never run within a set. Here the two sets are **services** (`svc-A`, `svc-B`, …) and **topics** (`orders.placed`, `orders.enriched`, `orders.fulfilled`, `platform.observability.consume_events`); every edge is either a **produce edge** (`service → topic`, from the isotope's `hops[]`) or a **consume edge** (`topic → service`, from the `platform.observability.consume_events` markers). Kafka's pub/sub model guarantees the bipartite shape: services never connect directly to other services, and topics never connect directly to other topics — every interaction flows through the opposite set. Before consume-side markers existed, only produce edges were captured, so the topology view collapsed into a **unipartite** `service → service → service` chain with topics hidden as edge labels and terminal consumers omitted entirely. With both edge directions now wired, topics become first-class nodes alongside services, and the `bipartite_topology` report renders the full graph — every produce *and* consume edge, in both directions.
@@ -93,7 +94,7 @@ flowchart TB
         TC[("platform.observability.consume_events<br/>value-less consume markers")]
     end
 
-    IPI -- "produce (x-isotope JSON + 6 scalar headers)" --> Kafka
+    IPI -- "produce (x-isotope JSON + 7 scalar headers)" --> Kafka
     Kafka -- "consume + adopt" --> Adopt
     Mark -- "produce (forwarded headers + x-isotope-consumer-service)" --> TC
 
@@ -150,7 +151,7 @@ app/                                    isotope JVM library + demo CLI + tests
                                         + UUIDv7 helpers (uuidV7Bytes / uuidV7String)
     IsotopeContext.java                 ThreadLocal + adoptFromRecord() +
                                         recordConsume() (emits consume-edge markers)
-    IsotopeProducerInterceptor.java     stamps/appends x-isotope + 6 scalar
+    IsotopeProducerInterceptor.java     stamps/appends x-isotope + 7 scalar
                                         reporting headers on send()
     App.java                            demo CLI — send / hop / consume / sink modes
   src/test/java/.../                    IsotopeCodecTest, IsotopeContextRecordConsumeTest
@@ -294,7 +295,7 @@ The integration tests cover:
 | Test | What it verifies |
 |---|---|
 | `BrokerSmokeIT` | AdminClient can create/list/delete a topic via the NodePort port-forward |
-| `ProducerInterceptorIT` | A consumer sees the `x-isotope` JSON header + all 6 scalar reporting headers with the expected origin/hop values, and the Protobuf round-trip preserves `DemoEvent.source` / `payload` |
+| `ProducerInterceptorIT` | A consumer sees the `x-isotope` JSON header + all 7 scalar reporting headers with the expected origin/hop values, and the Protobuf round-trip preserves `DemoEvent.source` / `payload` |
 | `ThreeStageHopPropagationIT` | `order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `order-intake-service`, this = `order-enrichment-service`, hop count = 2) at the terminal; consume-then-produce hops use `IsotopeContext.adoptFromRecord` to carry the trace forward |
 | `BipartiteTopologyIT` | The 4-stage `order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service → topic-CD → shipping-notification-service` chain emits exactly three consume-edge markers to a per-test markers topic — one per consume edge. Every marker carries the trace ID, forwarded `x-isotope-*` scalars describing the upstream producer, and the new `x-isotope-consumer-service` naming the downstream consumer. Asserts the `(consumer_service, consumed_topic)` set is exactly the three pairs of stages 2-4 |
 

@@ -28,6 +28,7 @@ INSERT INTO latency_percentiles_flat_1m
 SELECT
     UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
     UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    `pipeline`,
     `origin_service`,
     `this_topic`,
     `pcts`.`p50_ms`        AS `p50_ms`,
@@ -38,6 +39,7 @@ FROM (
     SELECT
         `window_start`,
         `window_end`,
+        `pipeline`,
         `origin_service`,
         `this_topic`,
         LATENCY_PERCENTILES(`latency_ms`) AS `pcts`
@@ -47,6 +49,7 @@ FROM (
     GROUP BY
         `window_start`,
         `window_end`,
+        `pipeline`,
         `origin_service`,
         `this_topic`
 );

@@ -29,6 +29,13 @@ class IsotopeCodecTest {
         assertTrue(iso.originTsMs() > 0);
     }
 
+    @Test
+    void newTraceDefaultsPipelineToUnknownAndKeepsExplicitName() {
+        assertEquals("unknown", Isotope.newTrace("order-intake-service").pipeline());
+        assertEquals("orders",
+            Isotope.newTrace("order-intake-service", "orders").pipeline());
+    }
+
     // -- UUIDv7 --------------------------------------------------------
 
     @Test
@@ -87,7 +94,7 @@ class IsotopeCodecTest {
 
     @Test
     void jsonRoundtripPreservesAllFields() {
-        Isotope iso = Isotope.newTrace("order-intake-service")
+        Isotope iso = Isotope.newTrace("order-intake-service", "orders")
             .appendHop(new Isotope.Hop("order-intake-service", "topic-1", 1_000L))
             .appendHop(new Isotope.Hop("order-enrichment-service", "topic-2", 2_000L));
 
@@ -97,6 +104,7 @@ class IsotopeCodecTest {
         assertArrayEquals(iso.traceId(), decoded.traceId());
         assertEquals(iso.originTsMs(), decoded.originTsMs());
         assertEquals(iso.originService(), decoded.originService());
+        assertEquals(iso.pipeline(), decoded.pipeline());
         assertEquals(iso.truncated(), decoded.truncated());
         assertEquals(iso.hops(), decoded.hops());
     }

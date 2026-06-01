@@ -95,6 +95,7 @@ final class IsotopeTestHarness {
         p.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
             IsotopeProducerInterceptor.class.getName());
         p.put(IsotopeProducerInterceptor.SERVICE_NAME_CONFIG, serviceName);
+        p.put(IsotopeProducerInterceptor.PIPELINE_NAME_CONFIG, "orders");
         return new KafkaProducer<>(p);
     }
 

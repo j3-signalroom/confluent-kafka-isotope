@@ -330,6 +330,7 @@ resource "confluent_flink_statement" "isotope_view" {
         CAST(`headers`['x-isotope-trace-id']                       AS STRING) AS trace_id,
         CAST(CAST(`headers`['x-isotope-origin-ts']    AS STRING)   AS BIGINT) AS origin_ts_ms,
         CAST(`headers`['x-isotope-origin-service']                 AS STRING) AS origin_service,
+        CAST(`headers`['x-isotope-pipeline']                       AS STRING) AS pipeline,
         CAST(`headers`['x-isotope-this-service']                   AS STRING) AS this_service,
         CAST(`headers`['x-isotope-this-topic']                     AS STRING) AS this_topic,
         CAST(CAST(`headers`['x-isotope-hop-count']    AS STRING)   AS INT)    AS hop_count,
@@ -380,6 +381,7 @@ resource "confluent_flink_statement" "consume_events_view" {
         CAST(`headers`['x-isotope-trace-id']                       AS STRING) AS trace_id,
         CAST(CAST(`headers`['x-isotope-origin-ts']    AS STRING)   AS BIGINT) AS origin_ts_ms,
         CAST(`headers`['x-isotope-origin-service']                 AS STRING) AS origin_service,
+        CAST(`headers`['x-isotope-pipeline']                       AS STRING) AS pipeline,
         CAST(`headers`['x-isotope-this-service']                   AS STRING) AS producer_service,
         CAST(`headers`['x-isotope-this-topic']                     AS STRING) AS consumed_topic,
         CAST(`headers`['x-isotope-consumer-service']               AS STRING) AS consumer_service,
@@ -423,6 +425,7 @@ resource "confluent_flink_statement" "isotope_report_latency_1m" {
     CREATE TABLE IF NOT EXISTS isotope_report_latency_1m (
         `window_start`    BIGINT,
         `window_end`      BIGINT,
+        `pipeline`        STRING,
         `origin_service`  STRING,
         `this_topic`      STRING,
         `sample_count`    BIGINT,
@@ -463,6 +466,7 @@ resource "confluent_flink_statement" "isotope_report_topology_1m" {
     CREATE TABLE IF NOT EXISTS isotope_report_topology_1m (
         `window_start`     BIGINT,
         `window_end`       BIGINT,
+        `pipeline`         STRING,
         `origin_service`   STRING,
         `producer_service` STRING,
         `topic`            STRING,
@@ -498,6 +502,7 @@ resource "confluent_flink_statement" "isotope_report_bipartite_topology_1m" {
     CREATE TABLE IF NOT EXISTS isotope_report_bipartite_topology_1m (
         `window_start`      BIGINT,
         `window_end`        BIGINT,
+        `pipeline`          STRING,
         `edge_type`         STRING,
         `producer_service`  STRING,
         `topic`             STRING,
@@ -535,6 +540,7 @@ resource "confluent_flink_statement" "isotope_report_hop_distribution_1m" {
     CREATE TABLE IF NOT EXISTS isotope_report_hop_distribution_1m (
         `window_start`    BIGINT,
         `window_end`      BIGINT,
+        `pipeline`        STRING,
         `this_topic`      STRING,
         `hop_count`       INT,
         `records`         BIGINT,
@@ -569,6 +575,7 @@ resource "confluent_flink_statement" "isotope_report_coverage_1m" {
     CREATE TABLE IF NOT EXISTS isotope_report_coverage_1m (
         `window_start`    BIGINT,
         `window_end`      BIGINT,
+        `pipeline`        STRING,
         `this_topic`      STRING,
         `origin_service`  STRING,
         `distinct_traces` BIGINT,
@@ -603,6 +610,7 @@ resource "confluent_flink_statement" "isotope_report_stuck_trace_1m" {
     CREATE TABLE IF NOT EXISTS isotope_report_stuck_trace_1m (
         `trace_id`        STRING,
         `origin_service`  STRING,
+        `pipeline`        STRING,
         `last_service`    STRING,
         `last_topic`      STRING,
         `last_hop_count`  INT,
@@ -685,6 +693,7 @@ resource "confluent_flink_statement" "insert_latency_report" {
     SELECT
         UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
         UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `pipeline`,
         `origin_service`,
         `this_topic`,
         COUNT(*)                          AS `sample_count`,
@@ -698,6 +707,7 @@ resource "confluent_flink_statement" "insert_latency_report" {
     GROUP BY
         `window_start`,
         `window_end`,
+        `pipeline`,
         `origin_service`,
         `this_topic`;
   EOT
@@ -731,6 +741,7 @@ resource "confluent_flink_statement" "insert_topology_report" {
     SELECT
         UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
         UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `pipeline`,
         `origin_service`,
         `this_service`            AS `producer_service`,
         `this_topic`              AS `topic`,
@@ -742,6 +753,7 @@ resource "confluent_flink_statement" "insert_topology_report" {
     GROUP BY
         `window_start`,
         `window_end`,
+        `pipeline`,
         `origin_service`,
         `this_service`,
         `this_topic`;
@@ -776,6 +788,7 @@ resource "confluent_flink_statement" "insert_bipartite_topology_report" {
     SELECT
         UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
         UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `pipeline`,
         CAST('produce' AS STRING)                             AS `edge_type`,
         `this_service`                                        AS `producer_service`,
         `this_topic`                                          AS `topic`,
@@ -789,6 +802,7 @@ resource "confluent_flink_statement" "insert_bipartite_topology_report" {
     GROUP BY
         `window_start`,
         `window_end`,
+        `pipeline`,
         `origin_service`,
         `this_service`,
         `this_topic`
@@ -796,6 +810,7 @@ resource "confluent_flink_statement" "insert_bipartite_topology_report" {
     SELECT
         UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
         UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `pipeline`,
         CAST('consume' AS STRING)                             AS `edge_type`,
         CAST(NULL AS STRING)                                  AS `producer_service`,
         `consumed_topic`                                      AS `topic`,
@@ -809,6 +824,7 @@ resource "confluent_flink_statement" "insert_bipartite_topology_report" {
     GROUP BY
         `window_start`,
         `window_end`,
+        `pipeline`,
         `origin_service`,
         `consumer_service`,
         `consumed_topic`;
@@ -844,6 +860,7 @@ resource "confluent_flink_statement" "insert_hop_distribution" {
     SELECT
         UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
         UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `pipeline`,
         `this_topic`,
         `hop_count`,
         COUNT(*)                  AS `records`,
@@ -854,6 +871,7 @@ resource "confluent_flink_statement" "insert_hop_distribution" {
     GROUP BY
         `window_start`,
         `window_end`,
+        `pipeline`,
         `this_topic`,
         `hop_count`;
   EOT
@@ -887,6 +905,7 @@ resource "confluent_flink_statement" "insert_coverage_report" {
     SELECT
         UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
         UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+        `pipeline`,
         `this_topic`,
         `origin_service`,
         COUNT(DISTINCT trace_id)  AS `distinct_traces`,
@@ -897,6 +916,7 @@ resource "confluent_flink_statement" "insert_coverage_report" {
     GROUP BY
         `window_start`,
         `window_end`,
+        `pipeline`,
         `this_topic`,
         `origin_service`;
   EOT
@@ -930,6 +950,7 @@ resource "confluent_flink_statement" "insert_stuck_trace_alerts" {
     SELECT
         trace_id,
         origin_service,
+        pipeline,
         last_service,
         last_topic,
         last_hop_count,

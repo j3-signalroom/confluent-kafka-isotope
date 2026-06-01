@@ -75,6 +75,13 @@ public final class App {
     private static final String SCHEMA_REGISTRY_URL =
         System.getProperty("schema.registry.url", "http://localhost:8081");
 
+    // Logical pipeline this CLI's traces belong to. The whole orders.* demo is
+    // one pipeline, so it defaults to "orders"; override with
+    // -Disotope.pipeline=location to drive a second pipeline through the same
+    // reports. Set once at the origin and forwarded on every hop.
+    private static final String PIPELINE =
+        System.getProperty("isotope.pipeline", "orders");
+
     // Optional CCAF / SASL_SSL config. Defaults are blank (the Minikube
     // dev cluster is plaintext-no-auth), so applying these is a no-op
     // unless the user passes the matching -D properties.
@@ -237,6 +244,7 @@ public final class App {
         p.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
             IsotopeProducerInterceptor.class.getName());
         p.put(IsotopeProducerInterceptor.SERVICE_NAME_CONFIG, service);
+        p.put(IsotopeProducerInterceptor.PIPELINE_NAME_CONFIG, PIPELINE);
         applyKafkaSecurity(p);
         applySchemaRegistryAuth(p);
 
@@ -322,6 +330,7 @@ public final class App {
         pp.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
             IsotopeProducerInterceptor.class.getName());
         pp.put(IsotopeProducerInterceptor.SERVICE_NAME_CONFIG, service);
+        pp.put(IsotopeProducerInterceptor.PIPELINE_NAME_CONFIG, PIPELINE);
         applyKafkaSecurity(pp);
         applySchemaRegistryAuth(pp);
 

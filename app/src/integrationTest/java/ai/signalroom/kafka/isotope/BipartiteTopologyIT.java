@@ -137,7 +137,7 @@ class BipartiteTopologyIT {
                     "exactly three consume-edge markers should have been emitted");
 
                 String traceIdHex = new Isotope(traceId, 0L, "order-intake-service",
-                    java.util.List.of(), false).traceIdHex();
+                    "orders", java.util.List.of(), false).traceIdHex();
                 Set<String> expectedEdges = new HashSet<>();
                 expectedEdges.add("order-enrichment-service|" + topicAB);
                 expectedEdges.add("order-fulfillment-service|" + topicBC);

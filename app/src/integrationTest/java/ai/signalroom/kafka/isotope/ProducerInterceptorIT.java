@@ -60,6 +60,7 @@ class ProducerInterceptorIT {
 
                     Isotope iso = Isotope.fromJsonBytes(h.value());
                     assertEquals("origin-service", iso.originService());
+                    assertEquals("orders", iso.pipeline());
                     assertTrue(iso.originTsMs() >= beforeSend,
                         "originTsMs " + iso.originTsMs() + " must be >= test start " + beforeSend);
                     assertEquals(16, iso.traceId().length);
@@ -76,6 +77,7 @@ class ProducerInterceptorIT {
                     assertEquals(iso.traceIdHex(),                IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_TRACE_ID));
                     assertEquals(Long.toString(iso.originTsMs()), IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_ORIGIN_TS));
                     assertEquals("origin-service",                IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_ORIGIN_SERVICE));
+                    assertEquals("orders",                        IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_PIPELINE));
                     assertEquals("origin-service",                IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_THIS_SERVICE));
                     assertEquals(topic,                           IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_THIS_TOPIC));
                     assertEquals("1",                             IsotopeTestHarness.stringHeader(hs, Isotope.HEADER_HOP_COUNT));

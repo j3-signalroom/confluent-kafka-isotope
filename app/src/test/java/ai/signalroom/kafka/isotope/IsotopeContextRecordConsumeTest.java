@@ -41,6 +41,7 @@ class IsotopeContextRecordConsumeTest {
         h.add(Isotope.HEADER_TRACE_ID,       traceIdHex.getBytes(StandardCharsets.UTF_8));
         h.add(Isotope.HEADER_ORIGIN_TS,      Long.toString(1_700_000_000_000L).getBytes(StandardCharsets.UTF_8));
         h.add(Isotope.HEADER_ORIGIN_SERVICE, originService.getBytes(StandardCharsets.UTF_8));
+        h.add(Isotope.HEADER_PIPELINE,       "orders".getBytes(StandardCharsets.UTF_8));
         h.add(Isotope.HEADER_THIS_SERVICE,   thisService.getBytes(StandardCharsets.UTF_8));
         h.add(Isotope.HEADER_THIS_TOPIC,     thisTopic.getBytes(StandardCharsets.UTF_8));
         h.add(Isotope.HEADER_HOP_COUNT,      Integer.toString(hopCount).getBytes(StandardCharsets.UTF_8));
@@ -78,6 +79,7 @@ class IsotopeContextRecordConsumeTest {
         assertEquals("0192abcd-deadbeef", headerString(marker, Isotope.HEADER_TRACE_ID));
         assertEquals("1700000000000",     headerString(marker, Isotope.HEADER_ORIGIN_TS));
         assertEquals("order-intake-service",             headerString(marker, Isotope.HEADER_ORIGIN_SERVICE));
+        assertEquals("orders",            headerString(marker, Isotope.HEADER_PIPELINE));
         assertEquals("order-intake-service",             headerString(marker, Isotope.HEADER_THIS_SERVICE));
         assertEquals(IN_TOPIC,            headerString(marker, Isotope.HEADER_THIS_TOPIC));
         assertEquals("1",                 headerString(marker, Isotope.HEADER_HOP_COUNT));

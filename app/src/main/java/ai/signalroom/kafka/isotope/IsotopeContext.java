@@ -99,6 +99,7 @@ public final class IsotopeContext {
         forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_TRACE_ID);
         forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_ORIGIN_TS);
         forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_ORIGIN_SERVICE);
+        forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_PIPELINE);
         forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_THIS_SERVICE);
         forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_THIS_TOPIC);
         forwardHeader(consumerRecord, markerHeaders, Isotope.HEADER_HOP_COUNT);

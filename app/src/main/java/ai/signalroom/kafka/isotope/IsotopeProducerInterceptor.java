@@ -9,6 +9,7 @@ package ai.signalroom.kafka.isotope;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.kafka.clients.producer.ProducerInterceptor;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -22,7 +23,7 @@ import org.slf4j.LoggerFactory;
  *
  * <p>On every {@code send()}, this interceptor finds (or creates) the in-flight
  * {@link Isotope}, appends a hop describing this produce edge, and writes the
- * JSON-encoded isotope plus six scalar headers describing the just-appended
+ * JSON-encoded isotope plus seven scalar headers describing the just-appended
  * hop. Sourcing order: thread-local context, inbound header, or a fresh trace
  * stamped with {@value #SERVICE_NAME_CONFIG}.
  */
@@ -30,9 +31,19 @@ public class IsotopeProducerInterceptor<K, V> implements ProducerInterceptor<K, 
 
     public static final String SERVICE_NAME_CONFIG = "isotope.service.name";
 
+    /**
+     * Names the logical pipeline a fresh trace belongs to (e.g. {@code orders}
+     * vs {@code location}). Only the trace's origin uses this value — it is
+     * stamped once at {@link Isotope#newTrace} and then forwarded unchanged on
+     * every hop, so downstream services inherit it from the inbound record and
+     * never need to set it.
+     */
+    public static final String PIPELINE_NAME_CONFIG = "isotope.pipeline.name";
+
     private static final Logger LOG = LoggerFactory.getLogger(IsotopeProducerInterceptor.class);
 
     private String serviceName = "unknown";
+    private String pipelineName = "unknown";
 
     @Override
     public void configure(Map<String, ?> configs) {
@@ -43,6 +54,14 @@ public class IsotopeProducerInterceptor<K, V> implements ProducerInterceptor<K, 
             LOG.warn("{} not configured; isotope hops will be tagged service=\"unknown\"",
                 SERVICE_NAME_CONFIG);
         }
+
+        Object pn = configs.get(PIPELINE_NAME_CONFIG);
+        if (pn instanceof String s && !s.isBlank()) {
+            pipelineName = s;
+        } else {
+            LOG.warn("{} not configured; new traces will be tagged pipeline=\"unknown\"",
+                PIPELINE_NAME_CONFIG);
+        }
     }
 
     @Override
@@ -52,7 +71,7 @@ public class IsotopeProducerInterceptor<K, V> implements ProducerInterceptor<K, 
             iso = Isotope.fromHeaders(producerRecord.headers());
         }
         if (iso == null) {
-            iso = Isotope.newTrace(serviceName);
+            iso = Isotope.newTrace(serviceName, pipelineName);
         }
 
         long hopTsMs = System.currentTimeMillis();
@@ -67,6 +86,10 @@ public class IsotopeProducerInterceptor<K, V> implements ProducerInterceptor<K, 
         putString(h, Isotope.HEADER_TRACE_ID,       iso.traceIdHex());
         putString(h, Isotope.HEADER_ORIGIN_TS,      Long.toString(iso.originTsMs()));
         putString(h, Isotope.HEADER_ORIGIN_SERVICE, iso.originService());
+        // pipeline() can be null only for traces adopted from a pre-pipeline
+        // record (legacy JSON without "p"); fall back to "unknown" so the
+        // scalar header is always present for Flink SQL.
+        putString(h, Isotope.HEADER_PIPELINE,       Objects.requireNonNullElse(iso.pipeline(), "unknown"));
         putString(h, Isotope.HEADER_THIS_SERVICE,   serviceName);
         putString(h, Isotope.HEADER_THIS_TOPIC,     producerRecord.topic());
         putString(h, Isotope.HEADER_HOP_COUNT,      Integer.toString(iso.hops().size()));

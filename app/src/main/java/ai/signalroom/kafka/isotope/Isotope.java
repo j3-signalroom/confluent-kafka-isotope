@@ -38,6 +38,7 @@ public final class Isotope {
     public static final String HEADER_TRACE_ID        = "x-isotope-trace-id";
     public static final String HEADER_ORIGIN_TS       = "x-isotope-origin-ts";
     public static final String HEADER_ORIGIN_SERVICE  = "x-isotope-origin-service";
+    public static final String HEADER_PIPELINE        = "x-isotope-pipeline";
     public static final String HEADER_THIS_SERVICE    = "x-isotope-this-service";
     public static final String HEADER_THIS_TOPIC      = "x-isotope-this-topic";
     public static final String HEADER_HOP_COUNT       = "x-isotope-hop-count";
@@ -46,7 +47,7 @@ public final class Isotope {
      * Consume-side marker header. Written by
      * {@code IsotopeContext.recordConsume} when a consumer emits a marker to
      * the {@code platform.observability.consume_events} topic, on top of the
-     * six forwarded headers above. Its presence is what Flink uses to
+     * seven forwarded headers above. Its presence is what Flink uses to
      * distinguish a consume-event marker from a regular produced record.
      */
     public static final String HEADER_CONSUMER_SERVICE = "x-isotope-consumer-service";
@@ -64,6 +65,10 @@ public final class Isotope {
     @JsonProperty("t") private final byte[] traceId;
     @JsonProperty("o") private final long originTsMs;
     @JsonProperty("s") private final String originService;
+    // Pipeline name — set once at the origin (like originService / originTsMs)
+    // and forwarded unchanged through every hop, so reports can slice traces
+    // by which logical pipeline they belong to (e.g. orders vs location).
+    @JsonProperty("p") private final String pipeline;
     @JsonProperty("h") private final List<Hop> hops;
     @JsonProperty("x") private boolean truncated;
 
@@ -72,20 +77,28 @@ public final class Isotope {
         @JsonProperty("t") byte[] traceId,
         @JsonProperty("o") long originTsMs,
         @JsonProperty("s") String originService,
+        @JsonProperty("p") String pipeline,
         @JsonProperty("h") List<Hop> hops,
         @JsonProperty("x") boolean truncated
     ) {
         this.traceId = traceId;
         this.originTsMs = originTsMs;
         this.originService = originService;
+        this.pipeline = pipeline;
         this.hops = hops != null ? new ArrayList<>(hops) : new ArrayList<>();
         this.truncated = truncated;
     }
 
+    /** Starts a fresh trace with an unnamed pipeline ({@code "unknown"}). */
     public static Isotope newTrace(String originService) {
+        return newTrace(originService, "unknown");
+    }
+
+    public static Isotope newTrace(String originService, String pipeline) {
         long now = System.currentTimeMillis();
         return new Isotope(uuidV7Bytes(now), now,
             Objects.requireNonNullElse(originService, "unknown"),
+            Objects.requireNonNullElse(pipeline, "unknown"),
             new ArrayList<>(), false);
     }
 
@@ -138,6 +151,7 @@ public final class Isotope {
     public String traceIdHex()     { return HexFormat.of().formatHex(traceId); }
     public long originTsMs()       { return originTsMs; }
     public String originService()  { return originService; }
+    public String pipeline()       { return pipeline; }
     public List<Hop> hops()        { return Collections.unmodifiableList(hops); }
     public boolean truncated()     { return truncated; }
 
