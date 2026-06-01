@@ -46,6 +46,7 @@ INSERT INTO stuck_trace_alerts_1m
 SELECT
     trace_id,
     origin_service,
+    pipeline,
     last_service,
     last_topic,
     last_hop_count,

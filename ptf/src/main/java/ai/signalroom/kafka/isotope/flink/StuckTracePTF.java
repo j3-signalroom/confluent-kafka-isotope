@@ -54,7 +54,7 @@ import java.time.Instant;
  *   );
  */
 @FunctionHint(output = @DataTypeHint("ROW<"
-    + "trace_id STRING, origin_service STRING, last_service STRING, "
+    + "trace_id STRING, origin_service STRING, pipeline STRING, last_service STRING, "
     + "last_topic STRING, last_hop_count INT, last_seen_ts_ms BIGINT, "
     + "stuck_for_ms BIGINT>"))
 public class StuckTracePTF extends ProcessTableFunction<Row> {
@@ -79,6 +79,7 @@ public class StuckTracePTF extends ProcessTableFunction<Row> {
     public static class TraceState {
         public String traceId;
         public String originService;
+        public String pipeline;
         public String lastService;
         public String lastTopic;
         public Integer lastHopCount;
@@ -97,6 +98,7 @@ public class StuckTracePTF extends ProcessTableFunction<Row> {
 
         state.traceId        = input.getFieldAs("trace_id");
         state.originService  = input.getFieldAs("origin_service");
+        state.pipeline       = input.getFieldAs("pipeline");
         state.lastService    = input.getFieldAs("this_service");
         state.lastTopic      = input.getFieldAs("this_topic");
         state.lastHopCount   = input.getFieldAs("hop_count");
@@ -116,6 +118,7 @@ public class StuckTracePTF extends ProcessTableFunction<Row> {
         collect(Row.of(
             state.traceId,
             state.originService,
+            state.pipeline,
             state.lastService,
             state.lastTopic,
             state.lastHopCount,

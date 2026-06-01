@@ -19,6 +19,7 @@ INSERT INTO hop_distribution_1m
 SELECT
     UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
     UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    `pipeline`,
     `this_topic`,
     `hop_count`,
     COUNT(*)                  AS `records`,
@@ -29,5 +30,6 @@ FROM TABLE(
 GROUP BY
     `window_start`,
     `window_end`,
+    `pipeline`,
     `this_topic`,
     `hop_count`;

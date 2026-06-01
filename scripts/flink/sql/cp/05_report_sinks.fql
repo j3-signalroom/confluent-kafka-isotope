@@ -39,6 +39,7 @@
 CREATE TABLE IF NOT EXISTS latency_report_1m (
     `window_start`    BIGINT,
     `window_end`      BIGINT,
+    `pipeline`        STRING,
     `origin_service`  STRING,
     `this_topic`      STRING,
     `sample_count`    BIGINT,
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS latency_report_1m (
 CREATE TABLE IF NOT EXISTS topology_report_1m (
     `window_start`     BIGINT,
     `window_end`       BIGINT,
+    `pipeline`         STRING,
     `origin_service`   STRING,
     `producer_service` STRING,
     `topic`            STRING,
@@ -84,6 +86,7 @@ CREATE TABLE IF NOT EXISTS topology_report_1m (
 CREATE TABLE IF NOT EXISTS bipartite_topology_report_1m (
     `window_start`      BIGINT,
     `window_end`        BIGINT,
+    `pipeline`          STRING,
     `edge_type`         STRING,
     `producer_service`  STRING,
     `topic`             STRING,
@@ -105,6 +108,7 @@ CREATE TABLE IF NOT EXISTS bipartite_topology_report_1m (
 CREATE TABLE IF NOT EXISTS hop_distribution_1m (
     `window_start`    BIGINT,
     `window_end`      BIGINT,
+    `pipeline`        STRING,
     `this_topic`      STRING,
     `hop_count`       INT,
     `records`         BIGINT,
@@ -123,6 +127,7 @@ CREATE TABLE IF NOT EXISTS hop_distribution_1m (
 CREATE TABLE IF NOT EXISTS coverage_report_1m (
     `window_start`    BIGINT,
     `window_end`      BIGINT,
+    `pipeline`        STRING,
     `this_topic`      STRING,
     `origin_service`  STRING,
     `distinct_traces` BIGINT,
@@ -145,6 +150,7 @@ CREATE TABLE IF NOT EXISTS coverage_report_1m (
 CREATE TABLE IF NOT EXISTS stuck_trace_alerts_1m (
     `trace_id`        STRING,
     `origin_service`  STRING,
+    `pipeline`        STRING,
     `last_service`    STRING,
     `last_topic`      STRING,
     `last_hop_count`  INT,
@@ -164,6 +170,7 @@ CREATE TABLE IF NOT EXISTS stuck_trace_alerts_1m (
 CREATE TABLE IF NOT EXISTS latency_percentiles_flat_1m (
     `window_start`    BIGINT,
     `window_end`      BIGINT,
+    `pipeline`        STRING,
     `origin_service`  STRING,
     `this_topic`      STRING,
     `p50_ms`          DOUBLE,

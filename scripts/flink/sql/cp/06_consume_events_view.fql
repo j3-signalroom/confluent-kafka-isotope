@@ -25,6 +25,7 @@ SELECT
     CAST(`headers`['x-isotope-trace-id']                          AS STRING) AS trace_id,
     CAST(CAST(`headers`['x-isotope-origin-ts']      AS STRING)    AS BIGINT) AS origin_ts_ms,
     CAST(`headers`['x-isotope-origin-service']                    AS STRING) AS origin_service,
+    CAST(`headers`['x-isotope-pipeline']                          AS STRING) AS pipeline,
     CAST(`headers`['x-isotope-this-service']                      AS STRING) AS producer_service,
     CAST(`headers`['x-isotope-this-topic']                        AS STRING) AS consumed_topic,
     CAST(`headers`['x-isotope-consumer-service']                  AS STRING) AS consumer_service,

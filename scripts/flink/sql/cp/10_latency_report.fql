@@ -23,6 +23,7 @@ INSERT INTO latency_report_1m
 SELECT
     UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
     UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    `pipeline`,
     `origin_service`,
     `this_topic`,
     COUNT(*)                          AS `sample_count`,
@@ -36,5 +37,6 @@ FROM TABLE(
 GROUP BY
     `window_start`,
     `window_end`,
+    `pipeline`,
     `origin_service`,
     `this_topic`;
