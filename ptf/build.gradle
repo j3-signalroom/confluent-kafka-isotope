@@ -44,7 +44,7 @@ tasks.named('test') {
 
 // The shadow jar is what gets uploaded to the Flink session cluster
 // (via init container or `make flink-reports-up`). It bundles t-digest
-// and the LatencyPercentilesUDAF + Percentiles + StuckTracePTF classes;
+// and the LatencyPercentilesPTF + StuckTracePTF + TDigests classes;
 // it excludes the (provided-by-Flink) flink-table-* dependencies.
 shadowJar {
     archiveBaseName.set('isotope-flink-udf')

@@ -49,7 +49,7 @@ variable "number_of_api_keys_to_retain" {
 }
 
 variable "artifact_jar_path" {
-  description = "Path (relative to terraform/) of the PTF/UDAF shadow JAR built by `./gradlew :ptf:shadowJar`."
+  description = "Path (relative to terraform/) of the PTF shadow JAR built by `./gradlew :ptf:shadowJar`."
   type        = string
   default     = "../ptf/build/libs/isotope-flink-udf.jar"
 }

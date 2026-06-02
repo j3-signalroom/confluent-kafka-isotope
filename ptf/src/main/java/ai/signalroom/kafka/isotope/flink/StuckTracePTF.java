@@ -32,9 +32,8 @@ import java.time.Instant;
  *   - When the timer fires, emits one {@link Row} matching the
  *     {@link FunctionHint} output schema below.
  *
- * Why we emit {@link Row} rather than a POJO: same reason as
- * {@code LatencyPercentilesUDAF}. Flink 2.1.2 / CCAF's sink-write codegen
- * generates a hard cast of the function output to {@code Row} in the
+ * Why we emit {@link Row} rather than a POJO: Flink 2.1.2 / CCAF's sink-write
+ * codegen generates a hard cast of the function output to {@code Row} in the
  * {@code INSERT INTO} path; if the function is parameterised on a POJO
  * the cast fails at runtime with
  * "class StuckTraceAlert cannot be cast to class org.apache.flink.types.Row".

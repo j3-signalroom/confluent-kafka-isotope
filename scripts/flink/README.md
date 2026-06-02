@@ -21,7 +21,7 @@ for the full motivation.
 | Runtime | Reports | Sink format | Where the SQL lives |
 |---|---|---|---|
 | **Confluent Platform Flink** (cp-flink 2.1.2 session cluster on Minikube) | 7 (latency, topology, bipartite-topology, hop-distribution, coverage, stuck-trace, latency-percentiles) | `avro-confluent` (SR-framed Avro) | [scripts/flink/sql/cp/](sql/cp/) — applied by [scripts/deploy-cp-flink-reports.sh](../deploy-cp-flink-reports.sh) |
-| **Confluent Cloud for Apache Flink (CCAF)** | 6 (no percentiles — UDAFs disallowed) | `proto-registry` (SR-framed Protobuf) | Inlined as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — applied by [scripts/deploy-cc-flink-reports.sh](../deploy-cc-flink-reports.sh) |
+| **Confluent Cloud for Apache Flink (CCAF)** | 7 (same set as CP) | `proto-registry` (SR-framed Protobuf) | Inlined as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — applied by [scripts/deploy-cc-flink-reports.sh](../deploy-cc-flink-reports.sh) |
 
 Control Center deserializes both sink formats natively.
 
@@ -47,12 +47,11 @@ keys each report groups by, on top of `pipeline`.
 | `hop_distribution`   | `isotope`                 | record counts bucketed by `hop_count` per topic per minute | CP, CCAF |
 | `coverage`           | `isotope`                 | distinct traces per topic per minute | CP, CCAF |
 | `stuck_trace`        | `isotope`                 | alerts (via `STUCK_TRACE_PTF`) for traces idle ≥60s of event time | CP, CCAF |
-| `latency_percentiles`| `isotope`                 | p50 / p95 / p99 (via `LATENCY_PERCENTILES` UDAF, T-Digest) | CP only |
+| `latency_percentiles`| `isotope`                 | p50 / p95 / p99 (via `LATENCY_PERCENTILES` PTF, T-Digest) | CP, CCAF |
 
 ## Format-by-runtime, not by domain
 
-Two asymmetries shape the sink format picture, and both are
-platform-level — not project preferences:
+The sink **format** differs by runtime for one platform-level reason:
 
 - **cp-flink ships SR-Avro but not SR-Protobuf.** Apache Flink
   open-source publishes
@@ -60,14 +59,15 @@ platform-level — not project preferences:
   there is no SR-integrated Protobuf equivalent. We could hand-write
   one (~150 lines wrapping `flink-protobuf` with magic-byte framing
   + SR client) but Avro already gives us Control Center decoding with
-  zero custom code.
-- **CCAF rejects all user-defined aggregate functions** with
-  `aggregate functions are not supported`, regardless of accumulator
-  shape. The `LATENCY_PERCENTILES` T-Digest UDAF therefore registers
-  on CP only. The Java class still ships in the JAR — it'll register
-  on CCAF the day Confluent lifts the restriction. The other
-  JAR-backed function, `STUCK_TRACE_PTF` (a ProcessTableFunction, not
-  a UDAF), works on both runtimes.
+  zero custom code. CCAF has SR-Protobuf, so its sinks use it.
+
+The report **set** is identical on both runtimes — but that took a
+deliberate choice for percentiles: **CCAF rejects all user-defined
+aggregate functions** with `aggregate functions are not supported`,
+regardless of accumulator shape. So `LATENCY_PERCENTILES` is
+implemented as a `ProcessTableFunction` (T-Digest sketch + per-window
+state and timers), not an aggregate function — a PTF registers and
+runs on both runtimes, same as `STUCK_TRACE_PTF`.
 
 The demo *event* topics (`orders.placed`, `orders.enriched`, `orders.fulfilled`)
 ride Protobuf+SR via the Java app's `DemoEvent` schema on both runtimes —
@@ -89,17 +89,18 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
   30_hop_distribution.fql               INSERT INTO: hop-count buckets per topic per minute
   40_coverage_report.fql                INSERT INTO: distinct traces per topic per minute
   60_stuck_trace_report.fql             INSERT INTO: stuck-trace alerts via STUCK_TRACE_PTF
-  70_latency_percentiles_report.fql     INSERT INTO: p50/p95/p99 via LATENCY_PERCENTILES UDAF (CP only)
+  70_latency_percentiles_report.fql     INSERT INTO: p50/p95/p99 via LATENCY_PERCENTILES PTF (T-Digest)
   99_teardown.fql                       DROP TABLE/VIEW/FUNCTION (companion to flink-reports-down)
 ```
 
-CCAF runs the same six non-percentile reports, but the SQL lives
-inline as `confluent_flink_statement` resources in
+CCAF runs the same seven reports, but the SQL lives inline as
+`confluent_flink_statement` resources in
 [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf)
-— 20 statements: ALTER (×4) + raw view + typed produce view + typed
-consume view + 6 sinks + `STUCK_TRACE_PTF` registration + 6 INSERTs.
-The JAR is uploaded as a `confluent_flink_artifact` and referenced
-via `USING JAR 'confluent-artifact://<id>'`.
+— 23 statements: ALTER (×4) + raw view + typed produce view + typed
+consume view + 7 sinks + `STUCK_TRACE_PTF` and `LATENCY_PERCENTILES`
+registrations (×2) + 7 INSERTs. The JAR is uploaded as a
+`confluent_flink_artifact` and referenced via
+`USING JAR 'confluent-artifact://<id>'`.
 
 ## Wire-format detail (CP only)
 
@@ -112,20 +113,21 @@ on-wire schema is plain Avro `long`. Consumers rehydrate via
 `TO_TIMESTAMP_LTZ(window_start, 3)`. The CCAF Protobuf sinks don't
 hit this — `proto-registry` handles `TIMESTAMP_LTZ` directly.
 
-## UDF/PTF JAR
+## PTF JAR
 
 The single shadow JAR `ptf/build/libs/isotope-flink-udf.jar`
 (produced by `./gradlew :ptf:shadowJar`) carries both JAR-backed
-functions under the `ai.signalroom.kafka.isotope.flink` package:
+functions — both `ProcessTableFunction`s — under the
+`ai.signalroom.kafka.isotope.flink` package:
 
-- `LatencyPercentilesUDAF` — T-Digest accumulator → p50/p95/p99
-  (registered on CP only).
+- `LatencyPercentilesPTF` (registered as `LATENCY_PERCENTILES`) —
+  T-Digest p50/p95/p99 via per-window state + event-time timers.
 - `StuckTracePTF` — per-trace state + event-time timer that emits
-  alerts for traces idle ≥60s (registered on both CP and CCAF).
+  alerts for traces idle ≥60s.
 
-The JAR ships unchanged to both runtimes; only the
-`CREATE FUNCTION … USING JAR …` clause differs (`file://` path on
-CP, `confluent-artifact://` reference on CCAF).
+Both register on both runtimes; only the `CREATE FUNCTION … USING JAR …`
+clause differs (`file://` path on CP, `confluent-artifact://` reference
+on CCAF).
 
 ## Operations
 
@@ -143,7 +145,7 @@ make flink-down         # tear down cluster + operator + cert-manager
 
 ```bash
 make cc-flink-reports-up   CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
-                           # terraform apply: env + cluster + topics + compute pool + artifact + 20 statements
+                           # terraform apply: env + cluster + topics + compute pool + artifact + 23 statements
                            # also regenerates terraform/terraform.png via `terraform graph | dot`
 source scripts/cc-cli-env.sh          # exports BOOTSTRAP / SR_URL / KAFKA_KEY / KAFKA_SECRET / SR_KEY / SR_SECRET / JAAS
 scripts/cc-app-run.sh send orders.placed order-intake-service 'hello'   # drives traffic with the SASL config

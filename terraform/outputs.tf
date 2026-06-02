@@ -48,6 +48,6 @@ output "compute_pool_id" {
 }
 
 output "artifact_id" {
-  description = "Flink artifact ID for the PTF/UDAF JAR (referenced by the CREATE FUNCTION statements)."
+  description = "Flink artifact ID for the PTF JAR (referenced by the CREATE FUNCTION statements)."
   value       = confluent_flink_artifact.isotope_udf.id
 }

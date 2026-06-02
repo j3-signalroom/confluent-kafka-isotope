@@ -1,55 +1,64 @@
 -- =====================================================================
--- Latency-percentiles report — closes the "no portable percentiles in
--- pure SQL" gap from `10_latency_report.fql` (pure-SQL avg/min/max).
--- Uses the
--- LATENCY_PERCENTILES UDAF (T-Digest sketch) to compute p50 / p95 / p99
--- per (origin_service, this_topic) per 1-minute tumbling window.
+-- Latency-percentiles report — p50 / p95 / p99 of per-hop latency, per
+-- (pipeline, origin_service, this_topic), in 1-minute tumbling windows.
+-- Closes the "no portable percentiles in pure SQL" gap left by
+-- 10_latency_report.fql (which is pure-SQL avg/min/max only).
+--
+-- Computed with the LATENCY_PERCENTILES function — a ProcessTableFunction
+-- (PTF) backed by a T-Digest sketch. A PTF (not an aggregate function) is
+-- used deliberately: it registers and runs identically on both Confluent
+-- Platform Flink and Confluent Cloud for Apache Flink (CCAF), whereas CCAF
+-- rejects user-defined aggregate functions outright. Same family as
+-- STUCK_TRACE_PTF.
 --
 -- Depends on:
---   - the `isotope` view (shared/05_isotope_view.fql)
---   - the LATENCY_PERCENTILES function (cp/01_register_functions.fql or
---     cc/01_register_functions.fql)
+--   - the `isotope` view (cp/05_isotope_view.fql)
+--   - the LATENCY_PERCENTILES function (cp/01_register_functions.fql)
 --   - the `latency_percentiles_flat_1m` sink (cp/05_report_sinks.fql)
 --
--- The UDAF returns a ROW with p50_ms / p95_ms / p99_ms / sample_count.
--- We flatten it in this INSERT (no intermediate VIEW) so the sink topic
--- carries flat columns ready for downstream consumers — kafkacat,
--- ksqlDB, dashboards, …
+-- The PTF folds the 1-minute tumble in by hand (per-window T-Digest in a
+-- value-state map keyed by window_start; an event-time timer at window_end fires
+-- once the watermark passes it — matching TUMBLE's firing semantics under
+-- the source's 5s allowance; late rows for an already-fired window are
+-- dropped). It emits window_start / window_end already as epoch-millis
+-- BIGINT, so no UNIX_TIMESTAMP conversion is needed here.
 --
 -- Sketch accuracy: T-Digest with compression=100 gives ~few-% error at
--- p99 with bounded memory (a few KB per accumulator key). Increase the
--- compression parameter inside LatencyPercentilesUDAF.java if you need
--- tighter tails at the cost of memory.
+-- p99 with bounded memory (a few KB per accumulator key). Tune the
+-- compression constant in TDigests.java for tighter tails at higher cost.
+--
+-- Call-form notes (Flink 2.1.2 PTF constraints, shared with
+-- 60_stuck_trace_report.fql):
+--   - MUST be an INSERT INTO ... SELECT ... FROM TABLE(ptf(...)), not a
+--     CREATE VIEW — the view-body Expander round-trip rejects the
+--     `TABLE x PARTITION BY ...` + named-arg shape.
+--   - All args MUST be named.
+--   - PARTITION BY (pipeline, origin_service, this_topic) sets the
+--     aggregation grain.
+--   - `uid` pins state identity across restarts; bump the suffix when the
+--     PTF state schema changes incompatibly.
+--   - The 1-minute window length is hard-coded inside the PTF
+--     (LatencyPercentilesPTF.WINDOW_MS): Flink 2.1.2 rejects extra
+--     user-declared scalar args alongside the implicit on_time / uid args.
 -- =====================================================================
 
 SET 'pipeline.name' = 'isotope_report_latency_percentiles_1m';
 
 INSERT INTO latency_percentiles_flat_1m
 SELECT
-    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
-    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    `window_start`,
+    `window_end`,
     `pipeline`,
     `origin_service`,
     `this_topic`,
-    `pcts`.`p50_ms`        AS `p50_ms`,
-    `pcts`.`p95_ms`        AS `p95_ms`,
-    `pcts`.`p99_ms`        AS `p99_ms`,
-    `pcts`.`sample_count`  AS `sample_count`
-FROM (
-    SELECT
-        `window_start`,
-        `window_end`,
-        `pipeline`,
-        `origin_service`,
-        `this_topic`,
-        LATENCY_PERCENTILES(`latency_ms`) AS `pcts`
-    FROM TABLE(
-        TUMBLE(TABLE isotope, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+    `p50_ms`,
+    `p95_ms`,
+    `p99_ms`,
+    `sample_count`
+FROM TABLE(
+    LATENCY_PERCENTILES(
+        input   => TABLE isotope PARTITION BY (`pipeline`, `origin_service`, `this_topic`),
+        on_time => DESCRIPTOR(`event_time`),
+        uid     => 'latency-pcts-v2'
     )
-    GROUP BY
-        `window_start`,
-        `window_end`,
-        `pipeline`,
-        `origin_service`,
-        `this_topic`
 );
