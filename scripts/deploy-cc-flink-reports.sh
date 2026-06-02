@@ -112,7 +112,7 @@ print_info "Terraform directory: ${TERRAFORM_DIR}"
 print_info "Repo root:           ${REPO_ROOT}"
 
 # ---------------------------------------------------------------------------
-# On `create`, build the PTF/UDAF shadow JAR if missing so the
+# On `create`, build the PTF shadow JAR if missing so the
 # confluent_flink_artifact resource has something to upload.
 # ---------------------------------------------------------------------------
 

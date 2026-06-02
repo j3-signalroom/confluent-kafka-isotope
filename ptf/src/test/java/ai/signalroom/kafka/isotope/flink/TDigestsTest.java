@@ -15,11 +15,10 @@ import com.tdunning.math.stats.MergingDigest;
 import org.junit.jupiter.api.Test;
 
 /**
- * Locks the shared T-Digest (de)serialization contract used by BOTH
- * {@link LatencyPercentilesUDAF} (CP-only UDAF) and {@link LatencyPercentilesPTF}
- * (CP+CCAF PTF). If these two ever diverge in compression or byte format, the
- * 70_ and 71_ reports would stop producing matching percentiles for the same
- * input — this test guards against that.
+ * Locks the T-Digest (de)serialization contract used by {@link
+ * LatencyPercentilesPTF}. If the compression parameter or the byte format ever
+ * changes, the percentile values (and their cross-restart stability) would
+ * shift silently — this test guards against that.
  */
 class TDigestsTest {
 
@@ -46,8 +45,8 @@ class TDigestsTest {
 
     @Test
     void compressionGivesExpectedAccuracyOnUniform() {
-        // Same distribution the UDAF test asserts on, exercised through the
-        // shared helper the PTF uses directly in onTimer().
+        // Uniform 0..999 → p50 ≈ 500, p95 ≈ 950, p99 ≈ 990, exercised through
+        // the shared helper the PTF uses directly in onTimer().
         MergingDigest d = TDigests.load(null);
         for (long i = 0; i < 1000; i++) d.add((double) i);
         d = TDigests.load(TDigests.save(d));

@@ -155,7 +155,7 @@ cancel_job_by_name() {
 }
 
 if [ "${ACTION}" = "up" ]; then
-    # 1. Build the PTF/UDAF JAR if it isn't already there.
+    # 1. Build the PTF JAR if it isn't already there.
     if [ ! -f "${JAR_HOST_PATH}" ]; then
         echo "→ Building PTF shadow JAR..."
         ./gradlew :ptf:shadowJar -q
@@ -246,7 +246,7 @@ if [ "${ACTION}" = "up" ]; then
     # actual running-job list afterwards.
     SQL_LOG=$(mktemp)
     trap 'rm -f "${COMBINED}" "${SINKS_INIT}" "${SQL_LOG}"' EXIT
-    # Pass the PTF/UDAF JAR via -j so the generated proto message classes
+    # Pass the PTF JAR via -j so the generated proto message classes
     # (ai.signalroom.kafka.isotope.proto.reports.*) live in the session's
     # user-code classloader. Flink ships -j jars to the TaskManagers as
     # part of each job submission, so Class.forName(messageClassName)
@@ -339,7 +339,7 @@ if [ "${ACTION}" = "up" ]; then
             echo "      so the user-code classloader sees it. If a class is still missing,"
             echo "      rebuild the JAR (./gradlew :ptf:shadowJar) — the running JAR may"
             echo "      be stale and missing newly-added classes."
-            echo "    • UDAF / PTF type-system bug — accumulator or output ROW shape"
+            echo "    • PTF type-system bug — state or output ROW shape"
             echo "      isn't being inferred correctly during codegen. This is a Java"
             echo "      fix in ptf/src/main/java/..., not a SQL fix."
         fi

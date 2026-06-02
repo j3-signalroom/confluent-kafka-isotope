@@ -17,18 +17,15 @@
 -- the cluster's Flink version, rebuild the JAR.
 -- =====================================================================
 
-CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
-    AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesUDAF'
-    USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';
+-- Both functions are ProcessTableFunctions (PTFs), so they register and run
+-- identically on Confluent Platform Flink and on CCAF.
 
 CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
     AS 'ai.signalroom.kafka.isotope.flink.StuckTracePTF'
     USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';
 
--- LATENCY_PERCENTILES_PTF — ProcessTableFunction twin of LATENCY_PERCENTILES.
--- Computes the same p50/p95/p99 (shared T-Digest math), but as a PTF it also
--- runs on CCAF, which rejects the UDAF. Use the 70_ report (UDAF) OR the 71_
--- report (this PTF) — not both; they write the same sink.
-CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES_PTF
+-- LATENCY_PERCENTILES — p50/p95/p99 via a T-Digest sketch. Implemented as a
+-- PTF (not an aggregate function) so it works on CCAF too, which rejects UDAFs.
+CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
     AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesPTF'
     USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';

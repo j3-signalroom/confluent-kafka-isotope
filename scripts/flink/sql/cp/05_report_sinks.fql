@@ -14,9 +14,6 @@
 --   * cp-flink (the session-cluster image) doesn't ship an SR-integrated
 --     Protobuf format. Apache Flink open-source ships SR-Avro but not
 --     SR-Protobuf.
---   * CMF supports SR-Protobuf for SQL Statements but disallows UDFs;
---     the latency-percentiles report depends on the LATENCY_PERCENTILES
---     T-Digest UDAF, so it can't live in CMF either.
 --   * Confluent's `protobuf-confluent` format isn't published on Maven
 --     Central for open-source Flink. We could write our own SR-Protobuf
 --     wrapper, but Avro+SR gets us Control Center decoding with zero

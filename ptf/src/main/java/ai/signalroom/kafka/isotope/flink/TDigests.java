@@ -12,15 +12,13 @@ import java.nio.ByteBuffer;
 import com.tdunning.math.stats.MergingDigest;
 
 /**
- * Shared T-Digest (de)serialization for the latency-percentile functions.
+ * Shared T-Digest (de)serialization for {@link LatencyPercentilesPTF}.
  *
- * Both {@link LatencyPercentilesUDAF} (CP-only AggregateFunction) and
- * {@link LatencyPercentilesPTF} (CP+CCAF ProcessTableFunction) store their
- * sketch as a Flink-native {@code byte[]} accumulator field and round-trip
- * through this helper on every record. Keeping the compression parameter and
- * the {@code asSmallBytes}/{@code fromBytes} contract in one place guarantees
- * the two implementations produce identical percentiles for the same input —
- * so the PTF report is a true drop-in for the UDAF report.
+ * The PTF stores its sketch as a Flink-native {@code byte[]} accumulator field
+ * and round-trips through this helper on every record. Keeping the compression
+ * parameter and the {@code asSmallBytes}/{@code fromBytes} contract in one
+ * place keeps the sketch behavior in a single, testable spot (see
+ * {@code TDigestsTest}).
  */
 final class TDigests {
 

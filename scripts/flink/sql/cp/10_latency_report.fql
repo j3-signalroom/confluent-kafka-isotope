@@ -7,7 +7,7 @@
 -- hops it's the partial latency up to that point.
 --
 -- p50/p95 are intentionally absent here — see
--- 70_latency_percentiles_report.fql for the T-Digest UDAF-based version.
+-- 70_latency_percentiles_report.fql for the T-Digest percentiles version.
 --
 -- Reads from the `isotope` view (typed projection of `isotope_raw`,
 -- with `x-isotope-*` headers decoded). Writes to the

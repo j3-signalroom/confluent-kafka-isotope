@@ -21,23 +21,22 @@ import java.time.Instant;
 
 /**
  * Streaming p50/p95/p99 over {@code latency_ms} in 1-minute tumbling windows,
- * implemented as a {@link ProcessTableFunction} so it runs on BOTH Confluent
- * Platform Flink and Confluent Cloud for Apache Flink (CCAF).
+ * registered in SQL as {@code LATENCY_PERCENTILES}.
  *
- * <h2>Why a PTF and not the UDAF</h2>
+ * <h2>Why a PTF</h2>
  *
- * {@link LatencyPercentilesUDAF} computes the same percentiles, but as an
- * {@code AggregateFunction} it is <b>CP-only</b> — CCAF rejects every UDAF
- * registration with "aggregate functions are not supported". PTFs have no such
- * restriction (see {@code StuckTracePTF}), so re-expressing the percentile
- * report as a PTF closes the "no portable percentiles" gap. The sketch math is
- * shared via {@link TDigests}, so this function is a true drop-in for the UDAF
- * report: same sink, same Avro subject, same numbers (within T-Digest error).
+ * Percentiles are a natural fit for an {@code AggregateFunction}, but CCAF
+ * rejects every user-defined aggregate registration with "aggregate functions
+ * are not supported". A {@link ProcessTableFunction} has no such restriction
+ * (see {@code StuckTracePTF}), so expressing the percentile report as a PTF is
+ * what makes it portable: it registers and runs identically on both Confluent
+ * Platform Flink and Confluent Cloud for Apache Flink (CCAF). The trade-off is
+ * that the PTF must do its own windowing (below) instead of leaning on the
+ * {@code TABLE(TUMBLE(...))} TVF.
  *
  * <h2>Windowing</h2>
  *
- * The UDAF leans on {@code TABLE(TUMBLE(...))} for window assignment and
- * firing. A PTF folds the tumble in by hand:
+ * The PTF folds the tumble in by hand:
  * <ul>
  *   <li>Each input row is bucketed into its 1-minute window by event time.</li>
  *   <li>Per-window T-Digest accumulators live in a {@link MapView} keyed by
@@ -48,14 +47,19 @@ import java.time.Instant;
  *       passes it (i.e. after the source's 5s allowance), matching the firing
  *       semantics of the {@code TUMBLE} TVF. {@code onTimer} emits one row for
  *       that window and evicts it from the map.</li>
+ *   <li>Late rows (those whose window already fired) are dropped via the {@link
+ *       Progress} high-water mark rather than re-opening the evicted window —
+ *       which would otherwise re-register a now-in-the-past timer and emit a
+ *       spurious second row. This mirrors {@code TUMBLE}'s drop-late-data
+ *       behavior, so each (window, partition) is emitted at most once.</li>
  * </ul>
  *
  * <h2>Partitioning</h2>
  *
  * The call partitions the input by {@code (pipeline, origin_service,
- * this_topic)} — the same grain as the UDAF report's {@code GROUP BY}. All
- * three dimensions are therefore constant within a partition; they are stashed
- * on the accumulator so {@code onTimer} (which has no input row) can emit them.
+ * this_topic)} — the aggregation grain. All three dimensions are therefore
+ * constant within a partition; they are stashed on the accumulator so {@code
+ * onTimer} (which has no input row) can emit them.
  *
  * <h2>Flink 2.1.2 PTF constraints (shared with StuckTracePTF)</h2>
  * <ul>
@@ -67,7 +71,7 @@ import java.time.Instant;
  *       {@code on_time} / {@code uid} args. Make it configurable when that
  *       limitation lifts.</li>
  *   <li>The call MUST live in {@code INSERT INTO ... SELECT ... FROM TABLE(ptf(...))},
- *       not {@code CREATE VIEW} — see {@code 71_latency_percentiles_ptf_report.fql}.</li>
+ *       not {@code CREATE VIEW} — see {@code 70_latency_percentiles_report.fql}.</li>
  * </ul>
  *
  * SQL invocation:
@@ -76,7 +80,7 @@ import java.time.Instant;
  *   SELECT window_start, window_end, pipeline, origin_service, this_topic,
  *          p50_ms, p95_ms, p99_ms, sample_count
  *   FROM TABLE(
- *       LATENCY_PERCENTILES_PTF(
+ *       LATENCY_PERCENTILES(
  *           input   => TABLE isotope PARTITION BY (pipeline, origin_service, this_topic),
  *           on_time => DESCRIPTOR(event_time),
  *           uid     => 'latency-pcts-v1'));
@@ -107,17 +111,31 @@ public class LatencyPercentilesPTF extends ProcessTableFunction<Row> {
         public String thisTopic;
     }
 
+    /**
+     * Per-partition late-data guard. Tracks the {@code window_end} of the most
+     * recently fired window for this key. Timers fire in ascending {@code
+     * window_end} order as the watermark advances, so this value is monotonic:
+     * any incoming row whose own {@code window_end} is at or below it belongs to
+     * a window that already closed and must be dropped, not re-opened. Without
+     * this, a late row would re-create the evicted accumulator, re-register a
+     * now-in-the-past timer, and emit a spurious second row for that window.
+     */
+    public static class Progress {
+        /** Largest fired {@code window_end} (epoch ms), or null before the first firing. */
+        public Long lastFiredWindowEnd;
+    }
+
     public void eval(
             Context ctx,
             @StateHint MapView<Long, WindowAccumulator> windows,
+            @StateHint Progress progress,
             @ArgumentHint({ArgumentTrait.SET_SEMANTIC_TABLE, ArgumentTrait.REQUIRE_ON_TIME})
                 Row input) throws Exception {
 
         // Read as Number, not Long: the `isotope` view derives latency_ms via
         // TIMESTAMPDIFF(MILLISECOND, ...), which Flink types as INT, so the field
-        // arrives boxed as Integer. (The UDAF path dodges this because Flink
-        // coerces INT->BIGINT when matching the accumulate(..., Long) signature;
-        // a raw getFieldAs(Long) here would throw ClassCastException.)
+        // arrives boxed as Integer — a raw getFieldAs(Long) would throw
+        // ClassCastException.
         Number latency = input.getFieldAs("latency_ms");
         if (latency == null) return;
 
@@ -127,6 +145,13 @@ public class LatencyPercentilesPTF extends ProcessTableFunction<Row> {
         long eventMs     = eventTime.toEpochMilli();
         long windowStart = Math.floorDiv(eventMs, WINDOW_MS) * WINDOW_MS;
         long windowEnd   = windowStart + WINDOW_MS;
+
+        // Late-data guard: if this row's window already fired, drop it rather
+        // than re-opening an evicted window (which would emit a spurious second
+        // row). Mirrors TUMBLE's drop-late-data semantics.
+        if (progress.lastFiredWindowEnd != null && windowEnd <= progress.lastFiredWindowEnd) {
+            return;
+        }
 
         WindowAccumulator acc = windows.get(windowStart);
         if (acc == null) {
@@ -148,10 +173,18 @@ public class LatencyPercentilesPTF extends ProcessTableFunction<Row> {
            .registerOnTime(TIMER_PREFIX + windowEnd, Instant.ofEpochMilli(windowEnd));
     }
 
-    public void onTimer(OnTimerContext ctx, MapView<Long, WindowAccumulator> windows) throws Exception {
+    public void onTimer(OnTimerContext ctx, MapView<Long, WindowAccumulator> windows, Progress progress)
+            throws Exception {
         // The firing timer's timestamp IS the window_end we registered for.
         long windowEnd   = ctx.timeContext(Instant.class).time().toEpochMilli();
         long windowStart = windowEnd - WINDOW_MS;
+
+        // Advance the late-data high-water mark even if the window is empty, so
+        // the eval() guard knows this window has closed. Timers fire in order,
+        // so windowEnd is monotonic, but max() keeps it defensive.
+        if (progress.lastFiredWindowEnd == null || windowEnd > progress.lastFiredWindowEnd) {
+            progress.lastFiredWindowEnd = windowEnd;
+        }
 
         WindowAccumulator acc = windows.get(windowStart);
         if (acc == null || acc.sampleCount == 0L) return;
