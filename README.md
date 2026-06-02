@@ -75,7 +75,7 @@ The exact call sites in `kafka-clients` 4.2.0: `KafkaProducer.send` invokes `int
 
 ## **2.0 Architecture**
 
-A bird's-eye view of the moving parts. The JVM library in [app/](app/) registers a Kafka producer interceptor that stamps the isotope into record headers on every `send()`; consume-then-produce services adopt the inbound trace via an explicit `IsotopeContext.adoptFromRecord(record)` call; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube applies `.fql` files under [scripts/flink/sql/cp/](scripts/flink/sql/cp/), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The shadow JAR from [ptf/](ptf/) (which powers two of the six reports) registers identically on both. (Kafka is drawn once below for brevity — each runtime provisions its own cluster.)
+A bird's-eye view of the moving parts. The JVM library in [app/](app/) registers a Kafka producer interceptor that stamps the isotope into record headers on every `send()`; consume-then-produce services adopt the inbound trace via an explicit `IsotopeContext.adoptFromRecord(record)` call; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube applies `.fql` files under [scripts/flink/sql/cp/](scripts/flink/sql/cp/), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The shadow JAR from [ptf/](ptf/) (which powers two of the seven reports) registers identically on both. (Kafka is drawn once below for brevity — each runtime provisions its own cluster.)
 
 ```mermaid
 flowchart TB
@@ -129,7 +129,7 @@ flowchart TB
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator<br/>Makefile: cp-up · flink-up · kafka-pf-up"]
-        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 20 statements<br/>Makefile: cc-flink-reports-up"]
+        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 23 statements<br/>Makefile: cc-flink-reports-up"]
     end
 
     K8S -. provisions .-> Kafka
@@ -184,7 +184,7 @@ scripts/
   cc-app-run.sh                         thin wrapper around `./gradlew :app:run` that
                                         sources cc-cli-env.sh and injects the six -D flags
   flink/README.md                       Flink SQL reports — runtime split (CP=7 reports/Avro+SR,
-                                        CCAF=6 reports/Protobuf+SR), layout, operations
+                                        CCAF=7 reports/Protobuf+SR), layout, operations
   flink/sql/cp/                         CP Flink SQL: 00_source_table, 01_register_functions,
                                         05_isotope_view, 06_consume_events_view,
                                         05_report_sinks (avro-confluent),

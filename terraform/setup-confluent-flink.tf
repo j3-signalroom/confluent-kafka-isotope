@@ -121,16 +121,34 @@ locals {
     "sql.current-catalog"  = confluent_environment.isotope.display_name
     "sql.current-database" = confluent_kafka_cluster.isotope.display_name
   }
+
+  # Content hash of the shadow JAR. confluent_flink_artifact tracks only the
+  # file PATH, not its bytes, so Terraform never notices rebuilt code on its
+  # own. This drives the re-upload (see terraform_data.artifact_jar_hash and the
+  # artifact's replace_triggered_by). The deploy script always rebuilds the JAR
+  # before apply, so this reflects the current code.
+  artifact_jar_md5 = filemd5("${path.module}/${var.artifact_jar_path}")
 }
 
 # ---------------------------------------------------------------------------
 # Flink artifact — uploads ptf/build/libs/isotope-flink-udf.jar to CCAF.
 # Build it with Java-17-target bytecode (see ptf/build.gradle) — CCAF
 # rejects artifacts compiled for Java versions > 17.
+#
+# Re-upload on code change: the artifact only tracks the JAR path, so a content
+# change wouldn't otherwise replace it. Embedding the JAR's md5 in display_name
+# (a ForceNew attribute) makes a rebuilt JAR replace the artifact — uploading
+# the new bytes under a new artifact id and cascading the drop/recreate of every
+# PTF + restart of the consumer jobs (via their replace_triggered_by on this
+# resource). create_before_destroy keeps the OLD artifact alive until the
+# functions have rebound to the new one, so deleting it never hits "artifact in
+# use"; the md5 in display_name keeps the two distinct while they briefly
+# coexist. The deploy script always rebuilds the JAR before apply, so when the
+# code is unchanged the md5 (and thus display_name) is stable and nothing churns.
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_artifact" "isotope_udf" {
-  display_name   = "isotope-flink-udf"
+  display_name   = "isotope-flink-udf-${substr(local.artifact_jar_md5, 0, 12)}"
   content_format = "JAR"
   cloud          = var.cloud
   region         = var.region
@@ -138,6 +156,10 @@ resource "confluent_flink_artifact" "isotope_udf" {
 
   environment {
     id = confluent_environment.isotope.id
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -689,9 +711,47 @@ resource "confluent_flink_statement" "isotope_report_latency_percentiles_1m" {
 # scripts/flink/sql/cp/70_latency_percentiles_report.fql).
 # ---------------------------------------------------------------------------
 
+# Each PTF is dropped and recreated on every deploy so it always rebinds to the
+# freshly uploaded JAR. The deploy script force-replaces the artifact (its
+# content isn't tracked by Terraform), which fires the replace_triggered_by on
+# the whole chain below. A plain CREATE FUNCTION — not CREATE FUNCTION IF NOT
+# EXISTS — preceded by DROP FUNCTION IF EXISTS guarantees the new code is
+# picked up; IF NOT EXISTS would silently keep the stale registration. The
+# consuming INSERT job is also replace_triggered_by the artifact (see
+# insert_stuck_trace_alerts) so it is stopped BEFORE the DROP — CCAF rejects
+# dropping a function that a running statement still uses — and restarted on the
+# new code AFTER the CREATE. Because the artifact is the root of the dependency
+# chain, Terraform serializes this as: stop job → DROP → re-upload → CREATE →
+# restart job.
+resource "confluent_flink_statement" "drop_stuck_trace_ptf" {
+  statement = <<-EOT
+    DROP FUNCTION IF EXISTS STUCK_TRACE_PTF;
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes       = [statement, compute_pool]
+    replace_triggered_by = [confluent_flink_artifact.isotope_udf]
+  }
+
+  depends_on = [confluent_flink_artifact.isotope_udf]
+}
+
 resource "confluent_flink_statement" "register_stuck_trace_ptf" {
   statement = <<-EOT
-    CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
+    CREATE FUNCTION STUCK_TRACE_PTF
         AS 'ai.signalroom.kafka.isotope.flink.StuckTracePTF'
         USING JAR 'confluent-artifact://${confluent_flink_artifact.isotope_udf.id}';
   EOT
@@ -710,7 +770,34 @@ resource "confluent_flink_statement" "register_stuck_trace_ptf" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [statement, compute_pool]
+    ignore_changes       = [statement, compute_pool]
+    replace_triggered_by = [confluent_flink_artifact.isotope_udf]
+  }
+
+  depends_on = [confluent_flink_statement.drop_stuck_trace_ptf]
+}
+
+resource "confluent_flink_statement" "drop_latency_percentiles" {
+  statement = <<-EOT
+    DROP FUNCTION IF EXISTS LATENCY_PERCENTILES;
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes       = [statement, compute_pool]
+    replace_triggered_by = [confluent_flink_artifact.isotope_udf]
   }
 
   depends_on = [confluent_flink_artifact.isotope_udf]
@@ -718,7 +805,7 @@ resource "confluent_flink_statement" "register_stuck_trace_ptf" {
 
 resource "confluent_flink_statement" "register_latency_percentiles" {
   statement = <<-EOT
-    CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
+    CREATE FUNCTION LATENCY_PERCENTILES
         AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesPTF'
         USING JAR 'confluent-artifact://${confluent_flink_artifact.isotope_udf.id}';
   EOT
@@ -737,10 +824,11 @@ resource "confluent_flink_statement" "register_latency_percentiles" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [statement, compute_pool]
+    ignore_changes       = [statement, compute_pool]
+    replace_triggered_by = [confluent_flink_artifact.isotope_udf]
   }
 
-  depends_on = [confluent_flink_artifact.isotope_udf]
+  depends_on = [confluent_flink_statement.drop_latency_percentiles]
 }
 
 # ---------------------------------------------------------------------------
@@ -1042,8 +1130,12 @@ resource "confluent_flink_statement" "insert_stuck_trace_alerts" {
   principal { id = confluent_service_account.flink_sql_runner.id }
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
+  # Restarted on every deploy alongside its PTF: replace_triggered_by stops this
+  # job before STUCK_TRACE_PTF is dropped (CCAF rejects dropping an in-use
+  # function) and rebuilds it on the new code after the function is recreated.
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes       = [compute_pool]
+    replace_triggered_by = [confluent_flink_artifact.isotope_udf]
   }
 
   depends_on = [
@@ -1074,7 +1166,7 @@ resource "confluent_flink_statement" "insert_latency_percentiles" {
         LATENCY_PERCENTILES(
             input   => TABLE isotope PARTITION BY (`pipeline`, `origin_service`, `this_topic`),
             on_time => DESCRIPTOR(`event_time`),
-            uid     => 'latency-pcts-v1'
+            uid     => 'latency-pcts-v2'
         )
     );
   EOT
@@ -1092,8 +1184,12 @@ resource "confluent_flink_statement" "insert_latency_percentiles" {
   principal { id = confluent_service_account.flink_sql_runner.id }
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
+  # Restarted on every deploy alongside its PTF: replace_triggered_by stops this
+  # job before LATENCY_PERCENTILES is dropped (CCAF rejects dropping an in-use
+  # function) and rebuilds it on the new code after the function is recreated.
   lifecycle {
-    ignore_changes = [compute_pool]
+    ignore_changes       = [compute_pool]
+    replace_triggered_by = [confluent_flink_artifact.isotope_udf]
   }
 
   depends_on = [

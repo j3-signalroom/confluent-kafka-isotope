@@ -17,7 +17,7 @@
 --   - the `latency_percentiles_flat_1m` sink (cp/05_report_sinks.fql)
 --
 -- The PTF folds the 1-minute tumble in by hand (per-window T-Digest in a
--- MapView keyed by window_start; an event-time timer at window_end fires
+-- value-state map keyed by window_start; an event-time timer at window_end fires
 -- once the watermark passes it — matching TUMBLE's firing semantics under
 -- the source's 5s allowance; late rows for an already-fired window are
 -- dropped). It emits window_start / window_end already as epoch-millis
@@ -59,6 +59,6 @@ FROM TABLE(
     LATENCY_PERCENTILES(
         input   => TABLE isotope PARTITION BY (`pipeline`, `origin_service`, `this_topic`),
         on_time => DESCRIPTOR(`event_time`),
-        uid     => 'latency-pcts-v1'
+        uid     => 'latency-pcts-v2'
     )
 );

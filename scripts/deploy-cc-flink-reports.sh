@@ -112,17 +112,15 @@ print_info "Terraform directory: ${TERRAFORM_DIR}"
 print_info "Repo root:           ${REPO_ROOT}"
 
 # ---------------------------------------------------------------------------
-# On `create`, build the PTF shadow JAR if missing so the
-# confluent_flink_artifact resource has something to upload.
+# On `create`, always (re)build the PTF shadow JAR so the
+# confluent_flink_artifact resource uploads the current code — never a stale
+# artifact left over from a prior deploy. Gradle's incremental build makes
+# this a no-op when nothing changed.
 # ---------------------------------------------------------------------------
 
 if [ "${create_action}" = true ]; then
-    if [ ! -f "${JAR_PATH}" ]; then
-        print_step "Shadow JAR not found at ${JAR_PATH} — building via ./gradlew :ptf:shadowJar"
-        (cd "${REPO_ROOT}" && ./gradlew :ptf:shadowJar)
-    else
-        print_info "Shadow JAR present at ${JAR_PATH}"
-    fi
+    print_step "Building PTF shadow JAR via ./gradlew :ptf:shadowJar"
+    (cd "${REPO_ROOT}" && ./gradlew :ptf:shadowJar)
 fi
 
 # ---------------------------------------------------------------------------
@@ -139,6 +137,10 @@ print_step "terraform init"
 terraform init -input=false
 
 if [ "${create_action}" = true ]; then
+    # Re-upload of a rebuilt JAR is handled in Terraform: the artifact's
+    # display_name embeds the JAR's md5 (a ForceNew attribute), so changed bytes
+    # replace the artifact and cascade the PTF drop/recreate. No -replace flag
+    # needed — when the code is unchanged the md5 is stable and nothing churns.
     print_step "terraform apply"
     terraform apply -auto-approve -input=false
 
