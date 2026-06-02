@@ -25,7 +25,8 @@ CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
     USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';
 
 -- LATENCY_PERCENTILES — p50/p95/p99 via a T-Digest sketch. Implemented as a
--- PTF (not an aggregate function) so it works on CCAF too, which rejects UDAFs.
+-- PTF (not an aggregate function) so it works on CCAF too, which rejects
+-- user-defined aggregate functions.
 CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
     AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesPTF'
     USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';

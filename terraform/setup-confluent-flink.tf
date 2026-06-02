@@ -705,8 +705,9 @@ resource "confluent_flink_statement" "isotope_report_latency_percentiles_1m" {
 #
 # STUCK_TRACE_PTF and LATENCY_PERCENTILES are both PTFs, which CCAF accepts.
 # Percentiles are implemented as a PTF (not a user-defined aggregate)
-# specifically because CCAF rejects all UDAF registrations with "aggregate
-# functions are not supported"; a PTF registers and runs on both CCAF and CP
+# specifically because CCAF rejects all user-defined aggregate function
+# registrations with "aggregate functions are not supported"; a PTF registers
+# and runs on both CCAF and CP
 # (see scripts/flink/sql/cp/01_register_functions.fql and
 # scripts/flink/sql/cp/70_latency_percentiles_report.fql).
 # ---------------------------------------------------------------------------
