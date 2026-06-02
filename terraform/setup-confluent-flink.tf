@@ -641,21 +641,93 @@ resource "confluent_flink_statement" "isotope_report_stuck_trace_1m" {
   depends_on = [confluent_flink_compute_pool.isotope]
 }
 
+resource "confluent_flink_statement" "isotope_report_latency_percentiles_1m" {
+  statement = <<-EOT
+    CREATE TABLE IF NOT EXISTS isotope_report_latency_percentiles_1m (
+        `window_start`   BIGINT,
+        `window_end`     BIGINT,
+        `pipeline`       STRING,
+        `origin_service` STRING,
+        `this_topic`     STRING,
+        `p50_ms`         DOUBLE,
+        `p95_ms`         DOUBLE,
+        `p99_ms`         DOUBLE,
+        `sample_count`   BIGINT
+    ) WITH (
+        'value.format' = 'proto-registry'
+    );
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [confluent_flink_compute_pool.isotope]
+}
+
 # ---------------------------------------------------------------------------
-# Statement 12 — CREATE FUNCTION for STUCK_TRACE_PTF (a ProcessTableFunction).
+# Statement 12 — CREATE FUNCTION for the two ProcessTableFunctions.
+#
+# STUCK_TRACE_PTF and LATENCY_PERCENTILES_PTF are both PTFs, which CCAF
+# accepts.
 #
 # LATENCY_PERCENTILES (an AggregateFunction / UDAF) is intentionally NOT
 # registered on CCAF — the platform rejects all UDAF registrations with
 # "aggregate functions are not supported" regardless of the accumulator
-# shape. The Java class still ships in the JAR for the CP runtime, which
-# has no such restriction (see scripts/flink/sql/cp/01_register_functions.fql and
-# scripts/flink/sql/cp/70_latency_percentiles_report.fql).
+# shape. LATENCY_PERCENTILES_PTF is the CCAF-portable replacement: it
+# computes the same p50/p95/p99 (shared T-Digest math in
+# ai...flink.TDigests), but as a PTF so it registers and runs here. The
+# UDAF Java class still ships in the JAR for the CP runtime, which has no
+# such restriction (see scripts/flink/sql/cp/01_register_functions.fql,
+# scripts/flink/sql/cp/70_latency_percentiles_report.fql for the UDAF form
+# and scripts/flink/sql/cp/71_latency_percentiles_ptf_report.fql for the PTF
+# form).
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "register_stuck_trace_ptf" {
   statement = <<-EOT
     CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
         AS 'ai.signalroom.kafka.isotope.flink.StuckTracePTF'
+        USING JAR 'confluent-artifact://${confluent_flink_artifact.isotope_udf.id}';
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [statement, compute_pool]
+  }
+
+  depends_on = [confluent_flink_artifact.isotope_udf]
+}
+
+resource "confluent_flink_statement" "register_latency_percentiles_ptf" {
+  statement = <<-EOT
+    CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES_PTF
+        AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesPTF'
         USING JAR 'confluent-artifact://${confluent_flink_artifact.isotope_udf.id}';
   EOT
 
@@ -986,6 +1058,57 @@ resource "confluent_flink_statement" "insert_stuck_trace_alerts" {
     confluent_flink_statement.isotope_view,
     confluent_flink_statement.isotope_report_stuck_trace_1m,
     confluent_flink_statement.register_stuck_trace_ptf,
+  ]
+}
+
+# Percentiles report — PTF form (CCAF has no UDAF, so this is the only form
+# here). Mirrors scripts/flink/sql/cp/71_latency_percentiles_ptf_report.fql
+# without the SET 'pipeline.name' directive (CCAF rejects SET in submitted
+# statements). PARTITION BY (pipeline, origin_service, this_topic) matches the
+# CP UDAF report's GROUP BY grain.
+resource "confluent_flink_statement" "insert_latency_percentiles_ptf" {
+  statement = <<-EOT
+    INSERT INTO isotope_report_latency_percentiles_1m
+    SELECT
+        `window_start`,
+        `window_end`,
+        `pipeline`,
+        `origin_service`,
+        `this_topic`,
+        `p50_ms`,
+        `p95_ms`,
+        `p99_ms`,
+        `sample_count`
+    FROM TABLE(
+        LATENCY_PERCENTILES_PTF(
+            input   => TABLE isotope PARTITION BY (`pipeline`, `origin_service`, `this_topic`),
+            on_time => DESCRIPTOR(`event_time`),
+            uid     => 'latency-pcts-v1'
+        )
+    );
+  EOT
+
+  properties    = local.flink_statement_properties
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    ignore_changes = [compute_pool]
+  }
+
+  depends_on = [
+    confluent_flink_statement.isotope_view,
+    confluent_flink_statement.isotope_report_latency_percentiles_1m,
+    confluent_flink_statement.register_latency_percentiles_ptf,
   ]
 }
 

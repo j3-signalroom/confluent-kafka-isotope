@@ -7,8 +7,6 @@
  */
 package ai.signalroom.kafka.isotope.flink;
 
-import java.nio.ByteBuffer;
-
 import com.tdunning.math.stats.MergingDigest;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.FunctionHint;
@@ -55,9 +53,6 @@ import org.apache.flink.types.Row;
     "ROW<p50_ms DOUBLE, p95_ms DOUBLE, p99_ms DOUBLE, sample_count BIGINT>"))
 public class LatencyPercentilesUDAF
         extends AggregateFunction<Row, LatencyPercentilesUDAF.TDigestAccumulator> {
-
-    /** Compression parameter for T-Digest. 100 gives ~5% error at p99, ~few KB per accumulator. */
-    private static final double COMPRESSION = 100.0;
 
     /**
      * POJO-shaped accumulator: a serialized T-Digest blob plus a sample count.
@@ -124,14 +119,13 @@ public class LatencyPercentilesUDAF
         ).toRow();
     }
 
+    // Sketch (de)serialization is shared with LatencyPercentilesPTF via TDigests
+    // so both functions compute identical percentiles for the same input.
     private static MergingDigest loadDigest(byte[] bytes) {
-        if (bytes == null) return new MergingDigest(COMPRESSION);
-        return MergingDigest.fromBytes(ByteBuffer.wrap(bytes));
+        return TDigests.load(bytes);
     }
 
     private static byte[] saveDigest(MergingDigest d) {
-        ByteBuffer buf = ByteBuffer.allocate(d.smallByteSize());
-        d.asSmallBytes(buf);
-        return buf.array();
+        return TDigests.save(d);
     }
 }

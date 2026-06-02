@@ -1,0 +1,65 @@
+-- =====================================================================
+-- Latency-percentiles report (PTF variant) — the portable twin of
+-- 70_latency_percentiles_report.fql.
+--
+-- 70_ uses the LATENCY_PERCENTILES UDAF inside TABLE(TUMBLE(...)). That
+-- UDAF is CP-only: CCAF rejects every AggregateFunction registration with
+-- "aggregate functions are not supported". This file computes the SAME
+-- p50/p95/p99 with the LATENCY_PERCENTILES_PTF ProcessTableFunction, which
+-- CCAF accepts (same family as STUCK_TRACE_PTF). The PTF shares the UDAF's
+-- T-Digest math (ai...flink.TDigests), so the numbers match within sketch
+-- error.
+--
+-- ⚠️  Run EITHER 70_ (UDAF) OR 71_ (PTF) — never both. They write the same
+--     sink (latency_percentiles_flat_1m → topic
+--     isotope_report_latency_percentiles_1m); running both double-writes.
+--     On CP, prefer 70_ (the planner handles windowing). On CCAF, 71_ is the
+--     only option.
+--
+-- Depends on:
+--   - the `isotope` view (shared/05_isotope_view.fql)
+--   - the LATENCY_PERCENTILES_PTF function (cp/01_register_functions.fql)
+--   - the `latency_percentiles_flat_1m` sink (cp/05_report_sinks.fql)
+--
+-- The PTF folds the 1-minute tumble in by hand (per-window T-Digest in a
+-- MapView keyed by window_start; an event-time timer at window_end fires
+-- once the watermark passes it — matching TUMBLE's firing semantics under
+-- the source's 5s allowance). It emits window_start / window_end already as
+-- epoch-millis BIGINT, so — unlike 70_ — no UNIX_TIMESTAMP conversion is
+-- needed here.
+--
+-- Call-form notes (identical Flink 2.1.2 PTF constraints as
+-- 60_stuck_trace_report.fql):
+--   - MUST be an INSERT INTO ... SELECT ... FROM TABLE(ptf(...)), not a
+--     CREATE VIEW — the view-body Expander round-trip rejects the
+--     `TABLE x PARTITION BY ...` + named-arg shape.
+--   - All args MUST be named.
+--   - PARTITION BY (pipeline, origin_service, this_topic) matches the
+--     GROUP BY grain of the 70_ UDAF report, so the two are equivalent.
+--   - `uid` pins state identity across restarts; bump the suffix when the
+--     PTF state schema changes incompatibly.
+--   - The 1-minute window length is hard-coded inside the PTF
+--     (LatencyPercentilesPTF.WINDOW_MS): Flink 2.1.2 rejects extra
+--     user-declared scalar args alongside the implicit on_time / uid args.
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope_report_latency_percentiles_ptf_1m';
+
+INSERT INTO latency_percentiles_flat_1m
+SELECT
+    `window_start`,
+    `window_end`,
+    `pipeline`,
+    `origin_service`,
+    `this_topic`,
+    `p50_ms`,
+    `p95_ms`,
+    `p99_ms`,
+    `sample_count`
+FROM TABLE(
+    LATENCY_PERCENTILES_PTF(
+        input   => TABLE isotope PARTITION BY (`pipeline`, `origin_service`, `this_topic`),
+        on_time => DESCRIPTOR(`event_time`),
+        uid     => 'latency-pcts-v1'
+    )
+);
