@@ -5,6 +5,9 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 
 
 ## [0.08.00.000] - TBD
+### Added
+- Issues[`#78`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/78)
+
 ### Changed
 - Issues[`#76`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/76)
 
