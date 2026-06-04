@@ -259,6 +259,8 @@ The fastest way to watch the isotope mechanic. Requires the cluster to be up and
 
 Terminal D's output for each record shows the same `trace_id` across all three hops, `origin = order-intake-service` (never reassigned), and `hops[]` listing `order-intake-service → order-enrichment-service → order-fulfillment-service` in order with per-hop timestamps. The bipartite-topology report sees all six edges: produce edges `order-intake-service → orders.placed`, `order-enrichment-service → orders.enriched`, `order-fulfillment-service → orders.fulfilled` and consume edges `orders.placed → order-enrichment-service`, `orders.enriched → order-fulfillment-service`, `orders.fulfilled → shipping-notification-service`. Swap `consume` for `sink` if you only want to inspect records without recording the terminal edge. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
 
+![isotope-diagram](isotope_diagram.png)
+
 ### **4.3 Integration tests (live Kafka via Minikube)**
 
 Bring up the local Confluent Platform stack and port-forward Kafka + SR:
