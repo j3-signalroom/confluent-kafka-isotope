@@ -94,6 +94,21 @@ public class IsotopeProducerInterceptor<K, V> implements ProducerInterceptor<K, 
         putString(h, Isotope.HEADER_THIS_TOPIC,     producerRecord.topic());
         putString(h, Isotope.HEADER_HOP_COUNT,      Integer.toString(iso.hops().size()));
 
+        // Emit the stateless-aggregation reports (latency / topology /
+        // hop distribution) to Micrometer for Prometheus/Grafana. No-op
+        // unless the app started the exporter (IsotopeMetrics.start). Latency
+        // is the partial origin→this-hop figure, same as the Flink latency
+        // report's `broker_ts_at_this_hop - origin_ts`.
+        if (IsotopeMetrics.isEnabled()) {
+            IsotopeMetrics.recordHop(
+                Objects.requireNonNullElse(iso.pipeline(), "unknown"),
+                iso.originService(),
+                serviceName,
+                producerRecord.topic(),
+                hopTsMs - iso.originTsMs(),
+                iso.hops().size());
+        }
+
         return producerRecord;
     }
 
