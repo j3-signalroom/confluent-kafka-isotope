@@ -98,7 +98,44 @@ public final class App {
     private static final String SR_BASIC_AUTH_USER_INFO =
         System.getProperty("schema.registry.basic.auth.user.info", "");
 
+    // Opt-in Prometheus metrics exporter. When enabled, the long-running
+    // producing modes serve the stateless-aggregation reports (latency /
+    // topology / hop distribution, emitted by IsotopeProducerInterceptor) at
+    // GET /metrics for Prometheus to scrape — the metrics-native alternative
+    // to the Flink latency_1m / topology_1m / hop_distribution_1m SQL jobs.
+    private static final boolean METRICS_ENABLED =
+        Boolean.parseBoolean(System.getProperty("metrics.prometheus.enabled", "false"));
+    private static final int METRICS_PORT =
+        Integer.parseInt(System.getProperty("metrics.prometheus.port", "9404"));
+
+    // Consumer offset reset for the hop / consume / sink modes. Defaults to
+    // "earliest" so a fresh random consumer group replays the whole topic —
+    // the § 4.4 sustained-traffic flow relies on that. Pass
+    // -Disotope.consume.from=latest to skip the backlog and measure only
+    // records produced after the stage starts; useful when reading the latency
+    // metric, since origin→hop latency for a days-old backlog record is
+    // genuinely huge (now − origin_ts), which dwarfs steady-state latency.
+    private static final String CONSUME_FROM =
+        System.getProperty("isotope.consume.from", "earliest");
+
     private App() {}
+
+    /**
+     * Starts the Prometheus metrics exporter when
+     * {@code -Dmetrics.prometheus.enabled=true}. Called by the long-running
+     * modes so the stateless-aggregation meters emitted by
+     * {@link IsotopeProducerInterceptor} can be scraped. No-op otherwise.
+     */
+    private static void maybeStartMetrics() {
+        if (METRICS_ENABLED) {
+            IsotopeMetrics.start(METRICS_PORT);
+            // start() degrades gracefully on a port clash, so only advertise
+            // the endpoint when it actually bound (otherwise its WARN explains).
+            if (IsotopeMetrics.isEnabled()) {
+                System.out.printf("→ metrics on http://localhost:%d/metrics%n", METRICS_PORT);
+            }
+        }
+    }
 
     /**
      * Apply Kafka client security settings (security.protocol +
@@ -165,6 +202,14 @@ public final class App {
             Endpoints (override via -Dkafka.bootstrap=... -Dschema.registry.url=...):
               kafka.bootstrap     = localhost:30092
               schema.registry.url = http://localhost:8081
+
+            Optional Prometheus metrics (latency / topology / hop-distribution
+            reports, emitted by the producer interceptor; scrape during `hop`):
+              -Dmetrics.prometheus.enabled=true   (default false)
+              -Dmetrics.prometheus.port=9404      → GET http://localhost:9404/metrics
+              -Disotope.consume.from=latest       skip the backlog (default earliest)
+                                                  → realistic latency, not now−origin_ts
+                                                    of days-old replayed records
 
             Optional Confluent Cloud auth (default: plaintext, no auth):
               -Dkafka.security.protocol=SASL_SSL
@@ -316,7 +361,7 @@ public final class App {
         cp.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
             DemoEvent.class.getName());
         cp.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-hop-" + service + "-" + UUID.randomUUID());
-        cp.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        cp.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, CONSUME_FROM);
         cp.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         applyKafkaSecurity(cp);
         applySchemaRegistryAuth(cp);
@@ -335,6 +380,9 @@ public final class App {
         applySchemaRegistryAuth(pp);
 
         System.out.printf("→ hopping %s → %s as %s (Ctrl-C to stop)%n", inTopic, outTopic, service);
+        // hop is the producing stage — its interceptor emits the latency /
+        // topology / hop-distribution meters, so this is where scraping pays off.
+        maybeStartMetrics();
 
         try (KafkaConsumer<byte[], DemoEvent> consumer = new KafkaConsumer<>(cp);
              KafkaProducer<byte[], DemoEvent> producer = new KafkaProducer<>(pp);
@@ -385,7 +433,7 @@ public final class App {
         p.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
             DemoEvent.class.getName());
         p.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-consume-" + service + "-" + UUID.randomUUID());
-        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, CONSUME_FROM);
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         applyKafkaSecurity(p);
         applySchemaRegistryAuth(p);
@@ -418,7 +466,7 @@ public final class App {
         p.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
             DemoEvent.class.getName());
         p.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-sink-" + UUID.randomUUID());
-        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, CONSUME_FROM);
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         applyKafkaSecurity(p);
         applySchemaRegistryAuth(p);

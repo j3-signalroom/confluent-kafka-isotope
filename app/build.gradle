@@ -34,6 +34,10 @@ dependencies {
     // The interceptor classes themselves remain generic over <K,V> and do
     // not depend on the SR client at compile time.
     implementation libs.kafka.protobuf.serializer
+    // Micrometer + Prometheus: the producer interceptor emits the
+    // stateless-aggregation reports (latency / topology / hop distribution)
+    // as meters; App serves them at /metrics for Prometheus to scrape.
+    implementation libs.micrometer.registry.prometheus
     runtimeOnly    libs.slf4j.simple
 
     testImplementation libs.kafka.clients
@@ -73,7 +77,8 @@ tasks.named('run', JavaExec) {
     // does NOT inherit gradle's system properties.
     System.getProperties().each { k, v ->
         def key = k.toString()
-        if (key.startsWith('kafka.') || key.startsWith('schema.registry.')) {
+        if (key.startsWith('kafka.') || key.startsWith('schema.registry.')
+                || key.startsWith('metrics.') || key.startsWith('isotope.')) {
             systemProperty key, v.toString()
         }
     }

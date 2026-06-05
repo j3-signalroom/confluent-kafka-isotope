@@ -29,6 +29,10 @@ Kafka topics become the connective tissue between services, while Kafka Intercep
     - [**4.5.2 Format-by-runtime + the percentiles PTF**](#452-format-by-runtime--the-percentiles-ptf)
     - [**4.5.3 Sustained traffic — required to see report rows.**](#453-sustained-traffic--required-to-see-report-rows)
     - [**4.5.4 Teardown**](#454-teardown)
+  - [**4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**](#46-stateless-reports-via-micrometer--prometheusgrafana-optional)
+    - [**4.6.1 Enabling the exporter**](#461-enabling-the-exporter)
+    - [**4.6.2 The three reports as PromQL**](#462-the-three-reports-as-promql)
+    - [**4.6.3 What stays in Flink — and two deliberate gaps**](#463-what-stays-in-flink--and-two-deliberate-gaps)
 - [**5.0 Resources**](#50-resources)
 <!-- tocstop -->
 
@@ -153,6 +157,8 @@ app/                                    isotope JVM library + demo CLI + tests
                                         recordConsume() (emits consume-edge markers)
     IsotopeProducerInterceptor.java     stamps/appends x-isotope + 7 scalar
                                         reporting headers on send()
+    IsotopeMetrics.java                 optional Micrometer/Prometheus exporter
+                                        for the 3 stateless reports (§ 4.6)
     App.java                            demo CLI — send / hop / consume / sink modes
   src/test/java/.../                    IsotopeCodecTest, IsotopeContextRecordConsumeTest
                                         (no broker needed)
@@ -425,6 +431,77 @@ make cc-flink-reports-down CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SE
 ```
 
 Runs `terraform destroy -auto-approve` — deletes every resource above, including the environment itself. Safe to run repeatedly.
+
+### **4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**
+
+Is Flink overkill for these reports? **Yes and no** — it's not all about stateless aggregation. Of the seven reports, **three are pure stateless scalar aggregation** keyed on bounded-cardinality dimensions (service / topic / hop_count — never `trace_id`):
+
+- **`latency_1m`** ([10_latency_report.fql](scripts/flink/sql/cp/10_latency_report.fql)) — avg/max latency per `(pipeline, origin_service, this_topic)`.
+- **`topology_1m`** ([20_topology_report.fql](scripts/flink/sql/cp/20_topology_report.fql)) — produce-edge record counts.
+- **`hop_distribution_1m`** ([30_hop_distribution.fql](scripts/flink/sql/cp/30_hop_distribution.fql)) — records per `hop_count`.
+
+These don't need a stream processor. The [producer interceptor](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeProducerInterceptor.java) already has every value in scope on each `send()`, so it can emit them as **Micrometer** meters and let **Prometheus** do the 1-minute windowing at query time (`rate()` / `increase()`), with **Grafana** on top. The other four reports — `latency_percentiles` (mergeable T-Digest), `coverage`, `bipartite_topology`, `stuck_trace` — are per-`trace_id` *stateful* or *absence-of-event* problems Prometheus can't express, so they **stay in Flink**. This path is **additive and opt-in** (off by default); it doesn't replace the Flink reports — it's the cheaper way to serve the three that are metrics, not stream processing.
+
+Emission lives in one place — [IsotopeMetrics.java](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java) — mirroring how `TDigests` centralizes the sketch contract.
+
+#### **4.6.1 Enabling the exporter**
+
+Pass `-Dmetrics.prometheus.enabled=true` to a long-running **producing** stage (`hop` / `enrich` / `fulfill`) — that's where the interceptor emits, so that's where scraping pays off. The app serves the meters at `GET /metrics` on `metrics.prometheus.port` (default `9404`) via the JDK's built-in HTTP server — no extra runtime.
+
+```bash
+# Prereq: 'make kafka-pf-up' is up. Run the enrich stage with metrics exposed:
+./gradlew :app:run -Dmetrics.prometheus.enabled=true --args="enrich"
+# → metrics on http://localhost:9404/metrics
+
+# In another shell, drive traffic so the meters move (origin produce):
+for i in {1..30}; do ./gradlew :app:run --args="place burst-$i" -q; sleep 5; done
+
+# Scrape:
+curl -s localhost:9404/metrics | grep isotope_
+```
+
+Point a Prometheus scrape job at each stage's `:9404` and the three reports become PromQL queries (no report topics, no Control Center — Grafana instead). Unlike the Flink jobs, there's **no watermark wait**: cumulative counters update on every send and Prometheus windows them at read time.
+
+> **Reading the latency metric — mind the backlog.** `hop` / `consume` use a *random* consumer group with `auto.offset.reset=earliest`, so a fresh stage **replays the whole topic from offset 0**. Latency is `now − origin_ts`, so days-old replayed records report enormous values — e.g. an `isotope_hop_latency_seconds_sum` of ~9,000,000 over 58 records (~43 h average) is just the backlog, not steady-state latency (the Flink `latency_1m` report shows the same, by the same definition). The tell: `_count` exceeds the number of records you just sent. Two ways to see realistic latency: drain the backlog and read `rate(isotope_hop_latency_seconds_sum[1m]) / rate(..._count[1m])` (the windowed rate ignores the stale backlog once it stops growing), or skip the backlog entirely with **`-Disotope.consume.from=latest`** so the stage only consumes records produced after it starts:
+>
+> ```bash
+> ./gradlew :app:run -Dmetrics.prometheus.enabled=true -Disotope.consume.from=latest --args="enrich"
+> ```
+
+#### **4.6.2 The three reports as PromQL**
+
+Two meters cover all three reports — a `Timer` whose count doubles as the topology edge count, plus a `Counter` for the hop histogram:
+
+| Report | Meter (Prometheus name) | Labels |
+|---|---|---|
+| `latency_1m` **+** `topology_1m` | `isotope_hop_latency_seconds_{count,sum,max}` (`Timer`) | `pipeline, origin_service, this_service, this_topic` |
+| `hop_distribution_1m` | `isotope_hop_records_total` (`Counter`) | `pipeline, this_topic, hop_count` |
+
+```promql
+# latency_1m — avg latency (seconds)
+  sum by (pipeline, origin_service, this_topic) (rate(isotope_hop_latency_seconds_sum[1m]))
+/ sum by (pipeline, origin_service, this_topic) (rate(isotope_hop_latency_seconds_count[1m]))
+
+# latency_1m — max
+max by (pipeline, origin_service, this_topic) (isotope_hop_latency_seconds_max)
+
+# topology_1m — records per produce edge
+sum by (pipeline, origin_service, this_service, this_topic) (increase(isotope_hop_latency_seconds_count[1m]))
+
+# hop_distribution_1m — records per hop_count
+sum by (pipeline, this_topic, hop_count) (increase(isotope_hop_records_total[1m]))
+```
+
+#### **4.6.3 What stays in Flink — and two deliberate gaps**
+
+Moving these out isn't free — two columns the Flink reports carry have **no Prometheus equivalent**, and both are documented in [IsotopeMetrics.java](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java):
+
+- **No `distinct_traces`.** All three SQL reports carry a `COUNT(DISTINCT trace_id)` column. A counter can't dedup, and `trace_id` is unbounded-cardinality so it can't be a label. If you need it, that column stays in Flink (or approximate it with a HyperLogLog sketch).
+- **No windowed `min` latency.** A Micrometer `Timer` exposes max but not a per-window min — avg and max port cleanly, min does not.
+
+So the line between "metric" and "Flink job" runs *through* a couple of these reports, not cleanly between them — which is exactly why the move is opt-in rather than a wholesale replacement.
+
+**Why `latency_percentiles_1m` is NOT in this list.** Percentiles *can* be served by Prometheus — but only via a *classic* histogram (`publishPercentileHistogram()` + `histogram_quantile()`), whose accuracy is **bucket-bound, not adaptive**: error is the width of fixed, pre-chosen buckets, so the tail (p99) is only as good as your bucket layout, and covering a range finely means emitting hundreds of `le` series per tag combo. Prometheus's adaptive answer — *native histograms* (exponential buckets, the closest thing to a T-Digest) — isn't emittable through Micrometer yet (experimental, protobuf-only as of late 2024). So the [T-Digest PTF](scripts/flink/sql/cp/70_latency_percentiles_report.fql) wins on tail accuracy **and** scales better: its sketch is bounded (~few KB/key) and mergeable, whereas at production volume a Micrometer percentile-histogram's `le`-bucket cardinality grows with the range you need to resolve. The built-in Flink `PERCENTILE` aggregate (exact, pure SQL) is *also* the wrong call at high volume — it retains every value in the window — so percentiles stay a **T-Digest sketch PTF** on purpose (see that file's header for the full rationale). This is a 3-Micrometer / 4-Flink split, not 4/3.
 
 ## **5.0 Resources**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)

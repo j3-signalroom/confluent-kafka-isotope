@@ -27,6 +27,14 @@ confluent       = "8.2.0"
 protoc          = "4.32.1"
 protobuf-plugin = "0.9.4"
 
+# Micrometer + Prometheus exporter for the :app demo. The producer
+# interceptor emits the three stateless-aggregation reports (latency,
+# topology produce-edges, hop distribution) as Micrometer meters; the app
+# serves them at GET /metrics for Prometheus to scrape (Grafana on top).
+# This is the metrics-native alternative to the Flink latency_1m /
+# topology_1m / hop_distribution_1m SQL reports — see README § 4.6.
+micrometer = "1.14.2"
+
 [libraries]
 kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
@@ -44,6 +52,9 @@ t-digest             = { module = "com.tdunning:t-digest",                 versi
 kafka-protobuf-serializer = { module = "io.confluent:kafka-protobuf-serializer", version.ref = "confluent" }
 protobuf-java             = { module = "com.google.protobuf:protobuf-java",       version.ref = "protoc" }
 protoc                    = { module = "com.google.protobuf:protoc",              version.ref = "protoc" }
+
+# Prometheus registry (pulls micrometer-core transitively).
+micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus", version.ref = "micrometer" }
 
 [plugins]
 shadow   = { id = "com.gradleup.shadow",  version.ref = "shadow" }
