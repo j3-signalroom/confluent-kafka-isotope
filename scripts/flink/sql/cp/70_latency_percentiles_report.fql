@@ -27,6 +27,18 @@
 -- p99 with bounded memory (a few KB per accumulator key). Tune the
 -- compression constant in TDigests.java for tighter tails at higher cost.
 --
+-- Why NOT the built-in PERCENTILE aggregate (Flink >= 2.0): it is available
+-- on both runtimes and would replace this whole PTF + T-Digest + JAR with
+-- pure SQL — BUT it computes the EXACT percentile, which means it retains
+-- every value in the window and full-sorts at emit. State then grows linearly
+-- with throughput (~tens of bytes/value), so at production volume a single hot
+-- (service, topic) key sized at millions of records/min costs tens-to-hundreds
+-- of MB of window state, inflating checkpoints and recovery. The T-Digest is
+-- bounded (~few KB/key regardless of volume) and mergeable across parallelism,
+-- so this report stays a sketch PTF on purpose. PERCENTILE is the better choice
+-- ONLY at low volume (roughly < a few hundred records/key/min), where exact +
+-- pure-SQL wins; this pipeline is sized for high volume, so keep the PTF.
+--
 -- Call-form notes (Flink 2.1.2 PTF constraints, shared with
 -- 60_stuck_trace_report.fql):
 --   - MUST be an INSERT INTO ... SELECT ... FROM TABLE(ptf(...)), not a

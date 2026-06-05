@@ -99,29 +99,41 @@ public final class IsotopeMetrics {
      * {@code GET /metrics} on {@code port}. Safe to call more than once (e.g.
      * from multiple modes) — only the first call opens the listener.
      *
-     * @throws IllegalStateException if the listener can't be opened on {@code port}
+     * <p>The exporter is an optional sidecar, so a failure to bind {@code port}
+     * (commonly a sibling stage already holding the default 9404) is logged at
+     * WARN and swallowed — the registry is left unbound ({@link #isEnabled()}
+     * stays false, {@link #recordHop} stays a no-op) and the caller's data
+     * pipeline runs on unaffected. It does <em>not</em> throw.
      */
     public static synchronized void start(int port) {
-        ensureRegistry();
         if (server != null) return;
+
+        // Open the listener BEFORE binding the registry, so a bind failure
+        // leaves nothing half-wired (no registry accumulating meters that
+        // nothing can scrape).
+        HttpServer s;
         try {
-            HttpServer s = HttpServer.create(new InetSocketAddress(port), 0);
-            s.createContext("/metrics", exchange -> {
-                byte[] body = scrape().getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders()
-                    .add("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
-                exchange.sendResponseHeaders(200, body.length);
-                try (OutputStream os = exchange.getResponseBody()) {
-                    os.write(body);
-                }
-            });
-            s.start();
-            server = s;
-            LOG.info("isotope metrics exporter listening on http://0.0.0.0:{}/metrics", port);
+            s = HttpServer.create(new InetSocketAddress(port), 0);
         } catch (IOException e) {
-            throw new IllegalStateException(
-                "failed to start isotope metrics exporter on port " + port, e);
+            LOG.warn("isotope metrics exporter NOT started: port {} unavailable ({}). "
+                + "Another stage may already own it — set -Dmetrics.prometheus.port "
+                + "to a free port. Continuing without metrics.", port, e.toString());
+            return;
         }
+
+        ensureRegistry();
+        s.createContext("/metrics", exchange -> {
+            byte[] body = scrape().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders()
+                .add("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        });
+        s.start();
+        server = s;
+        LOG.info("isotope metrics exporter listening on http://0.0.0.0:{}/metrics", port);
     }
 
     /** Binds the Prometheus registry without serving HTTP. Idempotent. */

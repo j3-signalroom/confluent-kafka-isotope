@@ -108,6 +108,16 @@ public final class App {
     private static final int METRICS_PORT =
         Integer.parseInt(System.getProperty("metrics.prometheus.port", "9404"));
 
+    // Consumer offset reset for the hop / consume / sink modes. Defaults to
+    // "earliest" so a fresh random consumer group replays the whole topic —
+    // the § 4.4 sustained-traffic flow relies on that. Pass
+    // -Disotope.consume.from=latest to skip the backlog and measure only
+    // records produced after the stage starts; useful when reading the latency
+    // metric, since origin→hop latency for a days-old backlog record is
+    // genuinely huge (now − origin_ts), which dwarfs steady-state latency.
+    private static final String CONSUME_FROM =
+        System.getProperty("isotope.consume.from", "earliest");
+
     private App() {}
 
     /**
@@ -119,7 +129,11 @@ public final class App {
     private static void maybeStartMetrics() {
         if (METRICS_ENABLED) {
             IsotopeMetrics.start(METRICS_PORT);
-            System.out.printf("→ metrics on http://localhost:%d/metrics%n", METRICS_PORT);
+            // start() degrades gracefully on a port clash, so only advertise
+            // the endpoint when it actually bound (otherwise its WARN explains).
+            if (IsotopeMetrics.isEnabled()) {
+                System.out.printf("→ metrics on http://localhost:%d/metrics%n", METRICS_PORT);
+            }
         }
     }
 
@@ -193,6 +207,9 @@ public final class App {
             reports, emitted by the producer interceptor; scrape during `hop`):
               -Dmetrics.prometheus.enabled=true   (default false)
               -Dmetrics.prometheus.port=9404      → GET http://localhost:9404/metrics
+              -Disotope.consume.from=latest       skip the backlog (default earliest)
+                                                  → realistic latency, not now−origin_ts
+                                                    of days-old replayed records
 
             Optional Confluent Cloud auth (default: plaintext, no auth):
               -Dkafka.security.protocol=SASL_SSL
@@ -344,7 +361,7 @@ public final class App {
         cp.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
             DemoEvent.class.getName());
         cp.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-hop-" + service + "-" + UUID.randomUUID());
-        cp.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        cp.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, CONSUME_FROM);
         cp.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         applyKafkaSecurity(cp);
         applySchemaRegistryAuth(cp);
@@ -416,7 +433,7 @@ public final class App {
         p.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
             DemoEvent.class.getName());
         p.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-consume-" + service + "-" + UUID.randomUUID());
-        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, CONSUME_FROM);
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         applyKafkaSecurity(p);
         applySchemaRegistryAuth(p);
@@ -449,7 +466,7 @@ public final class App {
         p.put(KafkaProtobufDeserializerConfig.SPECIFIC_PROTOBUF_VALUE_TYPE,
             DemoEvent.class.getName());
         p.put(ConsumerConfig.GROUP_ID_CONFIG, "isotope-sink-" + UUID.randomUUID());
-        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, CONSUME_FROM);
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         applyKafkaSecurity(p);
         applySchemaRegistryAuth(p);

@@ -7,9 +7,12 @@
  */
 package ai.signalroom.kafka.isotope;
 
+import java.net.ServerSocket;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,6 +46,19 @@ class IsotopeMetricsTest {
     void ensureRegistryEnablesEmission() {
         IsotopeMetrics.ensureRegistry();
         assertTrue(IsotopeMetrics.isEnabled());
+    }
+
+    @Test
+    void startOnTakenPortDegradesGracefully() throws Exception {
+        // Occupy an ephemeral port, then ask the exporter to bind the same one.
+        try (ServerSocket hog = new ServerSocket(0)) {
+            int taken = hog.getLocalPort();
+            // Optional sidecar: a port clash must NOT throw and must leave the
+            // exporter unbound, so the caller's pipeline keeps running.
+            assertDoesNotThrow(() -> IsotopeMetrics.start(taken));
+            assertFalse(IsotopeMetrics.isEnabled());
+            assertEquals("", IsotopeMetrics.scrape());
+        }
     }
 
     // -- exposition -----------------------------------------------------
