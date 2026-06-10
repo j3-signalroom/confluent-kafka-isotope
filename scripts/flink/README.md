@@ -43,7 +43,7 @@ keys each report groups by, on top of `pipeline`.
 |---|---|---|---|
 | `latency`            | `isotope`                 | avg / min / max end-to-end latency by `origin_service × current_topic` | CP, CCAF |
 | `topology`           | `isotope`                 | produce-edge counts per `(producer_service, topic)` per minute | CP, CCAF |
-| `bipartite_topology` | `isotope` ∪ `consume_events` | full bipartite graph: produce edges + consume edges per minute | CP, CCAF |
+| `bipartite_topology` | `isotope` and `consume_events` | full bipartite graph: produce edges plus consume edges per minute | CP, CCAF |
 | `hop_distribution`   | `isotope`                 | record counts bucketed by `hop_count` per topic per minute | CP, CCAF |
 | `coverage`           | `isotope`                 | distinct traces per topic per minute | CP, CCAF |
 | `stuck_trace`        | `isotope`                 | alerts (via `STUCK_TRACE_PTF`) for traces idle ≥60s of event time | CP, CCAF |
@@ -85,7 +85,7 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
   05_report_sinks.fql                   CREATE TABLE for each isotope_report_*_1m Kafka sink (avro-confluent)
   10_latency_report.fql                 INSERT INTO: avg/min/max latency by origin × topic
   20_topology_report.fql                INSERT INTO: produce-edge counts per minute
-  25_bipartite_topology_report.fql      INSERT INTO: produce ∪ consume edges (bipartite graph) per minute
+  25_bipartite_topology_report.fql      INSERT INTO: produce plus consume edges (bipartite graph) per minute
   30_hop_distribution.fql               INSERT INTO: hop-count buckets per topic per minute
   40_coverage_report.fql                INSERT INTO: distinct traces per topic per minute
   60_stuck_trace_report.fql             INSERT INTO: stuck-trace alerts via STUCK_TRACE_PTF
