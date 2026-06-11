@@ -81,6 +81,11 @@ public final class IsotopeContext {
      *
      * <p>Fire-and-forget: the send is async with no callback. The
      * {@link Producer} lifecycle is the caller's responsibility.
+     *
+     * <p>When the Micrometer exporter is enabled ({@link IsotopeMetrics#start}),
+     * this also emits the stateless consume-edge metrics for the marker via
+     * {@link IsotopeMetrics#recordConsume} — the consume-side analogue of the
+     * produce-side {@link IsotopeProducerInterceptor} emission.
      */
     public static void recordConsume(
             ConsumerRecord<?, ?> consumerRecord,
@@ -110,6 +115,24 @@ public final class IsotopeContext {
 
         emitter.send(new ProducerRecord<>(
             topic, null, null, null, null, markerHeaders));
+
+        // Mirror the produce-side IsotopeProducerInterceptor: also emit the
+        // stateless consume-edge metrics (topic→consumer count + time-to-consume
+        // latency) to Micrometer for Prometheus/Grafana. No-op unless the app
+        // started the exporter (IsotopeMetrics.start).
+        if (IsotopeMetrics.isEnabled()) {
+            long originTs = parseLongOrNeg(
+                headerString(consumerRecord, Isotope.HEADER_ORIGIN_TS, null));
+            long latencyMs = originTs < 0
+                ? -1L
+                : Math.max(0L, System.currentTimeMillis() - originTs);
+            IsotopeMetrics.recordConsume(
+                headerString(consumerRecord, Isotope.HEADER_PIPELINE,       "unknown"),
+                headerString(consumerRecord, Isotope.HEADER_ORIGIN_SERVICE, "unknown"),
+                consumerService == null ? "unknown" : consumerService,
+                headerString(consumerRecord, Isotope.HEADER_THIS_TOPIC,     "unknown"),
+                latencyMs);
+        }
     }
 
     private static void forwardHeader(
@@ -117,6 +140,23 @@ public final class IsotopeContext {
         Header h = source.headers().lastHeader(key);
         if (h != null) {
             dest.add(key, h.value());
+        }
+    }
+
+    /** Reads a scalar isotope header as a UTF-8 string, or {@code dflt} if absent. */
+    private static String headerString(
+            ConsumerRecord<?, ?> source, String key, String dflt) {
+        Header h = source.headers().lastHeader(key);
+        return h == null ? dflt : new String(h.value(), StandardCharsets.UTF_8);
+    }
+
+    /** Parses {@code s} as a long, returning {@code -1} when null or malformed. */
+    private static long parseLongOrNeg(String s) {
+        if (s == null) return -1L;
+        try {
+            return Long.parseLong(s.trim());
+        } catch (NumberFormatException e) {
+            return -1L;
         }
     }
 }

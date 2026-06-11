@@ -32,7 +32,8 @@ Kafka topics become the connective tissue between services, while Kafka Intercep
   - [**4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**](#46-stateless-reports-via-micrometer--prometheusgrafana-optional)
     - [**4.6.1 Enabling the exporter**](#461-enabling-the-exporter)
     - [**4.6.2 The three reports as PromQL**](#462-the-three-reports-as-promql)
-    - [**4.6.3 What stays in Flink — and two deliberate gaps**](#463-what-stays-in-flink--and-two-deliberate-gaps)
+    - [**4.6.3 Consume-side meters (terminal consumers)**](#463-consume-side-meters-terminal-consumers)
+    - [**4.6.4 What stays in Flink — and two deliberate gaps**](#464-what-stays-in-flink--and-two-deliberate-gaps)
 - [**5.0 Resources**](#50-resources)
 <!-- tocstop -->
 
@@ -446,7 +447,7 @@ Emission lives in one place — [IsotopeMetrics.java](app/src/main/java/ai/signa
 
 #### **4.6.1 Enabling the exporter**
 
-Pass `-Dmetrics.prometheus.enabled=true` to a long-running **producing** stage (`hop` / `enrich` / `fulfill`) — that's where the interceptor emits, so that's where scraping pays off. The app serves the meters at `GET /metrics` on `metrics.prometheus.port` (default `9404`) via the JDK's built-in HTTP server — no extra runtime.
+Pass `-Dmetrics.prometheus.enabled=true` to any long-running stage. **Producing** stages (`hop` / `enrich` / `fulfill`) emit the produce-side meters via the interceptor; **consuming** stages emit the consume-side meters via the marker path (§4.6.3) — `hop` does both (it consumes *and* produces), and the terminal `consume` / `ship` stages emit the consume side alone. The app serves the meters at `GET /metrics` on `metrics.prometheus.port` (default `9404`) via the JDK's built-in HTTP server — no extra runtime.
 
 ```bash
 # Prereq: 'make kafka-pf-up' is up. Run the enrich stage with metrics exposed:
@@ -492,7 +493,29 @@ sum by (pipeline, origin_service, this_service, this_topic) (increase(isotope_ho
 sum by (pipeline, this_topic, hop_count) (increase(isotope_hop_records_total[1m]))
 ```
 
-#### **4.6.3 What stays in Flink — and two deliberate gaps**
+#### **4.6.3 Consume-side meters (terminal consumers)**
+
+The three meters above all come from the **produce** side — the interceptor on `send()`. The **consume** side has its own pair, emitted by [`IsotopeContext.recordConsume`](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java) right beside the consume-edge marker it writes to `platform.observability.consume_events`. They fire on every consuming stage: `hop` (which consumes *and* produces, so it emits both sides) and the terminal `consume` / `ship` stages (which emit only this side). Same gating — no-op unless the exporter is started.
+
+| Signal | Meter (Prometheus name) | Labels |
+|---|---|---|
+| consume-edge counts (topic→consumer) | `isotope_consume_records_total` (`Counter`) | `pipeline, this_topic, consumer_service` |
+| time-to-consume latency (origin→consume) | `isotope_consume_latency_seconds_{count,sum,max}` (`Timer`) | `pipeline, origin_service, consumer_service, this_topic` |
+
+```promql
+# consume edges — records consumed per (topic → consumer) per minute
+sum by (pipeline, this_topic, consumer_service) (increase(isotope_consume_records_total[1m]))
+
+# time-to-consume — avg seconds from trace origin to consumption
+  sum by (pipeline, consumer_service, this_topic) (rate(isotope_consume_latency_seconds_sum[1m]))
+/ sum by (pipeline, consumer_service, this_topic) (rate(isotope_consume_latency_seconds_count[1m]))
+```
+
+These are **net-new signals**, not a port of a Flink report. `isotope_consume_records_total` is the *consume half* of the bipartite topology — the topic→consumer edge tallies — and `isotope_consume_latency_seconds_*` is an origin→consume figure no Flink report computes (the Flink `latency_1m` measures origin→**produce**-hop). The **full** `bipartite_topology` report still stays in Flink: stitching produce and consume edges per `trace_id` into one graph is per-trace stateful, which a counter can't do. What you get here is the bounded-cardinality edge *counts* and a time-to-consume distribution — cheap, windowable at read time, and free of the watermark wait.
+
+> The same **backlog caveat** from §4.6.1 applies: `consume` / `ship` use a random consumer group with `auto.offset.reset=earliest`, so a fresh stage replays from offset 0 and `isotope_consume_latency_seconds_sum` then reflects days-old origins, not steady-state. Read the windowed `rate(...sum[1m]) / rate(...count[1m])`, or start with `-Disotope.consume.from=latest`.
+
+#### **4.6.4 What stays in Flink — and two deliberate gaps**
 
 Moving these out isn't free — two columns the Flink reports carry have **no Prometheus equivalent**, and both are documented in [IsotopeMetrics.java](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java):
 
