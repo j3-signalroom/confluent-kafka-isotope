@@ -53,6 +53,21 @@ import org.slf4j.LoggerFactory;
  *       as a tag.</li>
  * </ul>
  *
+ * <p>On the <em>consume</em> side, {@link #recordConsume} (called from
+ * {@link IsotopeContext#recordConsume}) adds two more, the consume-marker
+ * analogues of the produce-side pair:
+ * <ul>
+ *   <li>{@value #CONSUME_LATENCY_TIMER} tagged {@code (pipeline, origin_service,
+ *       consumer_service, this_topic)} — origin&rarr;consume latency
+ *       (time-to-consume). Stateless and metrics-native; no Flink report
+ *       computes it.</li>
+ *   <li>{@value #CONSUME_RECORDS} tagged {@code (pipeline, this_topic,
+ *       consumer_service)} — topic&rarr;consumer edge counts, the consume half
+ *       of the bipartite topology. (The <em>full</em> per-{@code trace_id}
+ *       bipartite graph still needs Flink; these are just the bounded-cardinality
+ *       edge tallies.)</li>
+ * </ul>
+ *
  * <h2>Two deliberate gaps vs. the Flink reports</h2>
  * <ul>
  *   <li><b>No {@code distinct_traces}.</b> A counter can't dedup and
@@ -78,6 +93,21 @@ public final class IsotopeMetrics {
 
     /** Records per {@code (pipeline, this_topic, hop_count)} — hop distribution. */
     static final String HOP_RECORDS = "isotope.hop.records";
+
+    /**
+     * Origin&rarr;consume latency timer, tagged {@code (pipeline, origin_service,
+     * consumer_service, this_topic)}. Measures wall-clock from trace origin to
+     * the moment {@code consumer_service} consumed the record — a stateless,
+     * metrics-native time-to-consume figure with no Flink-report counterpart.
+     */
+    static final String CONSUME_LATENCY_TIMER = "isotope.consume.latency";
+
+    /**
+     * Records per {@code (pipeline, this_topic, consumer_service)} — the consume
+     * half of the bipartite topology (topic&rarr;consumer edge counts). One
+     * increment per consume marker; all three tags are bounded cardinality.
+     */
+    static final String CONSUME_RECORDS = "isotope.consume.records";
 
     // The exporter owns a dedicated Prometheus registry rather than the
     // process-global one: the meters here are the only thing on the /metrics
@@ -178,6 +208,45 @@ public final class IsotopeMetrics {
             .tag("pipeline",   pipeline)
             .tag("this_topic", thisTopic)
             .tag("hop_count",  Integer.toString(hopCount))
+            .register(r)
+            .increment();
+    }
+
+    /**
+     * Emits the stateless consume-edge metrics for one consume marker. No-op
+     * unless the exporter has been bound (via {@link #start(int)}). The
+     * companion to {@link #recordHop} on the consume side, called from
+     * {@link IsotopeContext#recordConsume}.
+     *
+     * @param pipeline         the trace's pipeline (origin-set, forwarded)
+     * @param originService    the service that originated the trace
+     * @param consumerService  the service consuming this record
+     * @param thisTopic        the topic the record was consumed from
+     * @param latencyMs        {@code consumeTs - originTs} already clamped at 0
+     *                         by the caller, or {@code < 0} when the inbound
+     *                         record carried no origin timestamp — in which case
+     *                         the edge is still counted but the latency timer is
+     *                         skipped
+     */
+    public static void recordConsume(String pipeline, String originService,
+            String consumerService, String thisTopic, long latencyMs) {
+        PrometheusMeterRegistry r = registry;
+        if (r == null) return;
+
+        if (latencyMs >= 0) {
+            Timer.builder(CONSUME_LATENCY_TIMER)
+                .tag("pipeline",         pipeline)
+                .tag("origin_service",   originService)
+                .tag("consumer_service", consumerService)
+                .tag("this_topic",       thisTopic)
+                .register(r)
+                .record(latencyMs, TimeUnit.MILLISECONDS);
+        }
+
+        Counter.builder(CONSUME_RECORDS)
+            .tag("pipeline",         pipeline)
+            .tag("this_topic",       thisTopic)
+            .tag("consumer_service", consumerService)
             .register(r)
             .increment();
     }

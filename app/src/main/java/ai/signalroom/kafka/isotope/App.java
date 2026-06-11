@@ -123,8 +123,11 @@ public final class App {
     /**
      * Starts the Prometheus metrics exporter when
      * {@code -Dmetrics.prometheus.enabled=true}. Called by the long-running
-     * modes so the stateless-aggregation meters emitted by
-     * {@link IsotopeProducerInterceptor} can be scraped. No-op otherwise.
+     * modes so their stateless-aggregation meters can be scraped — the
+     * produce-side meters emitted by {@link IsotopeProducerInterceptor} on
+     * {@code hop}, and the consume-side meters emitted by
+     * {@link IsotopeContext#recordConsume} on {@code hop} and the terminal
+     * {@code consume}. No-op otherwise.
      */
     private static void maybeStartMetrics() {
         if (METRICS_ENABLED) {
@@ -439,6 +442,11 @@ public final class App {
         applySchemaRegistryAuth(p);
 
         System.out.printf("→ consuming %s as %s (Ctrl-C to stop)%n", topic, service);
+        // Terminal consumer — it never produces downstream, so the interceptor
+        // meters never fire here, but recordConsume emits the consume-edge
+        // meters (topic→consumer count + time-to-consume), so scraping pays off.
+        maybeStartMetrics();
+
         try (KafkaConsumer<byte[], DemoEvent> consumer = new KafkaConsumer<>(p);
              KafkaProducer<byte[], byte[]>   markers  = markerProducer()) {
             consumer.subscribe(List.of(topic));
