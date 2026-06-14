@@ -67,6 +67,20 @@ Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom
 - **Seven scalar headers** (UTF-8 strings) carry the most-recent-hop view so
   Flink SQL can read them via `CAST(headers['x-isotope-…'] AS STRING)` without parsing the JSON array (no UDF required on either CCAF or CP Flink). See [scripts/flink/README.md](scripts/flink/README.md) for the full header table.
 
+Example of the Isotope’s two parts (formatted for readability; the actual header is in JSON bytes):
+```json
+{
+	"x-isotope-hop-count": "1",
+	"x-isotope": "{\"t\":\"AZ69OS8OeG+9zufGfF2sbw==\",\"o\":1781291101966,\"s\":\"order-intake-service\",\"p\":\"order\",\"h\":[{\"s\":\"order-intake-service\",\"t\":\"orders.placed\",\"m\":1781291101966}],\"x\":false}",
+	"x-isotope-trace-id": "019ebd392f0e786fbdcee7c67c5dac6f",
+	"x-isotope-this-service": "order-intake-service",
+	"x-isotope-origin-service": "order-intake-service",
+	"x-isotope-this-topic": "orders.placed",
+	"x-isotope-origin-ts": "1781291101966",
+	"x-isotope-pipeline": "order"
+}
+```
+
 A producer with the isotope interceptor loaded appends one hop on every `send()`. A consume-then-produce service calls `IsotopeContext.adoptFromRecord(record)` between consume and produce so the trace ID and origin survive the hop.
 
 ### **1.1 How the producer interceptor gets invoked**
