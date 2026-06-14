@@ -10,6 +10,7 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 
 ### Changed
 - Issues[`#100`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/100)
+- Issues[`#104`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/104)
 
 ## [0.13.00.000] - 2026-06-11
 ### Added
