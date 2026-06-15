@@ -517,12 +517,13 @@ sum by (pipeline, this_topic, hop_count) (increase(isotope_hop_records_total[1m]
 
 #### **4.6.3 Consume-side meters (terminal consumers)**
 
-The three meters above all come from the **produce** side — the interceptor on `send()`. The **consume** side has its own pair, emitted by [`IsotopeContext.recordConsume`](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java) right beside the consume-edge marker it writes to `platform.observability.consume_events`. They fire on every consuming stage: `hop` (which consumes *and* produces, so it emits both sides) and the terminal `consume` / `ship` stages (which emit only this side). Same gating — no-op unless the exporter is started.
+The three meters above all come from the **produce** side — the interceptor on `send()`. The **consume** side adds three more. Two — the edge counter and the time-to-consume latency — are emitted by [`IsotopeContext.recordConsume`](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java) right beside the consume-edge marker it writes to `platform.observability.consume_events`. The third, `isotope.consume.age`, is emitted **once per consumed record on whichever path the consumer takes**: continuing consumers report it from the **adoption path** ([`IsotopeContext.adoptFromRecord(record, service)`](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java)), and terminal consumers — which never adopt — report it from the **marker path** (`recordConsume`, guarded on `current() == null` so a stage that does both, like `hop`, never double-counts). So age fires on every consuming stage: `hop` via adoption, the terminal `consume` / `ship` stages via the marker. Same gating — no-op unless the exporter is started.
 
 | Signal | Meter (Prometheus name) | Labels |
 |---|---|---|
 | consume-edge counts (topic→consumer) | `isotope_consume_records_total` (`Counter`) | `pipeline, this_topic, consumer_service` |
 | time-to-consume latency (origin→consume) | `isotope_consume_latency_seconds_{count,sum,max}` (`Timer`) | `pipeline, origin_service, consumer_service, this_topic` |
+| origin→adoption age (how stale at pickup) | `isotope_consume_age_seconds_{count,sum,max}` (`Timer`) | `pipeline, origin_service, consumer_service, this_topic` |
 
 ```promql
 # consume edges — records consumed per (topic → consumer) per minute
@@ -531,11 +532,17 @@ sum by (pipeline, this_topic, consumer_service) (increase(isotope_consume_record
 # time-to-consume — avg seconds from trace origin to consumption
   sum by (pipeline, consumer_service, this_topic) (rate(isotope_consume_latency_seconds_sum[1m]))
 / sum by (pipeline, consumer_service, this_topic) (rate(isotope_consume_latency_seconds_count[1m]))
+
+# consume age — avg seconds a record had aged by the time a service adopted it
+  sum by (pipeline, consumer_service, this_topic) (rate(isotope_consume_age_seconds_sum[1m]))
+/ sum by (pipeline, consumer_service, this_topic) (rate(isotope_consume_age_seconds_count[1m]))
 ```
 
 These are **net-new signals**, not a port of a Flink report. `isotope_consume_records_total` is the *consume half* of the bipartite topology — the topic→consumer edge tallies — and `isotope_consume_latency_seconds_*` is an origin→consume figure no Flink report computes (the Flink `latency_1m` measures origin→**produce**-hop). The **full** `bipartite_topology` report still stays in Flink: stitching produce and consume edges per `trace_id` into one graph is per-trace stateful, which a counter can't do. What you get here is the bounded-cardinality edge *counts* and a time-to-consume distribution — cheap, windowable at read time, and free of the watermark wait.
 
-> The same **backlog caveat** from §4.6.1 applies: `consume` / `ship` use a random consumer group with `auto.offset.reset=earliest`, so a fresh stage replays from offset 0 and `isotope_consume_latency_seconds_sum` then reflects days-old origins, not steady-state. Read the windowed `rate(...sum[1m]) / rate(...count[1m])`, or start with `-Disotope.consume.from=latest`.
+`isotope_consume_age_seconds_*` measures the **same `now − origin_ts` quantity** as `isotope_consume_latency_seconds_*`, but it's the **universal consume-side age signal** — emitted once on *every* consuming stage, where latency only fires on the marker path. That's the point of having both: query `isotope_consume_age_*` to get consume-lag across **all** consumers (including `hop`-style stages that adopt-and-forward without ever writing a marker), and the timer's `_count` doubles as the per-`(consumer_service, topic)` consume rate. At a terminal consumer the age equals that consumer's latency by definition (same `now − origin_ts`); the two diverge in *coverage*, not value — latency is marker-only, age is everywhere.
+
+> The same **backlog caveat** from §4.6.1 applies: `hop` / `consume` / `ship` use a random consumer group with `auto.offset.reset=earliest`, so a fresh stage replays from offset 0 and both `isotope_consume_latency_seconds_sum` and `isotope_consume_age_seconds_sum` then reflect days-old origins, not steady-state. Read the windowed `rate(...sum[1m]) / rate(...count[1m])`, or start with `-Disotope.consume.from=latest`.
 
 #### **4.6.4 What stays in Flink — and two deliberate gaps**
 

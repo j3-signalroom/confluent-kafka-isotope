@@ -336,8 +336,10 @@ public final class App {
     /**
      * Consume-then-produce stage. Subscribes to {@code in}, and for every
      * arriving record:
-     *   1. Calls {@link IsotopeContext#adoptFromRecord} so the trace
-     *      context is in the thread-local before producing.
+     *   1. Calls {@link IsotopeContext#adoptFromRecord(ConsumerRecord, String)}
+     *      so the trace context is in the thread-local before producing, and
+     *      emits the {@code isotope.consume.age} meter attributed to
+     *      {@code service}.
      *   2. Forwards the same {@link DemoEvent} value to {@code out} with
      *      {@code service} as the producer's isotope service name.
      *
@@ -395,7 +397,7 @@ public final class App {
                 ConsumerRecords<byte[], DemoEvent> batch = consumer.poll(Duration.ofSeconds(2));
                 for (ConsumerRecord<byte[], DemoEvent> rec : batch) {
                     try {
-                        IsotopeContext.adoptFromRecord(rec);
+                        IsotopeContext.adoptFromRecord(rec, service);
                         IsotopeContext.recordConsume(rec, service, markers);
                         RecordMetadata md = producer
                             .send(new ProducerRecord<>(outTopic, rec.key(), rec.value()))

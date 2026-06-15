@@ -171,6 +171,44 @@ class IsotopeMetricsTest {
             () -> "latency timer should be skipped when origin ts is absent:\n" + text);
     }
 
+    @Test
+    void recordConsumeAgeEmitsTimerExposition() {
+        IsotopeMetrics.ensureRegistry();
+
+        // Two identical adoptions → count 2, sum 7.0s (2 × 3.5s) on one series.
+        for (int i = 0; i < 2; i++) {
+            IsotopeMetrics.recordConsumeAge("orders", "order-intake-service",
+                "order-enrichment-service", "orders.enriched", 3500L);
+        }
+
+        String text = IsotopeMetrics.scrape();
+
+        assertTrue(text.contains("isotope_consume_age_seconds_count"),
+            () -> "missing consume-age timer count:\n" + text);
+
+        assertTrue(text.contains("pipeline=\"orders\""));
+        assertTrue(text.contains("origin_service=\"order-intake-service\""));
+        assertTrue(text.contains("consumer_service=\"order-enrichment-service\""));
+        assertTrue(text.contains("this_topic=\"orders.enriched\""));
+
+        assertEquals(2.0, value(text, "isotope_consume_age_seconds_count"), 1e-9);
+        assertEquals(7.0, value(text, "isotope_consume_age_seconds_sum"),   1e-9);
+    }
+
+    @Test
+    void recordConsumeAgeClampsNegativeToZero() {
+        IsotopeMetrics.ensureRegistry();
+
+        // Cross-service clock skew can make now − originTs go negative; like the
+        // hop latency timer it must clamp to 0, not drop or throw.
+        IsotopeMetrics.recordConsumeAge("orders", "order-intake-service",
+            "order-enrichment-service", "orders.enriched", -50L);
+
+        String text = IsotopeMetrics.scrape();
+        assertEquals(1.0, value(text, "isotope_consume_age_seconds_count"), 1e-9);
+        assertEquals(0.0, value(text, "isotope_consume_age_seconds_sum"),   1e-9);
+    }
+
     /**
      * Reads the single value of a labelled metric line out of the exposition.
      * Each test uses one series per metric, so the first matching line is it;
