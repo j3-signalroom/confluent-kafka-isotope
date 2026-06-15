@@ -25,14 +25,14 @@ locals {
   # Canonical isotope event topics. The demo CLI writes DemoEvent (SR-Protobuf)
   # to orders.placed / orders.enriched / orders.fulfilled; the source view
   # inlined in setup-confluent-flink.tf UNIONs them.
-  # platform.observability.consume_events carries consume-edge markers (no
+  # isotope_consume_edge_markers carries consume-edge markers (no
   # value, scalar isotope headers + a x-isotope-consumer-service header) written
   # by IsotopeContext.recordConsume.
   isotope_event_topics = [
     "orders.placed",
     "orders.enriched",
     "orders.fulfilled",
-    "platform.observability.consume_events",
+    "isotope_consume_edge_markers",
   ]
 
   # Sink topics for the seven Flink SQL reports. Names mirror CP's sink topic

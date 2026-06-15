@@ -46,7 +46,7 @@ public final class Isotope {
     /**
      * Consume-side marker header. Written by
      * {@code IsotopeContext.recordConsume} when a consumer emits a marker to
-     * the {@code platform.observability.consume_events} topic, on top of the
+     * the {@code isotope_consume_edge_markers} topic, on top of the
      * seven forwarded headers above. Its presence is what Flink uses to
      * distinguish a consume-event marker from a regular produced record.
      */

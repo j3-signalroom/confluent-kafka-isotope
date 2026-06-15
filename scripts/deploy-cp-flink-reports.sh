@@ -36,7 +36,7 @@ EVENT_TOPICS=(
     orders.placed
     orders.enriched
     orders.fulfilled
-    platform.observability.consume_events
+    isotope_consume_edge_markers
 )
 
 # Sink topics — all 7 reports run on this session cluster, all written

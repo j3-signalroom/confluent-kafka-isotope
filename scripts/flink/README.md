@@ -3,7 +3,7 @@
 Seven reports that read two streams of isotope metadata — the
 **produce side** (the `x-isotope-*` headers stamped on every event
 topic record by `IsotopeProducerInterceptor`) and the **consume
-side** (the value-less marker records on `platform.observability.consume_events`
+side** (the value-less marker records on `isotope_consume_edge_markers`
 emitted by `IsotopeContext.recordConsume`) — and surface what's
 flowing where, how fast, and how reliably. Each report runs as a
 long-lived `INSERT INTO <report>_1m SELECT …` streaming job. The
@@ -81,7 +81,7 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
   00_source_table.fql                   CREATE TABLE per topic ('connector' = 'kafka') + isotope_raw UNION view
   01_register_functions.fql             CREATE FUNCTION … USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar'
   05_isotope_view.fql                   Typed view; decodes x-isotope-* header scalars (produces only)
-  06_consume_events_view.fql            Typed view of platform.observability.consume_events markers (consume edges)
+  06_consume_events_view.fql            Typed view of isotope_consume_edge_markers markers (consume edges)
   05_report_sinks.fql                   CREATE TABLE for each isotope_report_*_1m Kafka sink (avro-confluent)
   10_latency_report.fql                 INSERT INTO: avg/min/max latency by origin × topic
   20_topology_report.fql                INSERT INTO: produce-edge counts per minute

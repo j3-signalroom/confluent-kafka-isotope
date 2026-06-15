@@ -2,7 +2,7 @@
 -- Typed view of the consume-edge stream
 --
 -- Decodes the consume-edge markers that consumers emit to the
--- platform.observability.consume_events topic via
+-- isotope_consume_edge_markers topic via
 -- IsotopeContext.recordConsume(). Each marker
 -- forwards the producer-side scalar headers from the inbound record AND
 -- adds `x-isotope-consumer-service` — the field this view keys off to

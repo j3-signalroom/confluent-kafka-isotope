@@ -258,7 +258,7 @@ resource "confluent_flink_statement" "alter_orders_fulfilled_add_headers" {
 
 resource "confluent_flink_statement" "alter_consume_events_add_headers" {
   statement = <<-EOT
-    ALTER TABLE `platform.observability.consume_events`
+    ALTER TABLE `isotope_consume_edge_markers`
         ADD (`headers` MAP<STRING, BYTES> METADATA FROM 'headers' VIRTUAL);
   EOT
 
@@ -280,7 +280,7 @@ resource "confluent_flink_statement" "alter_consume_events_add_headers" {
   }
 
   depends_on = [
-    confluent_kafka_topic.isotope_event["platform.observability.consume_events"],
+    confluent_kafka_topic.isotope_event["isotope_consume_edge_markers"],
     confluent_flink_compute_pool.isotope,
   ]
 }
@@ -313,7 +313,7 @@ resource "confluent_flink_statement" "isotope_raw_view" {
     SELECT
         `$rowtime` AS `event_time`,
         `headers`  AS `headers`
-    FROM `platform.observability.consume_events`;
+    FROM `isotope_consume_edge_markers`;
   EOT
 
   properties    = local.flink_statement_properties

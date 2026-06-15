@@ -7,12 +7,10 @@
  */
 package ai.signalroom.kafka.isotope;
 
-import ai.signalroom.kafka.isotope.proto.DemoEvent;
-
-import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
-import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
-import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
-import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
+import java.time.Duration;
+import java.util.List;
+import java.util.Properties;
+import java.util.UUID;
 
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
@@ -28,10 +26,11 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 
-import java.time.Duration;
-import java.util.List;
-import java.util.Properties;
-import java.util.UUID;
+import ai.signalroom.kafka.isotope.proto.DemoEvent;
+import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializerConfig;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 
 /**
  * Demo CLI. Four modes:
@@ -42,12 +41,12 @@ import java.util.UUID;
  *
  *   hop <in-topic> <out-topic> <service>
  *      Consume-then-produce stage. Adopts the inbound isotope, emits a
- *      consume-edge marker to platform.observability.consume_events, then
+ *      consume-edge marker to isotope_consume_edge_markers, then
  *      produces the same DemoEvent to <out-topic> tagged as <service>.
  *
  *   consume <topic> <service>
  *      Terminal-consumer stage. Subscribes to <topic>, emits a
- *      consume-edge marker to platform.observability.consume_events as
+ *      consume-edge marker to isotope_consume_edge_markers as
  *      <service>, and pretty-prints the isotope trail. Use this for the
  *      final node of a bipartite-topology demo
  *      (shipping-notification-service in order-intake-service →

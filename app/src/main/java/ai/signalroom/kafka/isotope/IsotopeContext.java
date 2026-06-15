@@ -34,7 +34,7 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 public final class IsotopeContext {
 
     /** Default topic that {@link #recordConsume} writes markers to. */
-    public static final String CONSUME_EVENTS_TOPIC = "platform.observability.consume_events";
+    public static final String CONSUME_EVENTS_TOPIC = "isotope_consume_edge_markers";
 
     private static final ThreadLocal<Isotope> CURRENT = new ThreadLocal<>();
 
