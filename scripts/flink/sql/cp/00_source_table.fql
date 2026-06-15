@@ -16,10 +16,10 @@
 -- per-topic shape on CP too (instead of `topic-pattern = '…'`) so the source
 -- layer stays one-for-one with CCAF and the boundary between business
 -- topics (`orders.*`) and the infra marker topic
--- (`platform.observability.consume_events`) is visible in the DDL.
+-- (`isotope_consume_edge_markers`) is visible in the DDL.
 --
 -- The demo CLI writes DemoEvent (SR-Protobuf) to orders.placed /
--- orders.enriched / orders.fulfilled. platform.observability.consume_events
+-- orders.enriched / orders.fulfilled. isotope_consume_edge_markers
 -- carries value-less consume-edge markers that
 -- `IsotopeContext.recordConsume` emits.
 -- =====================================================================
@@ -94,9 +94,9 @@ CREATE TABLE IF NOT EXISTS `orders.fulfilled` (
 );
 
 -- ---------------------------------------------------------------------
--- platform.observability.consume_events — consume-edge marker sideband.
+-- isotope_consume_edge_markers — consume-edge marker sideband.
 -- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `platform.observability.consume_events` (
+CREATE TABLE IF NOT EXISTS `isotope_consume_edge_markers` (
     `value`           BYTES,
     `headers`         MAP<STRING, BYTES> METADATA FROM 'headers'   VIRTUAL,
     `event_time`      TIMESTAMP_LTZ(3)   METADATA FROM 'timestamp' VIRTUAL,
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS `platform.observability.consume_events` (
     WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
 ) WITH (
     'connector'                     = 'kafka',
-    'topic'                         = 'platform.observability.consume_events',
+    'topic'                         = 'isotope_consume_edge_markers',
     'properties.bootstrap.servers'  = 'kafka:9071',
     'properties.group.id'           = 'isotope-flink-reports',
     'scan.startup.mode'             = 'earliest-offset',
@@ -139,4 +139,4 @@ UNION ALL
 SELECT
     `event_time` AS `event_time`,
     `headers`    AS `headers`
-FROM `platform.observability.consume_events`;
+FROM `isotope_consume_edge_markers`;
