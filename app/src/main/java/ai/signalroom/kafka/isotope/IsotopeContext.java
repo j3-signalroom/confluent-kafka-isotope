@@ -8,6 +8,7 @@
 package ai.signalroom.kafka.isotope;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Producer;
@@ -21,7 +22,10 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
  * consume-then-produce service, the application calls
  * {@link #adoptFromRecord(ConsumerRecord)} before processing each record so
  * that {@link IsotopeProducerInterceptor} can find the inbound trace context
- * and append the next hop instead of starting a new trace.
+ * and append the next hop instead of starting a new trace. The
+ * {@link #adoptFromRecord(ConsumerRecord, String) (record, service)} overload
+ * additionally emits the stateless {@code isotope.consume.age} timer when the
+ * Micrometer exporter is enabled.
  *
  * <p>For bipartite topology visibility, consumers also call
  * {@link #recordConsume(ConsumerRecord, String, Producer)} to emit a
@@ -44,13 +48,43 @@ public final class IsotopeContext {
      * Extracts the isotope from the given record's headers (if any) and
      * installs it as the current thread-local context. Returns the isotope
      * adopted, or {@code null} if the record carried no isotope.
+     *
+     * <p>Emits no metric — use {@link #adoptFromRecord(ConsumerRecord, String)}
+     * to also record the stateless {@code isotope.consume.age} timer.
      */
     public static Isotope adoptFromRecord(ConsumerRecord<?, ?> consumerRecord) {
+        return adoptFromRecord(consumerRecord, null);
+    }
+
+    /**
+     * Like {@link #adoptFromRecord(ConsumerRecord)}, but also emits the
+     * stateless consume-side {@code isotope.consume.age} timer attributing the
+     * adoption to {@code consumerService}. The age is {@code now - originTs} —
+     * how stale the record was when this service adopted it to continue the
+     * trace — the adoption-path complement of {@link #recordConsume}'s
+     * marker-path {@code isotope.consume.latency}.
+     *
+     * <p>The thread-local adoption itself is identical to the single-arg
+     * overload. The metric is a no-op when the record carries no isotope,
+     * {@code consumerService} is {@code null}, or the exporter is off
+     * ({@link IsotopeMetrics#isEnabled()}).
+     */
+    public static Isotope adoptFromRecord(
+            ConsumerRecord<?, ?> consumerRecord, String consumerService) {
         Isotope iso = Isotope.fromHeaders(consumerRecord.headers());
         if (iso != null) {
             set(iso);
         } else {
             clear();
+        }
+
+        if (iso != null && consumerService != null && IsotopeMetrics.isEnabled()) {
+            IsotopeMetrics.recordConsumeAge(
+                Objects.requireNonNullElse(iso.pipeline(), "unknown"),
+                iso.originService(),
+                consumerService,
+                consumerRecord.topic(),
+                System.currentTimeMillis() - iso.originTsMs());
         }
         return iso;
     }
@@ -85,7 +119,12 @@ public final class IsotopeContext {
      * <p>When the Micrometer exporter is enabled ({@link IsotopeMetrics#start}),
      * this also emits the stateless consume-edge metrics for the marker via
      * {@link IsotopeMetrics#recordConsume} — the consume-side analogue of the
-     * produce-side {@link IsotopeProducerInterceptor} emission.
+     * produce-side {@link IsotopeProducerInterceptor} emission. For
+     * <em>terminal</em> consumers (those that did not {@link #adoptFromRecord
+     * adopt} the trace on this thread, so {@link #current()} is {@code null}) it
+     * additionally emits the {@code isotope.consume.age} timer that adoption
+     * would otherwise miss; when the record was adopted, age was already emitted
+     * on the adoption path and is skipped here to avoid a double sample.
      */
     public static void recordConsume(
             ConsumerRecord<?, ?> consumerRecord,
@@ -126,12 +165,23 @@ public final class IsotopeContext {
             long latencyMs = originTs < 0
                 ? -1L
                 : Math.max(0L, System.currentTimeMillis() - originTs);
-            IsotopeMetrics.recordConsume(
-                headerString(consumerRecord, Isotope.HEADER_PIPELINE,       "unknown"),
-                headerString(consumerRecord, Isotope.HEADER_ORIGIN_SERVICE, "unknown"),
-                consumerService == null ? "unknown" : consumerService,
-                headerString(consumerRecord, Isotope.HEADER_THIS_TOPIC,     "unknown"),
-                latencyMs);
+            String pipeline      = headerString(consumerRecord, Isotope.HEADER_PIPELINE,       "unknown");
+            String originService = headerString(consumerRecord, Isotope.HEADER_ORIGIN_SERVICE, "unknown");
+            String svc           = consumerService == null ? "unknown" : consumerService;
+            String thisTopic     = headerString(consumerRecord, Isotope.HEADER_THIS_TOPIC,     "unknown");
+
+            IsotopeMetrics.recordConsume(pipeline, originService, svc, thisTopic, latencyMs);
+
+            // Terminal consumers — those that did NOT adopt the trace to continue
+            // it (current() == null) — report isotope.consume.age here; the
+            // adoption-path emission in adoptFromRecord only covers continuing
+            // consumers. When current() is set, this record was already adopted
+            // on this thread and age was emitted there, so skip to avoid a double
+            // sample. (At a terminal consume the age equals the latency above by
+            // definition — the same now − originTs.)
+            if (originTs >= 0 && current() == null) {
+                IsotopeMetrics.recordConsumeAge(pipeline, originService, svc, thisTopic, latencyMs);
+            }
         }
     }
 

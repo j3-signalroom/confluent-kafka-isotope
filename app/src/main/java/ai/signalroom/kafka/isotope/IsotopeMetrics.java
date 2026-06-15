@@ -53,9 +53,13 @@ import org.slf4j.LoggerFactory;
  *       as a tag.</li>
  * </ul>
  *
- * <p>On the <em>consume</em> side, {@link #recordConsume} (called from
- * {@link IsotopeContext#recordConsume}) adds two more, the consume-marker
- * analogues of the produce-side pair:
+ * <p>On the <em>consume</em> side there are three more. {@link #recordConsume}
+ * (called from {@link IsotopeContext#recordConsume}, the bipartite-marker path)
+ * emits the first two. The third, {@link #recordConsumeAge}, is emitted once per
+ * consumed record on whichever path the consumer takes: the
+ * adoption/continuation path ({@link IsotopeContext#adoptFromRecord}) for
+ * consumers that continue the trace, and the marker path
+ * ({@link IsotopeContext#recordConsume}) for terminal consumers that don't:
  * <ul>
  *   <li>{@value #CONSUME_LATENCY_TIMER} tagged {@code (pipeline, origin_service,
  *       consumer_service, this_topic)} — origin&rarr;consume latency
@@ -66,6 +70,12 @@ import org.slf4j.LoggerFactory;
  *       of the bipartite topology. (The <em>full</em> per-{@code trace_id}
  *       bipartite graph still needs Flink; these are just the bounded-cardinality
  *       edge tallies.)</li>
+ *   <li>{@value #CONSUME_AGE_TIMER} tagged {@code (pipeline, origin_service,
+ *       consumer_service, this_topic)} — origin&rarr;consume age: how stale a
+ *       record was when a service consumed it. Same quantity as
+ *       {@value #CONSUME_LATENCY_TIMER}, but emitted once on <em>every</em>
+ *       consuming stage (continuing consumers via adoption, terminal consumers
+ *       via the marker path), so it's the universal consume-side age signal.</li>
  * </ul>
  *
  * <h2>Two deliberate gaps vs. the Flink reports</h2>
@@ -108,6 +118,20 @@ public final class IsotopeMetrics {
      * increment per consume marker; all three tags are bounded cardinality.
      */
     static final String CONSUME_RECORDS = "isotope.consume.records";
+
+    /**
+     * Origin&rarr;consume "age" timer, tagged {@code (pipeline, origin_service,
+     * consumer_service, this_topic)}. Measures wall-clock from trace origin to
+     * the moment a service consumed the record, answering "how stale was this
+     * record when it was picked up?". Same quantity as
+     * {@value #CONSUME_LATENCY_TIMER}, but emitted once on <em>every</em>
+     * consuming stage — continuing consumers report it from the adoption path
+     * ({@link IsotopeContext#adoptFromRecord}), terminal consumers from the
+     * marker path ({@link IsotopeContext#recordConsume}) — making it the
+     * universal consume-side age signal. Stateless and metrics-native; no
+     * Flink-report counterpart.
+     */
+    static final String CONSUME_AGE_TIMER = "isotope.consume.age";
 
     // The exporter owns a dedicated Prometheus registry rather than the
     // process-global one: the meters here are the only thing on the /metrics
@@ -249,6 +273,37 @@ public final class IsotopeMetrics {
             .tag("consumer_service", consumerService)
             .register(r)
             .increment();
+    }
+
+    /**
+     * Emits the stateless consume-side "age" timer for one consumed record. The
+     * age is {@code now - originTs}: how stale the record was when a service
+     * picked it up. No-op unless the exporter has been bound (via
+     * {@link #start(int)}). Called once per consumed record from
+     * {@link IsotopeContext#adoptFromRecord} for continuing consumers, or from
+     * {@link IsotopeContext#recordConsume} for terminal consumers that don't
+     * adopt — the two paths are mutually exclusive per record, so no double
+     * sampling.
+     *
+     * @param pipeline         the trace's pipeline (origin-set, forwarded)
+     * @param originService    the service that originated the trace
+     * @param consumerService  the service adopting the record to continue it
+     * @param thisTopic        the topic the record was consumed from
+     * @param ageMs            {@code now - originTs}; clamped at 0 to absorb
+     *                         cross-service clock skew
+     */
+    public static void recordConsumeAge(String pipeline, String originService,
+            String consumerService, String thisTopic, long ageMs) {
+        PrometheusMeterRegistry r = registry;
+        if (r == null) return;
+
+        Timer.builder(CONSUME_AGE_TIMER)
+            .tag("pipeline",         pipeline)
+            .tag("origin_service",   originService)
+            .tag("consumer_service", consumerService)
+            .tag("this_topic",       thisTopic)
+            .register(r)
+            .record(Math.max(0L, ageMs), TimeUnit.MILLISECONDS);
     }
 
     /** Test-only: stop the server, close the registry, and reset all state. */

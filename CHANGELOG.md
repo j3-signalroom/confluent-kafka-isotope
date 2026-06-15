@@ -7,6 +7,7 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 ## [0.14.00.000] - TBD
 ### Added
 - Issues[`#102`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/102)
+- Issues[`#106`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/106)
 
 ### Changed
 - Issues[`#100`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/100)
@@ -15,7 +16,7 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 ## [0.13.00.000] - 2026-06-11
 ### Added
 - Issues[`#92`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/92)
-- Issues[`#99`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/99)
+- Issues[`#98`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/98)
 
 ### Changed
 - Issues[`#94`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/94)
