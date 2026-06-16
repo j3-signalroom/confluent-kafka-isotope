@@ -32,7 +32,7 @@ Kafka topics become the connective tissue between services, while Kafka Intercep
   - [**4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**](#46-stateless-reports-via-micrometer--prometheusgrafana-optional)
     - [**4.6.1 Enabling the exporter**](#461-enabling-the-exporter)
     - [**4.6.2 The three reports as PromQL**](#462-the-three-reports-as-promql)
-    - [**4.6.3 Consume-side meters (terminal consumers)**](#463-consume-side-meters-terminal-consumers)
+    - [**4.6.3 Consume-side meters**](#463-consume-side-meters)
     - [**4.6.4 What stays in Flink — and two deliberate gaps**](#464-what-stays-in-flink--and-two-deliberate-gaps)
 - [**5.0 Resources**](#50-resources)
 <!-- tocstop -->
@@ -515,7 +515,7 @@ sum by (pipeline, origin_service, this_service, this_topic) (increase(isotope_ho
 sum by (pipeline, this_topic, hop_count) (increase(isotope_hop_records_total[1m]))
 ```
 
-#### **4.6.3 Consume-side meters (terminal consumers)**
+#### **4.6.3 Consume-side meters**
 
 The three meters above all come from the **produce** side — the interceptor on `send()`. The **consume** side adds three more. Two — the edge counter and the time-to-consume latency — are emitted by [`IsotopeContext.recordConsume`](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java) right beside the consume-edge marker it writes to `isotope_consume_edge_markers`. The third, `isotope.consume.age`, is emitted **once per consumed record on whichever path the consumer takes**: continuing consumers report it from the **adoption path** ([`IsotopeContext.adoptFromRecord(record, service)`](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java)), and terminal consumers — which never adopt — report it from the **marker path** (`recordConsume`, guarded on `current() == null` so a stage that does both, like `hop`, never double-counts). So age fires on every consuming stage: `hop` via adoption, the terminal `consume` / `ship` stages via the marker. Same gating — no-op unless the exporter is started.
 
