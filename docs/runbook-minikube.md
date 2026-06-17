@@ -60,6 +60,19 @@ This installs cert-manager, the Confluent Flink Kubernetes Operator, CMF
 (Confluent Manager for Apache Flink), creates the `dev-local` Flink environment,
 and deploys a `cp-flink` **session cluster** (Flink 2.1.2) with 8 task slots.
 
+> **CMF license.** The `cp-cmf` image ships with a date-locked trial license. Once
+> it expires, the CMF pod `CrashLoopBackOff`s on startup (`LicenseInitiator` throws)
+> and `make flink-up` fails at the CMF readiness wait. To run past expiry, supply a
+> Confluent license via a secret and point `CMF_LICENSE_SECRET` at it:
+>
+> ```bash
+> kubectl create secret generic confluent-license-for-cmf -n confluent \
+>   --from-file=license.txt=/path/to/license.txt   # key MUST be license.txt
+> make flink-up CMF_LICENSE_SECRET=confluent-license-for-cmf
+> ```
+>
+> Export `CMF_LICENSE_SECRET` in your shell to make plain `make flink-up` pick it up.
+
 ## 3. Port-forward Kafka
 
 ```bash
@@ -164,3 +177,9 @@ are only needed for the SQL report topics.
   died — re-run it and confirm `localhost:30092` / `localhost:8081` are live.
 - **Control Center's Flink tab is blank.** CMF proxy connectivity —
   `make cmf-proxy-inject` (and `make cmf-proxy-logs` to debug).
+- **`make flink-up` times out waiting for the CMF pod / CMF `CrashLoopBackOff`.**
+  Check `kubectl logs -n confluent -l app.kubernetes.io/name=confluent-manager-for-apache-flink`.
+  If you see `Trial license ... expired` / `LicenseInitiator ... Constructor threw exception`,
+  the image's embedded trial license has expired — supply your own via
+  `CMF_LICENSE_SECRET` (see the CMF license note in [step 2](#2-flink)). Wiping the
+  CMF PVC does **not** reset it; the expiry is baked into the image.
