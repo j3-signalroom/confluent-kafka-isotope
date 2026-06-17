@@ -46,6 +46,12 @@ FLINK_RBAC_MANIFEST ?= k8s/base/flink-rbac.yaml
 CERT_MANAGER_VER    ?= v1.18.2
 CMF_VER             ?= 2.3.1
 CMF_ENV_NAME        ?= dev-local
+# CMF's embedded trial license is date-locked and expires. To run past expiry,
+# create a secret holding your Confluent license (key MUST be license.txt):
+#   kubectl create secret generic confluent-license-for-cmf -n $(NAMESPACE) \
+#     --from-file=license.txt=/path/to/license.txt
+# then set CMF_LICENSE_SECRET to its name (env var or `make ... CMF_LICENSE_SECRET=...`).
+CMF_LICENSE_SECRET  ?=
 
 # Optional metrics showcase (Prometheus + Grafana) — see k8s/monitoring/README.md
 MONITORING_MANIFEST ?= k8s/monitoring
@@ -587,10 +593,15 @@ cmf-install: ## Install CMF v$(CMF_VER) — requires Confluent Flink Operator to
 	@echo "→ Installing Confluent Manager for Apache Flink (CMF) v$(CMF_VER)..."
 	@helm repo add confluentinc https://packages.confluent.io/helm 2>/dev/null || true
 	helm repo update
+ifeq ($(strip $(CMF_LICENSE_SECRET)),)
+	@echo "⚠ No CMF_LICENSE_SECRET set — relying on the image's embedded trial license."
+	@echo "  If the trial has expired, CMF will CrashLoopBackOff; see the CMF_LICENSE_SECRET notes in the Makefile."
+endif
 	helm upgrade --install cmf confluentinc/confluent-manager-for-apache-flink \
 		--version "~$(CMF_VER)" \
 		--namespace $(NAMESPACE) \
-		--set cmf.sql.production=false
+		--set cmf.sql.production=false \
+		$(if $(strip $(CMF_LICENSE_SECRET)),--set license.secretRef=$(CMF_LICENSE_SECRET),)
 	@echo "→ Waiting for CMF pod to be ready (timeout 3m)..."
 	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=confluent-manager-for-apache-flink -n $(NAMESPACE) --timeout=180s
 	@echo "✔ CMF v$(CMF_VER) installed."
