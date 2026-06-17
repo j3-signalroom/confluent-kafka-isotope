@@ -164,7 +164,7 @@ if [ "${create_action}" = true ]; then
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/cc-cli-env.sh" || print_warn "cc-cli-env.sh exited non-zero (see above)"
 
-    terraform graph | dot -Tpng > "$TERRAFORM_DIR/terraform.png"
+    terraform graph | dot -Tpng > "../docs/terraform.png"
 
     echo
     print_info "Next step — drive the 4-stage demo (see README § 4.5):"
