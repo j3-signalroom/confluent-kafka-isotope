@@ -34,6 +34,7 @@ Kafka topics become the connective tissue between services, while Kafka Intercep
     - [**4.6.2 The three reports as PromQL**](#462-the-three-reports-as-promql)
     - [**4.6.3 Consume-side meters**](#463-consume-side-meters)
     - [**4.6.4 What stays in Flink — and two deliberate gaps**](#464-what-stays-in-flink--and-two-deliberate-gaps)
+    - [**4.6.5 One-command showcase: Prometheus + Grafana on Minikube**](#465-one-command-showcase-prometheus--grafana-on-minikube)
 - [**5.0 Resources**](#50-resources)
 <!-- tocstop -->
 
@@ -182,7 +183,9 @@ app/                                    isotope JVM library + demo CLI + tests
                                         reporting headers on send()
     IsotopeMetrics.java                 optional Micrometer/Prometheus exporter
                                         for the 3 stateless reports (§ 4.6)
-    App.java                            demo CLI — send / hop / consume / sink modes
+    App.java                            demo CLI — pipeline-position verbs
+                                        (place / enrich / fulfill / ship) + generic
+                                        send / hop / consume / sink modes
   src/test/java/.../                    IsotopeCodecTest, IsotopeContextRecordConsumeTest
                                         (no broker needed)
   src/integrationTest/java/.../         BrokerSmokeIT, ProducerInterceptorIT,
@@ -200,6 +203,14 @@ k8s/base/                               CFK manifests
   confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
   flink-basic-deployment.yaml           cp-flink session cluster + CMF
   flink-rbac.yaml                       RBAC for the cp-flink operator
+k8s/monitoring/                         optional metrics showcase (§ 4.6.5) — `make metrics-up`
+  00-namespace.yaml                     dedicated 'monitoring' namespace
+  10-prometheus.yaml                    Prometheus pod/Service; scrapes host stages
+                                        via host.minikube.internal:9410/9411/9412
+  20-grafana.yaml                       Grafana pod/Service; auto-provisioned datasource
+                                        + 8-panel dashboard for the 6 produce/consume meters
+  kustomization.yaml                    `kubectl apply -k k8s/monitoring`
+  README.md                             runbook + troubleshooting
 scripts/
   port-forward-kafka.sh                 localhost:30092 → Kafka, localhost:8081 → SR
   port-forward-taskmanager.sh           Flink TaskManager web UI forward
@@ -236,7 +247,8 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
                                         Kafka + SR API key/secret outputs (sensitive)
   terraform.png                         rendered resource graph (embedded in § 4.5)
 Makefile                                cp-up / flink-up / kafka-pf-up / flink-reports-up /
-                                        cc-flink-reports-up / cc-flink-reports-down / ...
+                                        cc-flink-reports-up / cc-flink-reports-down /
+                                        metrics-up / metrics-down / metrics-delete / ...
 ```
 
 ## **4.0 Running**
@@ -554,6 +566,26 @@ Moving these out isn't free — two columns the Flink reports carry have **no Pr
 So the line between "metric" and "Flink job" runs *through* a couple of these reports, not cleanly between them — which is exactly why the move is opt-in rather than a wholesale replacement.
 
 **Why `latency_percentiles_1m` is NOT in this list.** Percentiles *can* be served by Prometheus — but only via a *classic* histogram (`publishPercentileHistogram()` + `histogram_quantile()`), whose accuracy is **bucket-bound, not adaptive**: error is the width of fixed, pre-chosen buckets, so the tail (p99) is only as good as your bucket layout, and covering a range finely means emitting hundreds of `le` series per tag combo. Prometheus's adaptive answer — *native histograms* (exponential buckets, the closest thing to a [T-Digest](https://www.sciencedirect.com/science/article/pii/S2665963820300403)) — isn't emittable through Micrometer yet (experimental, protobuf-only as of late 2024). So the [T-Digest PTF](scripts/flink/sql/cp/70_latency_percentiles_report.fql) wins on tail accuracy **and** scales better: its sketch is bounded (~few KB/key) and mergeable, whereas at production volume a Micrometer percentile-histogram's `le`-bucket cardinality grows with the range you need to resolve. The built-in Flink `PERCENTILE` aggregate (exact, pure SQL) is *also* the wrong call at high volume — it retains every value in the window — so percentiles stay a **T-Digest sketch PTF** on purpose (see that file's header for the full rationale). This is a 3-Micrometer / 4-Flink split, not 4/3.
+
+#### **4.6.5 One-command showcase: Prometheus + Grafana on Minikube**
+
+To *see* these meters instead of `curl`-ing `/metrics`, there's an optional, self-contained stack under [k8s/monitoring/](k8s/monitoring/) — Prometheus + Grafana as Minikube pods, with the datasource and a dashboard (all six produce/consume signals from §4.6.2–4.6.3) **auto-provisioned**, so it opens straight to a populated board with no login.
+
+The pipeline stages run on your **host** via `./gradlew :app:run`, not in-cluster — so Prometheus scrapes back across the Minikube→host bridge `host.minikube.internal`, one host port per stage (`enrich`→9410, `fulfill`→9411, `ship`→9412; edit [k8s/monitoring/10-prometheus.yaml](k8s/monitoring/10-prometheus.yaml) to change the mapping).
+
+```bash
+make metrics-up        # deploy, wait, port-forward Prometheus+Grafana, open Grafana
+
+# In separate terminals, run each stage on its mapped port (metrics on):
+./gradlew :app:run -Dmetrics.prometheus.enabled=true -Dmetrics.prometheus.port=9410 \
+  -Disotope.consume.from=latest --args="enrich"     # fulfill→9411, ship→9412
+# …then drive traffic with `place` so the meters move.
+
+make metrics-down      # stop the port-forwards (pods stay up)
+make metrics-delete    # tear the whole showcase down
+```
+
+Confirm scraping at Prometheus → [Status → Targets](http://localhost:9090/targets) (a target is `DOWN` until you start its stage — expected). Full runbook and troubleshooting: [k8s/monitoring/README.md](k8s/monitoring/README.md).
 
 ## **5.0 Resources**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)

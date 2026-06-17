@@ -1,0 +1,8 @@
+# One-shot apply for the Isotope metrics showcase:
+#   kubectl apply -k k8s/monitoring
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 00-namespace.yaml
+  - 10-prometheus.yaml
+  - 20-grafana.yaml
