@@ -183,7 +183,9 @@ app/                                    isotope JVM library + demo CLI + tests
                                         reporting headers on send()
     IsotopeMetrics.java                 optional Micrometer/Prometheus exporter
                                         for the 3 stateless reports (§ 4.6)
-    App.java                            demo CLI — send / hop / consume / sink modes
+    App.java                            demo CLI — pipeline-position verbs
+                                        (place / enrich / fulfill / ship) + generic
+                                        send / hop / consume / sink modes
   src/test/java/.../                    IsotopeCodecTest, IsotopeContextRecordConsumeTest
                                         (no broker needed)
   src/integrationTest/java/.../         BrokerSmokeIT, ProducerInterceptorIT,
@@ -201,6 +203,14 @@ k8s/base/                               CFK manifests
   confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
   flink-basic-deployment.yaml           cp-flink session cluster + CMF
   flink-rbac.yaml                       RBAC for the cp-flink operator
+k8s/monitoring/                         optional metrics showcase (§ 4.6.5) — `make metrics-up`
+  00-namespace.yaml                     dedicated 'monitoring' namespace
+  10-prometheus.yaml                    Prometheus pod/Service; scrapes host stages
+                                        via host.minikube.internal:9410/9411/9412
+  20-grafana.yaml                       Grafana pod/Service; auto-provisioned datasource
+                                        + 8-panel dashboard for the 6 produce/consume meters
+  kustomization.yaml                    `kubectl apply -k k8s/monitoring`
+  README.md                             runbook + troubleshooting
 scripts/
   port-forward-kafka.sh                 localhost:30092 → Kafka, localhost:8081 → SR
   port-forward-taskmanager.sh           Flink TaskManager web UI forward
@@ -237,7 +247,8 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
                                         Kafka + SR API key/secret outputs (sensitive)
   terraform.png                         rendered resource graph (embedded in § 4.5)
 Makefile                                cp-up / flink-up / kafka-pf-up / flink-reports-up /
-                                        cc-flink-reports-up / cc-flink-reports-down / ...
+                                        cc-flink-reports-up / cc-flink-reports-down /
+                                        metrics-up / metrics-down / metrics-delete / ...
 ```
 
 ## **4.0 Running**

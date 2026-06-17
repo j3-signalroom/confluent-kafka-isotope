@@ -21,6 +21,7 @@ out/
 .gradle/
 gradle-app.setting
 !gradle-wrapper.jar
+gradle.properties                        # Gradle project properties
 
 # Ignore Kotlin plugin data
 .kotlin
