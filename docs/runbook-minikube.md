@@ -120,8 +120,8 @@ make metrics-up          # optional: Prometheus + Grafana for the stateless mete
 ```
 
 The metrics showcase has its own runbook —
-[k8s/monitoring/README.md](../k8s/monitoring/README.md) (and
-[README §4.6.5](../README.md#465-one-command-showcase-prometheus--grafana-on-minikube)).
+[k8s/monitoring/README.md](../k8s/monitoring/README.md) (and the meter/PromQL
+reference in [docs/metrics.md](metrics.md)).
 Stop the background port-forwards with `make c3-stop` / `make flink-ui-stop` /
 `make metrics-down`.
 

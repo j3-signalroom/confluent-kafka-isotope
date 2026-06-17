@@ -36,7 +36,7 @@ kubectl wait --for=condition=available deploy/prometheus deploy/grafana \
 Prereq: Kafka reachable from the host (`make kafka-pf-up`, or the CCAF env via
 `scripts/cc-app-run.sh`). Launch each stage in its own terminal on its mapped
 port. `-Disotope.consume.from=latest` skips the replay backlog so latency/age
-read steady-state — see README §4.6.1.
+read steady-state — see [docs/metrics.md](../../docs/metrics.md#enabling-the-exporter).
 
 ```bash
 # Local CP via gradle:
@@ -84,5 +84,5 @@ kubectl delete -k k8s/monitoring
   drive some traffic (step 2). Until a stage produces/consumes, `/metrics` has no
   `isotope_*` series.
 - **Huge latency/age values.** Backlog replay, not steady-state — use
-  `-Disotope.consume.from=latest` (README §4.6.1).
+  `-Disotope.consume.from=latest` ([docs/metrics.md](../../docs/metrics.md#enabling-the-exporter)).
   
