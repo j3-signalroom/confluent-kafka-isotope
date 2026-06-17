@@ -1,0 +1,9 @@
+# Dedicated namespace for the optional metrics showcase (Prometheus + Grafana).
+# Kept separate from `confluent` so it can be torn down independently and never
+# interferes with the Kafka/Flink workloads.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: isotope-observability

@@ -47,10 +47,15 @@ CERT_MANAGER_VER    ?= v1.18.2
 CMF_VER             ?= 2.3.1
 CMF_ENV_NAME        ?= dev-local
 
+# Optional metrics showcase (Prometheus + Grafana) — see k8s/monitoring/README.md
+MONITORING_MANIFEST ?= k8s/monitoring
+
 # Ports for port-forwarding to local machine (Control Center, CMF, Flink UI)
 C3_PORT             ?= 9021
 FLINK_UI_PORT       ?= 8081
 CMF_PORT            ?= 8080
+GRAFANA_PORT        ?= 3000
+PROMETHEUS_PORT     ?= 9090
 
 SHELL               := /bin/bash
 .SHELLFLAGS         := -eu -o pipefail -c
@@ -361,6 +366,53 @@ kafka-pf-up: ## Port-forward the CFK Kafka external listener NodePorts to localh
 .PHONY: kafka-pf-down
 kafka-pf-down: ## Stop the background Kafka port-forwards
 	@$(mkfile_dir)scripts/port-forward-kafka.sh --stop
+
+# ------------------------------------------------------------------------------
+# Metrics showcase — Prometheus + Grafana (optional; see k8s/monitoring/README.md)
+# ------------------------------------------------------------------------------
+.PHONY: metrics-up
+metrics-up: ## Deploy Prometheus+Grafana, port-forward both in the background, and open Grafana
+	@echo "→ Deploying metrics showcase to the 'monitoring' namespace"
+	@kubectl apply -k $(MONITORING_MANIFEST)
+	@echo "→ Waiting for Prometheus and Grafana to become available"
+	@kubectl wait --for=condition=available deploy/prometheus deploy/grafana \
+		-n monitoring --timeout=120s
+	@for svc in prometheus:$(PROMETHEUS_PORT) grafana:$(GRAFANA_PORT); do \
+		name=$${svc%%:*}; port=$${svc##*:}; \
+		if (lsof -iTCP:$$port -sTCP:LISTEN -t >/dev/null 2>&1) || \
+		   (ss -tlnp 2>/dev/null | grep -q ":$$port "); then \
+			echo "→ Port $$port already in use — assuming $$name is already forwarded."; \
+		else \
+			kubectl port-forward -n monitoring svc/$$name $$port:$$port >/dev/null 2>&1 & \
+			echo $$! > /tmp/isotope-$$name-pf.pid; \
+			sleep 1; \
+			if kill -0 $$(cat /tmp/isotope-$$name-pf.pid) 2>/dev/null; then \
+				echo "✔ $$name forwarded to http://localhost:$$port (PID $$(cat /tmp/isotope-$$name-pf.pid))"; \
+			else \
+				echo "✘ $$name port-forward failed to start."; rm -f /tmp/isotope-$$name-pf.pid; exit 1; \
+			fi; \
+		fi; \
+	done
+	@echo "→ Prometheus targets: http://localhost:$(PROMETHEUS_PORT)/targets"
+	@echo "→ Grafana dashboard:  http://localhost:$(GRAFANA_PORT)  (run the host stages — see k8s/monitoring/README.md)"
+	@$(OPEN_CMD) http://localhost:$(GRAFANA_PORT)
+
+.PHONY: metrics-down
+metrics-down: ## Stop the background Prometheus/Grafana port-forwards (leaves the pods running)
+	@for name in prometheus grafana; do \
+		if [ -f /tmp/isotope-$$name-pf.pid ] && kill -0 $$(cat /tmp/isotope-$$name-pf.pid) 2>/dev/null; then \
+			kill $$(cat /tmp/isotope-$$name-pf.pid); \
+			echo "✔ $$name port-forward stopped."; \
+		else \
+			echo "→ No active $$name port-forward found."; \
+		fi; \
+		rm -f /tmp/isotope-$$name-pf.pid; \
+	done
+
+.PHONY: metrics-delete
+metrics-delete: metrics-down ## Tear down the entire metrics showcase (pods, configmaps, namespace)
+	@kubectl delete -k $(MONITORING_MANIFEST) --ignore-not-found
+	@echo "✔ Metrics showcase removed."
 
 # ------------------------------------------------------------------------------
 # Phase 6: Apache Flink
