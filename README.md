@@ -32,7 +32,7 @@ Kafka topics become the connective tissue between services, while Kafka Intercep
   - [**4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**](#46-stateless-reports-via-micrometer--prometheusgrafana-optional)
     - [**4.6.1 Enabling the exporter**](#461-enabling-the-exporter)
     - [**4.6.2 The three reports as PromQL**](#462-the-three-reports-as-promql)
-    - [**4.6.3 Consume-side meters (terminal consumers)**](#463-consume-side-meters-terminal-consumers)
+    - [**4.6.3 Consume-side meters**](#463-consume-side-meters)
     - [**4.6.4 What stays in Flink — and two deliberate gaps**](#464-what-stays-in-flink--and-two-deliberate-gaps)
 - [**5.0 Resources**](#50-resources)
 <!-- tocstop -->
@@ -138,7 +138,7 @@ flowchart TB
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/setup-confluent-flink.tf<br/>23 × confluent_flink_statement"]
+            TFSQL["terraform/setup-confluent-flink.tf<br/>25 × confluent_flink_statement"]
             JCC["7 × INSERT INTO TUMBLE(1 MIN)<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
@@ -156,7 +156,7 @@ flowchart TB
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator<br/>Makefile: cp-up · flink-up · kafka-pf-up"]
-        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 23 statements<br/>Makefile: cc-flink-reports-up"]
+        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 25 statements<br/>Makefile: cc-flink-reports-up"]
     end
 
     K8S -. provisions .-> Kafka
@@ -228,10 +228,10 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
   setup-confluent-kafka.tf              Kafka cluster + Kafka API key rotation module
                                         (iac-confluent-api_key_rotation-tf_module)
   setup-confluent-flink.tf              service account + 6 role bindings, compute pool,
-                                        artifact upload, SR API key rotation, and 23 inline
+                                        artifact upload, SR API key rotation, and 25 inline
                                         `confluent_flink_statement` resources: 4 ALTER TABLE
-                                        + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION
-                                        (both PTFs) + 7 INSERT INTO
+                                        + 3 VIEW + 7 sink CREATE TABLE + 2 DROP FUNCTION +
+                                        2 CREATE FUNCTION (both PTFs) + 7 INSERT INTO
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
   terraform.png                         rendered resource graph (embedded in § 4.5)
@@ -369,7 +369,7 @@ The demo *event* topics (`orders.placed`, `orders.enriched`, `orders.fulfilled`)
 
 ### **4.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**
 
-CCAF parallel of [§ 4.4](#44-flink-sql-reports-on-confluent-platform-for-apache-flink-minikube), driven by Terraform under [terraform/](terraform/). One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, 4 pre-created event topics (the three demo topics `orders.placed` / `orders.enriched` / `orders.fulfilled` plus the consume-edge marker topic `isotope_consume_edge_markers`; report sink topics are created on the fly by the Flink `CREATE TABLE` statements — see the comment in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf) for why pre-creating them via `confluent_kafka_topic` would conflict with CCAF's Topic Catalog auto-import), a Flink compute pool, two rotating service-account API key pairs (one for Kafka, one for Schema Registry), the PTF JAR uploaded as a Flink artifact, and 23 long-lived `confluent_flink_statement` resources broken down as **4 ALTER TABLE** (add scalar headers on the event topics) + **3 VIEW** (raw + typed produce + typed consume) + **7 sink CREATE TABLE** + **2 CREATE FUNCTION** (both PTFs — `STUCK_TRACE_PTF` and `LATENCY_PERCENTILES`) + **7 INSERT INTO** streaming jobs. The Terraform shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version, same `iac-confluent-api_key_rotation-tf_module`, same DROP-then-CREATE statement pattern.
+CCAF parallel of [§ 4.4](#44-flink-sql-reports-on-confluent-platform-for-apache-flink-minikube), driven by Terraform under [terraform/](terraform/). One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, 4 pre-created event topics (the three demo topics `orders.placed` / `orders.enriched` / `orders.fulfilled` plus the consume-edge marker topic `isotope_consume_edge_markers`; report sink topics are created on the fly by the Flink `CREATE TABLE` statements — see the comment in [terraform/setup-confluent-kafka.tf](terraform/setup-confluent-kafka.tf) for why pre-creating them via `confluent_kafka_topic` would conflict with CCAF's Topic Catalog auto-import), a Flink compute pool, two rotating service-account API key pairs (one for Kafka, one for Schema Registry), the PTF JAR uploaded as a Flink artifact, and 25 `confluent_flink_statement` resources — 23 long-lived (**4 ALTER TABLE** (add scalar headers on the event topics) + **3 VIEW** (raw + typed produce + typed consume) + **7 sink CREATE TABLE** + **2 CREATE FUNCTION** (both PTFs — `STUCK_TRACE_PTF` and `LATENCY_PERCENTILES`) + **7 INSERT INTO** streaming jobs) plus **2 transient DROP FUNCTION** (the DROP half of the idempotent DROP-then-CREATE for each PTF). The Terraform shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version, same `iac-confluent-api_key_rotation-tf_module`, same DROP-then-CREATE statement pattern.
 
 #### **4.5.1 Provisioning and Deployment commands**
 **Prereqs:**
@@ -399,7 +399,7 @@ The wrapper script ([scripts/deploy-cc-flink-reports.sh](scripts/deploy-cc-flink
 | `confluent_service_account` + 6 role bindings | `isotope-flink-sql-runner` | FlinkDeveloper (org) + ResourceOwner on topic=\* / transactional-id=\* / group=\* / SR subject=\* + Assigner on the service account |
 | `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for 7 INSERTs + ad-hoc SELECTs |
 | `confluent_flink_artifact` | `isotope-flink-udf` | Uploads `ptf/build/libs/isotope-flink-udf.jar` |
-| `confluent_flink_statement` × 23 | (see file) | 4 ALTER TABLE (event-topic scalar headers) + 3 VIEW (raw + typed produce + typed consume) + 7 sink CREATE TABLE + 2 CREATE FUNCTION (both PTFs) + 7 INSERT INTO |
+| `confluent_flink_statement` × 25 | (see file) | 4 ALTER TABLE (event-topic scalar headers) + 3 VIEW (raw + typed produce + typed consume) + 7 sink CREATE TABLE + 2 DROP FUNCTION + 2 CREATE FUNCTION (both PTFs) + 7 INSERT INTO |
 
 **Useful outputs:**
 
@@ -515,7 +515,7 @@ sum by (pipeline, origin_service, this_service, this_topic) (increase(isotope_ho
 sum by (pipeline, this_topic, hop_count) (increase(isotope_hop_records_total[1m]))
 ```
 
-#### **4.6.3 Consume-side meters (terminal consumers)**
+#### **4.6.3 Consume-side meters**
 
 The three meters above all come from the **produce** side — the interceptor on `send()`. The **consume** side adds three more. Two — the edge counter and the time-to-consume latency — are emitted by [`IsotopeContext.recordConsume`](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java) right beside the consume-edge marker it writes to `isotope_consume_edge_markers`. The third, `isotope.consume.age`, is emitted **once per consumed record on whichever path the consumer takes**: continuing consumers report it from the **adoption path** ([`IsotopeContext.adoptFromRecord(record, service)`](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java)), and terminal consumers — which never adopt — report it from the **marker path** (`recordConsume`, guarded on `current() == null` so a stage that does both, like `hop`, never double-counts). So age fires on every consuming stage: `hop` via adoption, the terminal `consume` / `ship` stages via the marker. Same gating — no-op unless the exporter is started.
 
