@@ -105,6 +105,122 @@ These are **net-new signals**, not a port of a Flink report. `isotope_consume_re
 
 > The same **backlog caveat** from [Enabling the exporter](#enabling-the-exporter) applies: `hop` / `consume` / `ship` use a random consumer group with `auto.offset.reset=earliest`, so a fresh stage replays from offset 0 and both `isotope_consume_latency_seconds_sum` and `isotope_consume_age_seconds_sum` then reflect days-old origins, not steady-state. Read the windowed `rate(...sum[1m]) / rate(...count[1m])`, or start with `-Disotope.consume.from=latest`.
 
+## Operational queries (cookbook)
+
+The queries above mirror the three reports. These are the **operational** angles you'd reach for when running the demo or alerting on it — they lean on the `status` label (present on every meter: `success` on the happy path) and on read-time ratios. All are `pipeline`-scoped via `{pipeline=~"$pipeline"}` when used in the provisioned dashboard.
+
+```promql
+# Hop failure ratio per service (0–1) — clamp the denominator so a quiet
+# stage reads 0, not NaN. Grafana: format as "percent (0.0–1.0)".
+  sum by (this_service) (rate(isotope_hop_records_total{status!="success"}[5m]))
+/ clamp_min(sum by (this_service) (rate(isotope_hop_records_total[5m])), 1e-9)
+
+# Hop completion — share of traffic reaching the deepest hop (full pipeline).
+# hop_count="3" is the terminal depth for the orders.* chain.
+  sum(rate(isotope_hop_records_total{hop_count="3"}[5m]))
+/ clamp_min(sum(rate(isotope_hop_records_total[5m])), 1e-9)
+
+# Consumers reading data older than 30s on average — adoption-lag alert.
+( sum by (consumer_service) (rate(isotope_consume_age_seconds_sum[5m]))
+/ sum by (consumer_service) (rate(isotope_consume_age_seconds_count[5m])) ) > 30
+
+# Stage liveness — fires for any stage that emitted no record in the last 2m.
+sum by (this_service) (increase(isotope_hop_records_total[2m])) == 0
+
+# Scrape health — an exporter is down (host stage not running on its port).
+up{job="isotope-stages"} == 0
+
+# Drop-off between adjacent topics — records into enriched vs into fulfilled.
+  sum(rate(isotope_consume_records_total{this_topic="orders.enriched"}[5m]))
+- sum(rate(isotope_consume_records_total{this_topic="orders.fulfilled"}[5m]))
+```
+
+> **Why no `histogram_quantile`?** These are Micrometer `Timer`s exported as `_sum`/`_count`/`_max` — there are **no `_bucket` series**, so percentiles aren't available. Use `rate(_sum)/rate(_count)` for the average and `_max` for the recent worst case (a decaying per-step max, not an all-time high). Enable client-side histograms in the exporter if you need true quantiles.
+
+## Mapping questions to PromQL (Easy → Medium)
+
+What can you actually *ask* these meters? Below, each question carries a verdict:
+
+- ✅ **PromQL** — answerable directly from the meters.
+- 🟡 **PromQL (approx)** — answerable as a bounded-cardinality *aggregate*; the exact, per-trace form stays in Flink (or the record header).
+- 🔴 **Header / Flink** — per-`trace_id` or absence-of-event; **no Prometheus equivalent** (these meters never tag `trace_id` — see [IsotopeMetrics.java](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java)).
+
+### Easy — single record, single trace
+
+Every question here is about **one** record or trace. Prometheus aggregates away identity, so the answer lives on the record's `isotope` header (inspect the record) or in Flink's per-trace reports — **not** in these meters.
+
+| Question | Verdict | Where to look |
+|---|---|---|
+| Did my record get tagged? | 🔴 | The `isotope` header on the record itself — presence = tagged. |
+| What's the origin of this trace? | 🔴 | `origin_service` / `origin_ts` fields in the header. |
+| How many hops has *this* record taken? | 🔴 | The header's hop list length. (The *distribution* across all records is ✅ — see Easy→Medium.) |
+| Where did this trace go? | 🔴 | Per-trace path = Flink `bipartite_topology`, or replay the header trail. |
+| Did the trace ID survive a consume-then-produce hop? | 🔴 | App/Flink per-trace; a counter can't follow one `trace_id`. |
+| Which pipeline does this trace belong to? | 🔴 | Header `pipeline` field. (`pipeline` is a meter *label*, but can't isolate one trace.) |
+
+### Easy → Medium — single per-minute aggregates
+
+This is the meters' sweet spot: bounded-cardinality scalar aggregation, windowed at query time.
+
+```promql
+# ✅ End-to-end latency intake → shipping over the last minute (origin→consume)
+  sum(rate(isotope_consume_latency_seconds_sum{consumer_service="shipping-notification-service"}[1m]))
+/ sum(rate(isotope_consume_latency_seconds_count{consumer_service="shipping-notification-service"}[1m]))
+
+# 🟡 The actual service graph — produce edges + consume edges (the edge *sets*;
+#    the full per-trace stitch is Flink's bipartite_topology)
+sum by (this_service, this_topic)   (increase(isotope_hop_latency_seconds_count[1m]))   # produce side
+sum by (this_topic, consumer_service)(increase(isotope_consume_records_total[1m]))       # consume side
+
+# 🟡 Records per topic per minute — proxy for "distinct traces"; a counter can't
+#    COUNT(DISTINCT trace_id), so this counts records, not deduped traces (→ Flink)
+sum by (this_topic) (increase(isotope_hop_records_total[1m]))
+
+# ✅ Hop-count distribution — long tails here = retry storms
+sum by (hop_count) (increase(isotope_hop_records_total[1m]))
+
+# ✅ Traces hitting the 32-hop ceiling (Isotope.MAX_HOPS). The eviction *marker*
+#    itself is an absence-of-event → Flink; the count at the ceiling is metric-native
+sum (increase(isotope_hop_records_total{hop_count="32"}[5m]))
+
+# 🟡 Records each pipeline carries, minute by minute (records, not distinct traces)
+sum by (pipeline) (increase(isotope_hop_records_total[1m]))
+```
+
+### Medium — cross-window deltas, anomalies, multi-report joins
+
+Cross-window deltas and "newly appeared" detection are a Prometheus *strength*; per-trace coverage and stuck-trace detection are where it hands off to Flink.
+
+```promql
+# ✅ Did latency get worse after the 2pm deploy? — now vs. before, via offset
+  ( sum(rate(isotope_hop_latency_seconds_sum[5m])) / sum(rate(isotope_hop_latency_seconds_count[5m])) )
+- ( sum(rate(isotope_hop_latency_seconds_sum[5m] offset 2h)) / sum(rate(isotope_hop_latency_seconds_count[5m] offset 2h)) )
+
+# 🟡 What % of intake records made it through to the shipping consumer?
+#    Ratio of rates — NOT a per-trace coverage join (that's Flink's coverage report)
+  sum(rate(isotope_consume_records_total{consumer_service="shipping-notification-service"}[5m]))
+/ sum(rate(isotope_hop_records_total{this_topic="orders.placed"}[5m]))
+
+# 🟡 Where are records being dropped? — drop-off between adjacent edges.
+#    Pinpointing *which* traces dropped = Flink coverage
+  sum(rate(isotope_hop_records_total{this_topic="orders.enriched"}[5m]))
+- sum(rate(isotope_hop_records_total{this_topic="orders.fulfilled"}[5m]))
+
+# ✅ When a new service goes live, when does it first appear in the topology?
+#    Series present now but absent an hour ago
+  group by (this_service) (isotope_hop_latency_seconds_count)
+unless
+  group by (this_service) (isotope_hop_latency_seconds_count offset 1h)
+```
+
+| Question | Verdict | Why |
+|---|---|---|
+| Are some traces duplicated at the terminal sink? | 🔴 | Dedup is per-`trace_id`; a counter can hint (consume > produce) but can't name the dupes → Flink. |
+| Which traces went in but never came out within 60s? | 🔴 | Absence-of-event per trace = Flink `stuck_trace_alerts`; Prometheus can't assert a *missing* series. |
+| Where did each stuck trace last get seen? | 🔴 | Per-trace state → Flink / the header trail. |
+
+The pattern: **aggregates and time-deltas → PromQL; identity, dedup, and absence → Flink.** That boundary is the same one [IsotopeMetrics.java](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java) draws (3 metrics-native reports, 4 stay in Flink), and the next section spells out the two columns that can never cross it.
+
 ## What stays in Flink — and two deliberate gaps
 
 Moving these out isn't free — two columns the Flink reports carry have **no Prometheus equivalent**, and both are documented in [IsotopeMetrics.java](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java):

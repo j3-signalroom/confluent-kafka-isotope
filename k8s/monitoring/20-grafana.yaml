@@ -164,6 +164,50 @@ data:
               "legendFormat": "{{consumer_service}} ← {{this_topic}}"
             }
           ]
+        },
+        {
+          "type": "row", "title": "Health & ratios (operational)",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }
+        },
+        {
+          "type": "timeseries", "title": "hop failure ratio (5m) — non-success / total",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 27 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (this_service) (rate(isotope_hop_records_total{status!=\"success\",pipeline=~\"$pipeline\"}[5m])) / clamp_min(sum by (this_service) (rate(isotope_hop_records_total{pipeline=~\"$pipeline\"}[5m])), 1e-9)",
+              "legendFormat": "{{this_service}}"
+            }
+          ]
+        },
+        {
+          "type": "stat", "title": "hop completion — share reaching hop 3",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 27 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+          "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(isotope_hop_records_total{hop_count=\"3\",pipeline=~\"$pipeline\"}[5m])) / clamp_min(sum(rate(isotope_hop_records_total{pipeline=~\"$pipeline\"}[5m])), 1e-9)",
+              "legendFormat": "completion"
+            }
+          ]
+        },
+        {
+          "type": "timeseries", "title": "consume throughput — records/min by consumer",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 27 },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (consumer_service) (increase(isotope_consume_records_total{pipeline=~\"$pipeline\"}[1m]))",
+              "legendFormat": "{{consumer_service}}"
+            }
+          ]
         }
       ]
     }
