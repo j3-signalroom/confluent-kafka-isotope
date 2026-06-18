@@ -6,8 +6,8 @@ metadata:
 spec:
   dataVolumeCapacity: 10G
   image:
-    application: docker.io/confluentinc/cp-server:8.2.0
-    init: confluentinc/confluent-init-container:3.1.0
+    application: docker.io/confluentinc/cp-server:8.3.0
+    init: confluentinc/confluent-init-container:3.2.2
   replicas: 1
   # Removed metricsClient — circular dependency: C3 isn't up when KRaftController initializes
 ---
@@ -19,8 +19,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-server:8.2.0
-    init: confluentinc/confluent-init-container:3.1.0
+    application: confluentinc/cp-server:8.3.0
+    init: confluentinc/confluent-init-container:3.2.2
   dataVolumeCapacity: 100Gi
   configOverrides:
     server:
@@ -61,8 +61,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-schema-registry:8.2.0
-    init: confluentinc/confluent-init-container:3.1.0
+    application: confluentinc/cp-schema-registry:8.3.0
+    init: confluentinc/confluent-init-container:3.2.2
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: Connect
@@ -72,8 +72,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-server-connect:8.2.0
-    init: confluentinc/confluent-init-container:3.1.0
+    application: confluentinc/cp-server-connect:8.3.0
+    init: confluentinc/confluent-init-container:3.2.2
   configOverrides:
     server:
       # Single-broker dev: Connect internal topics must use rf=1
@@ -92,8 +92,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-ksqldb-server:8.2.0
-    init: confluentinc/confluent-init-container:3.1.0
+    application: confluentinc/cp-ksqldb-server:8.3.0
+    init: confluentinc/confluent-init-container:3.2.2
   dataVolumeCapacity: 10Gi
 ---
 apiVersion: platform.confluent.io/v1beta1
@@ -104,8 +104,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-kafka-rest:8.2.0
-    init: confluentinc/confluent-init-container:3.1.0
+    application: confluentinc/cp-kafka-rest:8.3.0
+    init: confluentinc/confluent-init-container:3.2.2
   dependencies:
     schemaRegistry:
       url: http://schemaregistry.confluent.svc.cluster.local:8081
@@ -118,8 +118,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-enterprise-control-center-next-gen:2.2.0
-    init: confluentinc/confluent-init-container:3.1.0
+    application: confluentinc/cp-enterprise-control-center-next-gen:2.5.0
+    init: confluentinc/confluent-init-container:3.2.2
   dataVolumeCapacity: 10Gi
   dependencies:
     schemaRegistry:
@@ -146,24 +146,29 @@ spec:
       - confluent.controlcenter.command.topic.replication=1
       - confluent.metrics.topic.replication=1
       - confluent.monitoring.interceptor.topic.replication=1
-      # CMF integration: enables the Flink tab in C3 next-gen 2.2.
+      # CMF integration: enables the Flink tab in C3 next-gen.
       # confluent.controlcenter.cmf.enable=true activates the Flink UI.
       # confluent.controlcenter.cmf.url points to the CMF service.
-      # Note: C3 2.2 hardcodes localhost:8080 regardless of cmf.url — run:
+      # Note: C3 next-gen 2.2 hardcoded localhost:8080 regardless of cmf.url,
+      # requiring the socat workaround below. C3 2.5 added GA Flink SQL +
+      # multi-k8s support; the release notes don't confirm the hardcoding is
+      # fixed, so re-verify on 2.5 — if the Flink tab reaches cmf.url directly,
+      # the proxy sidecar is no longer needed. Until verified, run:
       #   make cmf-proxy-inject
       # to inject a socat sidecar that proxies localhost:8080 → cmf-service:80.
       - confluent.controlcenter.cmf.enable=true
       - confluent.controlcenter.cmf.url=http://cmf-service.confluent.svc.cluster.local:80
-  # NOTE: cp-enterprise-control-center-next-gen:2.2.0 ignores
-  # confluent.controlcenter.flink.rest.endpoint and hardcodes localhost:8080
+  # NOTE: cp-enterprise-control-center-next-gen:2.2.0 ignored
+  # confluent.controlcenter.flink.rest.endpoint and hardcoded localhost:8080
   # as its CMF target. CFK's ControlCenter CRD does not support podTemplate.sidecars,
   # so a socat proxy sidecar must be injected manually after deployment:
   #   make cmf-proxy-inject
   # This pauses CFK reconciliation and patches the StatefulSet directly.
+  # Re-verify on 2.5.0: if the Flink tab honors cmf.url, this is unnecessary.
   services:
     prometheus:
-      image: confluentinc/cp-enterprise-prometheus:2.2.0
+      image: confluentinc/cp-enterprise-prometheus:2.5.0
       pvc:
         dataVolumeCapacity: 10Gi
     alertmanager:
-      image: confluentinc/cp-enterprise-alertmanager:2.2.0
+      image: confluentinc/cp-enterprise-alertmanager:2.5.0
