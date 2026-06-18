@@ -378,6 +378,10 @@ kafka-pf-down: ## Stop the background Kafka port-forwards
 # ------------------------------------------------------------------------------
 .PHONY: metrics-up
 metrics-up: ## Deploy Prometheus+Grafana, port-forward both in the background, and open Grafana
+	@if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then \
+		echo "✘ Minikube is not running — cannot deploy the metrics showcase. Run 'make minikube-start' first."; \
+		exit 1; \
+	fi
 	@echo "→ Deploying metrics showcase to the 'monitoring' namespace"
 	@kubectl apply -k $(MONITORING_MANIFEST)
 	@echo "→ Waiting for Prometheus and Grafana to become available"

@@ -185,6 +185,23 @@ spec:
       labels:
         app: grafana
     spec:
+      # Grafana provisions its datasource and dashboard at startup and immediately
+      # queries Prometheus. If it lands before CoreDNS/Prometheus are serving, the
+      # dashboard fails with "lookup prometheus ... no such host". Block startup
+      # until Prometheus answers /-/ready so that race can't happen.
+      initContainers:
+        - name: wait-for-prometheus
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Prometheus to become ready..."
+              until wget -q -T 3 -O /dev/null http://prometheus:9090/-/ready 2>/dev/null; do
+                echo "  prometheus not ready yet — retrying in 2s"
+                sleep 2
+              done
+              echo "Prometheus is ready — starting Grafana."
       containers:
         - name: grafana
           image: grafana/grafana:11.2.0
