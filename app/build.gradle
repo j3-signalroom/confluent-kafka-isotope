@@ -7,6 +7,17 @@ repositories {
     mavenCentral()
     // kafka-protobuf-serializer + its transitive Confluent deps live here.
     maven { url 'https://packages.confluent.io/maven/' }
+    // The isotope tracing library is published from j3-signalroom/kafka-isotope.
+    // GitHub Packages requires authentication even for public artifacts, so
+    // provide gpr.user/gpr.key (or GITHUB_ACTOR/GITHUB_TOKEN) to resolve it.
+    maven {
+        name = 'IsotopeGitHubPackages'
+        url = 'https://maven.pkg.github.com/j3-signalroom/kafka-isotope'
+        credentials {
+            username = project.findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
+            password = project.findProperty('gpr.key')  ?: System.getenv('GITHUB_TOKEN')
+        }
+    }
 }
 
 sourceSets {
@@ -24,25 +35,27 @@ configurations {
 }
 
 dependencies {
+    // The isotope tracing library, published from j3-signalroom/kafka-isotope.
+    // The demo is a reference consumer. isotope-core is the propagation;
+    // isotope-metrics is the optional Prometheus exporter (App starts it via
+    // PrometheusIsotopeMetrics.start()). Micrometer, Jackson and SLF4J arrive
+    // transitively through these, so the demo no longer declares them directly.
+    implementation 'ai.signalroom:isotope-core:0.16.0'
+    implementation 'ai.signalroom:isotope-metrics:0.16.0'
+
     implementation libs.kafka.clients
-    implementation libs.jackson.databind
-    implementation libs.slf4j.api
-    implementation libs.protobuf.java
     // The runnable App demo (send / sink) and the integration tests both
-    // produce/consume SR-framed Protobuf via DemoEvent, so this lives in
-    // implementation rather than the integrationTest-only configuration.
-    // The interceptor classes themselves remain generic over <K,V> and do
-    // not depend on the SR client at compile time.
+    // produce/consume SR-framed Protobuf via DemoEvent.
+    implementation libs.protobuf.java
     implementation libs.kafka.protobuf.serializer
-    // Micrometer + Prometheus: the producer interceptor emits the
-    // stateless-aggregation reports (latency / topology / hop distribution)
-    // as meters; App serves them at /metrics for Prometheus to scrape.
-    implementation libs.micrometer.registry.prometheus
     runtimeOnly    libs.slf4j.simple
 
     testImplementation libs.kafka.clients
     testImplementation libs.junit.jupiter
     testRuntimeOnly   libs.junit.platform.launcher
+
+    // IsotopeTestHarness + the ITs reference the core tracing classes directly.
+    integrationTestImplementation 'ai.signalroom:isotope-core:0.16.0'
 }
 
 protobuf {

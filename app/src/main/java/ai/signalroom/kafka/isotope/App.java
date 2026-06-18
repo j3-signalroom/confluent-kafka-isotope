@@ -26,6 +26,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 
+import ai.signalroom.kafka.isotope.metrics.PrometheusIsotopeMetrics;
 import ai.signalroom.kafka.isotope.proto.DemoEvent;
 import io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
@@ -130,7 +131,7 @@ public final class App {
      */
     private static void maybeStartMetrics() {
         if (METRICS_ENABLED) {
-            IsotopeMetrics.start(METRICS_PORT);
+            PrometheusIsotopeMetrics.start(METRICS_PORT);
             // start() degrades gracefully on a port clash, so only advertise
             // the endpoint when it actually bound (otherwise its WARN explains).
             if (IsotopeMetrics.isEnabled()) {
