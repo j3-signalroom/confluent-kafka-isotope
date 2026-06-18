@@ -24,9 +24,11 @@ Is Flink overkill for these reports? **Yes and no** — it's not all about state
 - **`topology_1m`** ([20_topology_report.fql](../scripts/flink/sql/cp/20_topology_report.fql)) — produce-edge record counts.
 - **`hop_distribution_1m`** ([30_hop_distribution.fql](../scripts/flink/sql/cp/30_hop_distribution.fql)) — records per `hop_count`.
 
-These don't need a stream processor. The [producer interceptor](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeProducerInterceptor.java) already has every value in scope on each `send()`, so it can emit them as **Micrometer** meters and let **Prometheus** do the 1-minute windowing at query time (`rate()` / `increase()`), with **Grafana** on top. The other four reports — `latency_percentiles` (mergeable T-Digest), `coverage`, `bipartite_topology`, `stuck_trace` — are per-`trace_id` *stateful* or *absence-of-event* problems Prometheus can't express, so they **stay in Flink**. This path is **additive and opt-in** (off by default); it doesn't replace the Flink reports — it's the cheaper way to serve the three that are metrics, not stream processing.
+These don't need a stream processor. The [producer interceptor](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-core/src/main/java/ai/signalroom/kafka/isotope/IsotopeProducerInterceptor.java) already has every value in scope on each `send()`, so it can emit them as **Micrometer** meters and let **Prometheus** do the 1-minute windowing at query time (`rate()` / `increase()`), with **Grafana** on top. The other four reports — `latency_percentiles` (mergeable T-Digest), `coverage`, `bipartite_topology`, `stuck_trace` — are per-`trace_id` *stateful* or *absence-of-event* problems Prometheus can't express, so they **stay in Flink**. This path is **additive and opt-in** (off by default); it doesn't replace the Flink reports — it's the cheaper way to serve the three that are metrics, not stream processing.
 
-Emission lives in one place — [IsotopeMetrics.java](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java) — mirroring how `TDigests` centralizes the sketch contract.
+Emission lives in one place — [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java) — mirroring how `TDigests` centralizes the sketch contract.
+
+> **Packaged as a library.** The tracing is an adoptable, publishable library, split so metrics are optional: [`isotope-core`](https://github.com/j3-signalroom/kafka-isotope/tree/main/isotope-core) carries the propagation (interceptor, headers, consume markers — Jackson + Kafka only), and [`isotope-metrics`](https://github.com/j3-signalroom/kafka-isotope/tree/main/isotope-metrics) adds the Micrometer/Prometheus exporter. The core routes emissions through a no-op `IsotopeMetricsSink` until `isotope-metrics` registers the Prometheus one, so propagation pulls no metrics dependency. The runnable stages below (`:app`) are the reference consumer — see [isotope-core/README.md](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-core/README.md) to adopt it elsewhere.
 
 ## Enabling the exporter
 
@@ -78,7 +80,7 @@ sum by (pipeline, this_topic, hop_count) (increase(isotope_hop_records_total[1m]
 
 ## Consume-side meters
 
-The three meters above all come from the **produce** side — the interceptor on `send()`. The **consume** side adds three more. Two — the edge counter and the time-to-consume latency — are emitted by [`IsotopeContext.recordConsume`](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java) right beside the consume-edge marker it writes to `isotope_consume_edge_markers`. The third, `isotope.consume.age`, is emitted **once per consumed record on whichever path the consumer takes**: continuing consumers report it from the **adoption path** ([`IsotopeContext.adoptFromRecord(record, service)`](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java)), and terminal consumers — which never adopt — report it from the **marker path** (`recordConsume`, guarded on `current() == null` so a stage that does both, like `hop`, never double-counts). So age fires on every consuming stage: `hop` via adoption, the terminal `consume` / `ship` stages via the marker. Same gating — no-op unless the exporter is started.
+The three meters above all come from the **produce** side — the interceptor on `send()`. The **consume** side adds three more. Two — the edge counter and the time-to-consume latency — are emitted by [`IsotopeContext.recordConsume`](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-core/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java) right beside the consume-edge marker it writes to `isotope_consume_edge_markers`. The third, `isotope.consume.age`, is emitted **once per consumed record on whichever path the consumer takes**: continuing consumers report it from the **adoption path** ([`IsotopeContext.adoptFromRecord(record, service)`](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-core/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java)), and terminal consumers — which never adopt — report it from the **marker path** (`recordConsume`, guarded on `current() == null` so a stage that does both, like `hop`, never double-counts). So age fires on every consuming stage: `hop` via adoption, the terminal `consume` / `ship` stages via the marker. Same gating — no-op unless the exporter is started.
 
 | Signal | Meter (Prometheus name) | Labels |
 |---|---|---|
@@ -143,7 +145,7 @@ What can you actually *ask* these meters? Below, each question carries a verdict
 
 - ✅ **PromQL** — answerable directly from the meters.
 - 🟡 **PromQL (approx)** — answerable as a bounded-cardinality *aggregate*; the exact, per-trace form stays in Flink (or the record header).
-- 🔴 **Header / Flink** — per-`trace_id` or absence-of-event; **no Prometheus equivalent** (these meters never tag `trace_id` — see [IsotopeMetrics.java](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java)).
+- 🔴 **Header / Flink** — per-`trace_id` or absence-of-event; **no Prometheus equivalent** (these meters never tag `trace_id` — see [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java)).
 
 ### Easy — single record, single trace
 
@@ -219,11 +221,11 @@ unless
 | Which traces went in but never came out within 60s? | 🔴 | Absence-of-event per trace = Flink `stuck_trace_alerts`; Prometheus can't assert a *missing* series. |
 | Where did each stuck trace last get seen? | 🔴 | Per-trace state → Flink / the header trail. |
 
-The pattern: **aggregates and time-deltas → PromQL; identity, dedup, and absence → Flink.** That boundary is the same one [IsotopeMetrics.java](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java) draws (3 metrics-native reports, 4 stay in Flink), and the next section spells out the two columns that can never cross it.
+The pattern: **aggregates and time-deltas → PromQL; identity, dedup, and absence → Flink.** That boundary is the same one [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java) draws (3 metrics-native reports, 4 stay in Flink), and the next section spells out the two columns that can never cross it.
 
 ## What stays in Flink — and two deliberate gaps
 
-Moving these out isn't free — two columns the Flink reports carry have **no Prometheus equivalent**, and both are documented in [IsotopeMetrics.java](../app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java):
+Moving these out isn't free — two columns the Flink reports carry have **no Prometheus equivalent**, and both are documented in [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java):
 
 - **No `distinct_traces`.** All three SQL reports carry a `COUNT(DISTINCT trace_id)` column. A counter can't dedup, and `trace_id` is unbounded-cardinality so it can't be a label. If you need it, that column stays in Flink (or approximate it with a HyperLogLog sketch).
 - **No windowed `min` latency.** A Micrometer `Timer` exposes max but not a per-window min — avg and max port cleanly, min does not.

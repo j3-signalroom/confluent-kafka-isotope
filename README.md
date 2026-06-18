@@ -102,24 +102,18 @@ See [§ 3.0](#30-repo-layout) for the file tree behind each box, and [§ 4.0](#4
 
 ## **3.0 Repo layout**
 
+The isotope tracing library lives in its own repo — **[j3-signalroom/kafka-isotope](https://github.com/j3-signalroom/kafka-isotope)** (`ai.signalroom:isotope-core` + `ai.signalroom:isotope-metrics`). This repo is the runnable demo that consumes it.
+
 ```
-app/                                    isotope JVM library + demo CLI + tests
+app/                                    demo CLI + tests (consumes the isotope library)
   src/main/proto/ai/signalroom/kafka/isotope/proto/
     demo_event.proto                    DemoEvent message (Protobuf value schema)
   src/main/java/ai/signalroom/kafka/isotope/
-    Isotope.java                        POJO + JSON codec + Hop + fromHeaders()
-                                        + UUIDv7 helpers (uuidV7Bytes / uuidV7String)
-    IsotopeContext.java                 ThreadLocal + adoptFromRecord() +
-                                        recordConsume() (emits consume-edge markers)
-    IsotopeProducerInterceptor.java     stamps/appends x-isotope + 7 scalar
-                                        reporting headers on send()
-    IsotopeMetrics.java                 optional Micrometer/Prometheus exporter
-                                        for the 3 stateless reports (§ 4.6)
     App.java                            demo CLI — pipeline-position verbs
                                         (place / enrich / fulfill / ship) + generic
-                                        send / hop / consume / sink modes
-  src/test/java/.../                    IsotopeCodecTest, IsotopeContextRecordConsumeTest
-                                        (no broker needed)
+                                        send / hop / consume / sink modes; registers
+                                        IsotopeProducerInterceptor + starts the
+                                        PrometheusIsotopeMetrics exporter (§ 4.6)
   src/integrationTest/java/.../         BrokerSmokeIT, ProducerInterceptorIT,
                                         ThreeStageHopPropagationIT, BipartiteTopologyIT,
                                         IsotopeTestHarness — live-broker tests; produce/consume
@@ -305,7 +299,7 @@ Two CCAF-specific design points worth keeping in the README:
 
 ### **4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**
 
-Three of the seven reports — `latency_1m`, `topology_1m`, `hop_distribution_1m` — are pure stateless scalar aggregation over bounded-cardinality dimensions (service / topic / hop_count, never `trace_id`). Those don't need a stream processor: the [producer interceptor](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeProducerInterceptor.java) already has every value in scope on each `send()`, so it emits them as **Micrometer** meters ([IsotopeMetrics.java](app/src/main/java/ai/signalroom/kafka/isotope/IsotopeMetrics.java)) and lets **Prometheus** window them at read time, with **Grafana** on top. The other four (`latency_percentiles`, `coverage`, `bipartite_topology`, `stuck_trace`) are per-`trace_id` stateful or absence-of-event problems Prometheus can't express, so they **stay in Flink**. This path is **additive and opt-in** — a 3-Micrometer / 4-Flink split.
+Three of the seven reports — `latency_1m`, `topology_1m`, `hop_distribution_1m` — are pure stateless scalar aggregation over bounded-cardinality dimensions (service / topic / hop_count, never `trace_id`). Those don't need a stream processor: the [producer interceptor](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-core/src/main/java/ai/signalroom/kafka/isotope/IsotopeProducerInterceptor.java) already has every value in scope on each `send()`, so it emits them as **Micrometer** meters ([PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java)) and lets **Prometheus** window them at read time, with **Grafana** on top. The other four (`latency_percentiles`, `coverage`, `bipartite_topology`, `stuck_trace`) are per-`trace_id` stateful or absence-of-event problems Prometheus can't express, so they **stay in Flink**. This path is **additive and opt-in** — a 3-Micrometer / 4-Flink split.
 
 > **Full details** — the meter/PromQL reference, the produce- and consume-side signals, the two deliberate gaps (`distinct_traces`, windowed `min`), and why percentiles stays a PTF — are in **[docs/metrics.md](docs/metrics.md)**. The one-command Prometheus + Grafana showcase has its own runbook: **[k8s/monitoring/README.md](k8s/monitoring/README.md)** (`make metrics-up`).
 
