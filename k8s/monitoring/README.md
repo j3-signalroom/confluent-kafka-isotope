@@ -51,8 +51,20 @@ read steady-state — see [docs/metrics.md](../../docs/metrics.md#enabling-the-e
 for i in $(seq 1 30); do ./gradlew :app:run -q --args="place burst-$i"; sleep 3; done
 ```
 
-> Running against Confluent Cloud instead? Use `scripts/cc-app-run.sh` and add
-> the same `-Dmetrics.prometheus.*` flags (it forwards extra `-D` args).
+Against **Confluent Cloud** instead, use `scripts/cc-app-run.sh` (no local CP /
+`kafka-pf-up` needed — it pulls Cloud creds from `terraform output`, so
+`make cc-flink-reports-up` must have succeeded first). Leading `-D…` flags are
+forwarded to the app JVM; the verb is the trailing arg:
+
+```bash
+# CCAF via cc-app-run.sh — same metrics ports, Cloud-backed stages:
+scripts/cc-app-run.sh -Dmetrics.prometheus.enabled=true -Dmetrics.prometheus.port=9410 enrich
+scripts/cc-app-run.sh -Dmetrics.prometheus.enabled=true -Dmetrics.prometheus.port=9411 fulfill
+scripts/cc-app-run.sh -Dmetrics.prometheus.enabled=true -Dmetrics.prometheus.port=9412 ship
+
+# Drive traffic so the meters move:
+scripts/cc-app-run.sh place 'hello'
+```
 
 ## 3. Open the dashboards
 

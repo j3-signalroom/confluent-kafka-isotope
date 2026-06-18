@@ -73,9 +73,23 @@ for var in BOOTSTRAP SR_URL KAFKA_KEY KAFKA_SECRET SR_KEY SR_SECRET JAAS; do
     fi
 done
 
-# Join the args ($@) with spaces for App.java's main() — `--args` is a
-# single space-separated string in gradle's JavaExec form.
-APP_ARGS="$*"
+# Split incoming args into JVM system-property flags (-D…) and App.java
+# verbs/args. Leading -D flags are forwarded to gradle so the build can
+# pass them through to the app JVM (app/build.gradle forwards keys under
+# metrics./isotope./kafka./schema.) — this is how the metrics exporter is
+# enabled on the CCAF path, e.g.:
+#   scripts/cc-app-run.sh -Dmetrics.prometheus.enabled=true \
+#     -Dmetrics.prometheus.port=9410 enrich
+# Everything else is joined with spaces into the single `--args` string.
+EXTRA_D=()
+APP_ARGV=()
+for arg in "$@"; do
+    case "$arg" in
+        -D*) EXTRA_D+=("$arg") ;;
+        *)   APP_ARGV+=("$arg") ;;
+    esac
+done
+APP_ARGS="${APP_ARGV[*]}"
 
 cd "${REPO_ROOT}"
 exec ./gradlew :app:run -q \
@@ -85,4 +99,5 @@ exec ./gradlew :app:run -q \
     "-Dkafka.sasl.jaas.config=${JAAS}" \
     "-Dschema.registry.url=${SR_URL}" \
     "-Dschema.registry.basic.auth.user.info=${SR_KEY}:${SR_SECRET}" \
+    ${EXTRA_D[@]+"${EXTRA_D[@]}"} \
     --args="${APP_ARGS}"
