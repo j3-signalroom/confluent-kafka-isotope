@@ -15,8 +15,8 @@
 #      Connect, ksqlDB, REST Proxy, Control Center)
 #   5. Control Center browser access via port-forwarding
 #   6. Apache Flink 2.1.2 (cert-manager, Confluent Flink Kubernetes Operator
-#      1.130, session cluster deployment, Flink UI)
-#   7. Confluent Manager for Apache Flink (CMF) 2.1
+#      1.140, session cluster deployment, Flink UI)
+#   7. Confluent Manager for Apache Flink (CMF) 2.3
 #   8. Flink JAR build (Gradle shadow JAR) and REST API job submission
 # ==============================================================================
 
@@ -38,7 +38,7 @@ endif
 
 # CMF manages Flink via confluentinc/cp-flink images — not the open-source flink image
 FLINK_IMAGE         ?= confluentinc/cp-flink:2.1.2-cp1-java21$(if $(filter arm64,$(MINIKUBE_NODE_ARCH)),-arm64,)
-FLINK_OPERATOR_VER  ?= 1.130.3
+FLINK_OPERATOR_VER  ?= 1.140.1
 FLINK_VERSION       ?= v2_1
 FLINK_CLUSTER_NAME  ?= flink-basic
 FLINK_MANIFEST      ?= k8s/base/flink-basic-deployment.yaml
