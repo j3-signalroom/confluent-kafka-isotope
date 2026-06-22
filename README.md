@@ -89,7 +89,7 @@ flowchart TB
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator<br/>Makefile: cp-up · flink-up · kafka-pf-up"]
-        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 25 statements<br/>Makefile: cc-flink-reports-up"]
+        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 25 statements (+3 optional AI)<br/>Makefile: cc-flink-reports-up"]
     end
 
     K8S -. provisions .-> Kafka
@@ -125,7 +125,7 @@ ptf/                                    Flink PTF shadow JAR (powers 2 of 7 repo
     StuckTracePTF.java                  per-trace state + event-time timer
     TDigests.java                       shared T-Digest (de)serialization
   src/test/java/.../                    TDigestsTest
-k8s/base/                               CFK manifests
+k8s/base/                               CFK manifests (applied by `make cp-up` / `flink-up`)
   confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
   flink-basic-deployment.yaml           cp-flink session cluster + CMF
   flink-rbac.yaml                       RBAC for the cp-flink operator
@@ -156,6 +156,11 @@ scripts/
                                         05_report_sinks (avro-confluent),
                                         10/20/25/30/40/60/70 INSERT INTO reports, 99_teardown
                                         (CCAF SQL is inlined under terraform/setup-confluent-flink.tf.)
+  flink/sql/ccaf-ai/                     optional AI extension (CCAF-only, off by default)
+    trace_rca.sql                       PoC: 8th, AI-generated report — turns each
+                                        stuck-trace alert into an LLM root-cause
+                                        hypothesis via CREATE MODEL + ML_PREDICT
+                                        (wired in by terraform/setup-ccaf-ai.tf)
 terraform/                              CCAF infrastructure-as-code (`make cc-flink-reports-up`)
   providers.tf                          Confluent provider — cloud key/secret vars
   versions.tf                           required Terraform (>= 1.13) + provider versions
@@ -169,6 +174,10 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
                                         `confluent_flink_statement` resources: 4 ALTER TABLE
                                         + 3 VIEW + 7 sink CREATE TABLE + 2 DROP FUNCTION +
                                         2 CREATE FUNCTION (both PTFs) + 7 INSERT INTO
+  setup-ccaf-ai.tf                      OPTIONAL AI trace-RCA report — 3 extra
+                                        statements (CREATE MODEL + Protobuf sink +
+                                        INSERT … ML_PREDICT); gated on
+                                        var.enable_trace_rca (default false)
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
 docs/                                   extracted long-form docs (linked from the README)
@@ -296,6 +305,8 @@ Two CCAF-specific design points worth keeping in the README:
 **Format-by-runtime (not -by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
 
 **Why percentiles is a PTF.** CCAF rejects all `CREATE FUNCTION` statements for user-defined *aggregate* functions ("aggregate functions are not supported"). Percentiles would naturally be an aggregate, so to keep the report portable it's implemented as a `ProcessTableFunction` instead — `LATENCY_PERCENTILES` (class `LatencyPercentilesPTF`) does its own 1-minute tumbling-window aggregation over a T-Digest sketch via per-window state and event-time timers. A PTF has no such restriction, so it registers and runs on **both** runtimes, exactly like `STUCK_TRACE_PTF`. Both runtimes therefore run the same seven reports: `latency` (avg/min/max), `topology` (produce-side), `bipartite_topology` (full service↔topic↔service graph), `hop_distribution`, `coverage`, `stuck_trace`, and `latency_percentiles` (p50/p95/p99).
+
+**Optional: AI root-cause analysis (CCAF-only, off by default).** Beyond the seven deterministic reports, [terraform/setup-ccaf-ai.tf](terraform/setup-ccaf-ai.tf) wires an **eighth, AI-generated report** that turns each stuck-trace *alert* into a natural-language root-cause hypothesis plus a one-line remediation. It adds three `confluent_flink_statement` resources — `CREATE MODEL trace_rca` (a remote text-generation model), a `proto-registry` sink `isotope_report_trace_rca_1m`, and an `INSERT … SELECT … LATERAL TABLE(ML_PREDICT('trace_rca', …))` — all **gated on `var.enable_trace_rca` (default `false`)**, so a normal `make cc-flink-reports-up` is completely unaffected. The model is invoked once per *alert* (the low-volume 1-minute stuck-trace report topic), never per record, and its output lands on its own topic — it never overwrites the deterministic reports. Defaults target OpenAI (`gpt-4o`); for Claude set `rca_model_provider = "bedrock"` (Anthropic isn't a direct CCAF model provider) and supply the matching `rca_model_version` / `rca_model_endpoint` / `rca_model_api_key`. The standalone SQL PoC — a `CREATE MODEL` + `ML_PREDICT` walkthrough with provider notes and alternative options — is in [scripts/flink/sql/ccaf-ai/trace_rca.sql](scripts/flink/sql/ccaf-ai/trace_rca.sql).
 
 ### **4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**
 
