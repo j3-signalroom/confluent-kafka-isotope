@@ -40,8 +40,8 @@ dependencies {
     // isotope-metrics is the optional Prometheus exporter (App starts it via
     // PrometheusIsotopeMetrics.start()). Micrometer, Jackson and SLF4J arrive
     // transitively through these, so the demo no longer declares them directly.
-    implementation 'ai.signalroom:isotope-core:0.16.0'
-    implementation 'ai.signalroom:isotope-metrics:0.16.0'
+    implementation 'ai.signalroom:isotope-core:0.17.1'
+    implementation 'ai.signalroom:isotope-metrics:0.17.1'
 
     implementation libs.kafka.clients
     // The runnable App demo (send / sink) and the integration tests both
@@ -55,7 +55,7 @@ dependencies {
     testRuntimeOnly   libs.junit.platform.launcher
 
     // IsotopeTestHarness + the ITs reference the core tracing classes directly.
-    integrationTestImplementation 'ai.signalroom:isotope-core:0.16.0'
+    integrationTestImplementation 'ai.signalroom:isotope-core:0.17.1'
 }
 
 protobuf {
