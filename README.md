@@ -157,7 +157,7 @@ scripts/
                                         10/20/25/30/40/60/70 INSERT INTO reports, 99_teardown
                                         (CCAF SQL is inlined under terraform/setup-confluent-flink.tf.)
   flink/sql/ccaf-ai/                     optional AI extension (CCAF-only, off by default)
-    trace_rca.sql                       PoC: 8th, AI-generated report — turns each
+    trace_rca.fql                       PoC: 8th, AI-generated report — turns each
                                         stuck-trace alert into an LLM root-cause
                                         hypothesis via CREATE MODEL + ML_PREDICT
                                         (wired in by terraform/setup-ccaf-ai.tf)
@@ -200,11 +200,12 @@ Cheapest-first order if you're new: `./gradlew test` (§ 4.1) → local CP via M
 ### **4.1. Unit tests (no broker, instant)**
 
 ```bash
-./gradlew test                       # both subprojects
+./gradlew test                       # runs :ptf:test (the app has no unit tests in this repo)
 # or scoped:
-./gradlew :app:test                  # IsotopeCodecTest (10) + IsotopeContextRecordConsumeTest (4) — JSON roundtrip, hop eviction, UUIDv7 properties, consume-marker emission (14 tests)
 ./gradlew :ptf:test                  # TDigestsTest — T-Digest sketch (de)serialization + accuracy
 ```
+
+> **Note:** the isotope codec / consume-marker unit tests (`IsotopeCodecTest`, `IsotopeContextRecordConsumeTest`) now live in the standalone tracing library [`j3-signalroom/kafka-isotope`](https://github.com/j3-signalroom/kafka-isotope), which this repo consumes as the `ai.signalroom:kafka-isotope-core` / `kafka-isotope-metrics` dependencies. The `:app` subproject here keeps only integration tests (§ 4.3).
 
 ### **4.2 Demo CLI — see one trace propagate live**
 
@@ -306,7 +307,7 @@ Two CCAF-specific design points worth keeping in the README:
 
 **Why percentiles is a PTF.** CCAF rejects all `CREATE FUNCTION` statements for user-defined *aggregate* functions ("aggregate functions are not supported"). Percentiles would naturally be an aggregate, so to keep the report portable it's implemented as a `ProcessTableFunction` instead — `LATENCY_PERCENTILES` (class `LatencyPercentilesPTF`) does its own 1-minute tumbling-window aggregation over a T-Digest sketch via per-window state and event-time timers. A PTF has no such restriction, so it registers and runs on **both** runtimes, exactly like `STUCK_TRACE_PTF`. Both runtimes therefore run the same seven reports: `latency` (avg/min/max), `topology` (produce-side), `bipartite_topology` (full service↔topic↔service graph), `hop_distribution`, `coverage`, `stuck_trace`, and `latency_percentiles` (p50/p95/p99).
 
-**Optional: AI root-cause analysis (CCAF-only, off by default).** Beyond the seven deterministic reports, [terraform/setup-ccaf-ai.tf](terraform/setup-ccaf-ai.tf) wires an **eighth, AI-generated report** that turns each stuck-trace *alert* into a natural-language root-cause hypothesis plus a one-line remediation. It adds three `confluent_flink_statement` resources — `CREATE MODEL trace_rca` (a remote text-generation model), a `proto-registry` sink `isotope_report_trace_rca_1m`, and an `INSERT … SELECT … LATERAL TABLE(ML_PREDICT('trace_rca', …))` — all **gated on `var.enable_trace_rca` (default `false`)**, so a normal `make cc-flink-reports-up` is completely unaffected. The model is invoked once per *alert* (the low-volume 1-minute stuck-trace report topic), never per record, and its output lands on its own topic — it never overwrites the deterministic reports. Defaults target OpenAI (`gpt-4o`); for Claude set `rca_model_provider = "bedrock"` (Anthropic isn't a direct CCAF model provider) and supply the matching `rca_model_version` / `rca_model_endpoint` / `rca_model_api_key`. The standalone SQL PoC — a `CREATE MODEL` + `ML_PREDICT` walkthrough with provider notes and alternative options — is in [scripts/flink/sql/ccaf-ai/trace_rca.sql](scripts/flink/sql/ccaf-ai/trace_rca.sql).
+**Optional: AI root-cause analysis (CCAF-only, off by default).** Beyond the seven deterministic reports, [terraform/setup-ccaf-ai.tf](terraform/setup-ccaf-ai.tf) wires an **eighth, AI-generated report** that turns each stuck-trace *alert* into a natural-language root-cause hypothesis plus a one-line remediation. It adds three `confluent_flink_statement` resources — `CREATE MODEL trace_rca` (a remote text-generation model), a `proto-registry` sink `isotope_report_trace_rca_1m`, and an `INSERT … SELECT … LATERAL TABLE(ML_PREDICT('trace_rca', …))` — all **gated on `var.enable_trace_rca` (default `false`)**, so a normal `make cc-flink-reports-up` is completely unaffected. The model is invoked once per *alert* (the low-volume 1-minute stuck-trace report topic), never per record, and its output lands on its own topic — it never overwrites the deterministic reports. Defaults target OpenAI (`gpt-4o`); for Claude hosted by Anthropic — a **direct** CCAF provider — set `rca_model_provider = "anthropic"`, `rca_model_endpoint = "https://api.anthropic.com/v1/messages"`, a Claude `rca_model_version`, and your Claude `rca_model_api_key` (bare API key, no AWS auth), plus the Anthropic-required `rca_model_max_tokens`. Claude via AWS Bedrock (`rca_model_provider = "bedrock"`) also works but isn't required. The standalone SQL PoC — a `CREATE MODEL` + `ML_PREDICT` walkthrough with provider notes and alternative options — is in [scripts/flink/sql/ccaf-ai/trace_rca.fql](scripts/flink/sql/ccaf-ai/trace_rca.fql).
 
 ### **4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**
 

@@ -31,21 +31,25 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- OPTION A — CREATE MODEL + ML_PREDICT  (most control; pick your provider)
 -- ─────────────────────────────────────────────────────────────────────────────
--- NOTE: Anthropic is NOT a direct CREATE MODEL provider. To use Claude, go via
--- AWS Bedrock ('provider'='bedrock'). Supported providers: bedrock, sagemaker,
--- azureml, azureopenai, googleai, openai, vertexai (+ 'confluent' managed).
--- The WITH keys below follow the verified OpenAI example shape; swap the
--- provider prefix + auth for Bedrock/Claude (AWS creds via a CREATE CONNECTION).
+-- NOTE: Anthropic IS a direct CREATE MODEL provider. Supported providers:
+-- anthropic, bedrock, sagemaker, azureml, azureopenai, googleai, openai,
+-- vertexai (+ 'confluent' managed). To use Claude hosted by Anthropic, set
+-- 'provider'='anthropic', endpoint 'https://api.anthropic.com/v1/messages', a
+-- bare api_key (no AWS auth), plus the required 'anthropic.params.max_tokens'.
+-- Claude via AWS Bedrock ('provider'='bedrock', AWS creds via CREATE CONNECTION)
+-- also works but isn't required. The WITH keys below use the OpenAI example
+-- shape; swap the provider prefix + auth for your chosen provider.
 
 CREATE MODEL trace_rca
 INPUT  (prompt STRING)
 OUTPUT (analysis STRING)
 WITH (
-    'provider'             = 'openai',                 -- or 'bedrock' for Claude
+    'provider'             = 'openai',                 -- or 'anthropic' for Claude hosted by Anthropic
     'task'                 = 'text_generation',
-    'openai.model_version' = 'gpt-4o',                 -- e.g. a Bedrock Claude model id under bedrock.*
+    'openai.model_version' = 'gpt-4o',                 -- e.g. a Claude model id under anthropic.*
     'openai.endpoint'      = 'https://api.openai.com/v1/chat/completions',
     'openai.api_key'       = '{{sessionconfig/sql.secrets.rca_api_key}}'
+    -- For Anthropic, also add: 'anthropic.params.max_tokens' = '2048'
 );
 
 -- Enrichment sink (one row per alert, carrying the AI hypothesis alongside the facts).

@@ -1,9 +1,11 @@
 # Isotope metrics showcase — Prometheus + Grafana on Minikube
 
 A throwaway, opt-in observability stack that visualizes the three stateless
-Isotope reports (latency / topology / hop-distribution) plus the three
-consume-side signals straight from the app's Micrometer meters — no Flink, no
-Control Center. See [README §4.6](../../README.md#46-stateless-reports-via-micrometer--prometheusgrafana-optional)
+Isotope reports (latency / topology / hop-distribution), the three
+consume-side signals, and a third **Health & ratios (operational)** row
+(hop failure ratio, hop completion — share reaching hop 3, consume throughput)
+straight from the app's Micrometer meters — no Flink, no Control Center.
+See [README §4.6](../../README.md#46-stateless-reports-via-micrometer--prometheusgrafana-optional)
 for what each meter means.
 
 ## Architecture (A — scrape host stages)
@@ -73,7 +75,7 @@ kubectl -n monitoring port-forward svc/grafana 3000:3000      # → http://local
 kubectl -n monitoring port-forward svc/prometheus 9090:9090   # → http://localhost:9090
 ```
 
-Grafana opens straight on **"Isotope — stateless reports"** (anonymous Admin,
+Grafana opens straight on **"Isotope — stateless reports (Micrometer → Prometheus)"** (anonymous Admin,
 no login). Confirm scraping is live at Prometheus →
 [Status → Targets](http://localhost:9090/targets): each `isotope-stages` target
 should be **UP**. A target is `DOWN` until you start the stage on its port — that

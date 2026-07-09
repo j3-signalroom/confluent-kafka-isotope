@@ -1,6 +1,8 @@
 # Flink SQL reports
 
-Seven reports that read two streams of isotope metadata — the
+Seven deterministic reports (plus an optional eighth, AI-generated one —
+see [Optional: AI root-cause analysis](#optional-ai-root-cause-analysis-ccaf-only-off-by-default))
+that read two streams of isotope metadata — the
 **produce side** (the `x-isotope-*` headers stamped on every event
 topic record by `IsotopeProducerInterceptor`) and the **consume
 side** (the value-less marker records on `isotope_consume_edge_markers`
@@ -49,6 +51,35 @@ keys each report groups by, on top of `pipeline`.
 | `stuck_trace`        | `isotope`                 | alerts (via `STUCK_TRACE_PTF`) for traces idle ≥60s of event time | CP, CCAF |
 | `latency_percentiles`| `isotope`                 | p50 / p95 / p99 (via `LATENCY_PERCENTILES` PTF, T-Digest) | CP, CCAF |
 
+## Optional: AI root-cause analysis (CCAF-only, off by default)
+
+Beyond the seven deterministic reports, an **eighth, AI-generated report**
+turns each stuck-trace *alert* into a natural-language root-cause hypothesis
+plus a one-line remediation. It's a CCAF-only feature, wired by
+[terraform/setup-ccaf-ai.tf](../../terraform/setup-ccaf-ai.tf) and **gated on
+`var.enable_trace_rca` (default `false`)**, so a normal deploy is unaffected.
+
+When enabled, it adds three `confluent_flink_statement` resources:
+
+- `CREATE MODEL trace_rca` — registers a remote text-generation model.
+- A `proto-registry` sink table `isotope_report_trace_rca_1m`.
+- An `INSERT … SELECT … LATERAL TABLE(ML_PREDICT('trace_rca', …))` that calls
+  the model **once per alert** (reading the low-volume 1-minute stuck-trace
+  report topic, never the source stream) and writes the hypothesis to its own
+  topic — it never overwrites the deterministic reports.
+
+The default provider is OpenAI (`gpt-4o`). Claude is supported two ways:
+directly via **Anthropic** (`rca_model_provider = "anthropic"`, endpoint
+`https://api.anthropic.com/v1/messages`, a bare `rca_model_api_key`, plus the
+required `rca_model_max_tokens`), or via **AWS Bedrock**
+(`rca_model_provider = "bedrock"` with AWS credentials). Other supported
+providers: `vertexai`, `azureopenai`, `googleai`, `sagemaker`, `azureml`.
+
+The standalone SQL walkthrough — a `CREATE MODEL` + `ML_PREDICT` PoC with
+provider notes and alternative options — is in
+[sql/ccaf-ai/trace_rca.fql](sql/ccaf-ai/trace_rca.fql). See also
+[root README §4.5](../../README.md#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf).
+
 ## Format-by-runtime, not by domain
 
 The sink **format** differs by runtime for one platform-level reason:
@@ -91,14 +122,17 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
   60_stuck_trace_report.fql             INSERT INTO: stuck-trace alerts via STUCK_TRACE_PTF
   70_latency_percentiles_report.fql     INSERT INTO: p50/p95/p99 via LATENCY_PERCENTILES PTF (T-Digest)
   99_teardown.fql                       DROP TABLE/VIEW/FUNCTION (companion to flink-reports-down)
+
+scripts/flink/sql/ccaf-ai/            Optional AI report — CCAF only (see section below)
+  trace_rca.fql                         CREATE MODEL + ML_PREDICT PoC: LLM root-cause hypothesis per stuck-trace alert
 ```
 
 CCAF runs the same seven reports, but the SQL lives inline as
 `confluent_flink_statement` resources in
 [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf)
-— 23 statements: ALTER (×4) + raw view + typed produce view + typed
+— 25 statements: ALTER (×4) + raw view + typed produce view + typed
 consume view + 7 sinks + `STUCK_TRACE_PTF` and `LATENCY_PERCENTILES`
-registrations (×2) + 7 INSERTs. The JAR is uploaded as a
+drop+register (×2 each = 4) + 7 INSERTs. The JAR is uploaded as a
 `confluent_flink_artifact` and referenced via
 `USING JAR 'confluent-artifact://<id>'`.
 
@@ -145,7 +179,7 @@ make flink-down         # tear down cluster + operator + cert-manager
 
 ```bash
 make cc-flink-reports-up   CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
-                           # terraform apply: env + cluster + topics + compute pool + artifact + 23 statements
+                           # terraform apply: env + cluster + topics + compute pool + artifact + 25 statements
                            # also regenerates terraform/terraform.png via `terraform graph | dot`
 source scripts/cc-cli-env.sh          # exports BOOTSTRAP / SR_URL / KAFKA_KEY / KAFKA_SECRET / SR_KEY / SR_SECRET / JAAS
 scripts/cc-app-run.sh send orders.placed order-intake-service 'hello'   # drives traffic with the SASL config
