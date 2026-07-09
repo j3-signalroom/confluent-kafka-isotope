@@ -1,7 +1,7 @@
 # =============================================================================
 # Optional: AI-enriched root-cause analysis for the stuck-trace report (CCAF).
 # =============================================================================
-# Wires the trace_rca PoC (scripts/flink/sql/ccaf-ai/trace_rca.sql, Option A)
+# Wires the trace_rca PoC (scripts/flink/sql/ccaf-ai/trace_rca.fql, Option A)
 # into the managed Flink report set as `confluent_flink_statement` resources.
 #
 # DISABLED BY DEFAULT — every resource is gated on `var.enable_trace_rca`
@@ -15,10 +15,13 @@
 # The AI output is a hypothesis on its own topic; it never overwrites the
 # deterministic reports.
 #
-# NOTE: Anthropic is not a direct CCAF provider — for Claude, set
-# rca_model_provider = "bedrock" and supply the Bedrock model id + AWS auth
-# (Bedrock authenticates via AWS credentials rather than a bare api_key, so the
-# WITH block below may need provider-specific keys; see the create-model docs).
+# NOTE: Anthropic IS a direct CCAF provider — for Claude hosted by Anthropic,
+# set rca_model_provider = "anthropic", rca_model_endpoint =
+# "https://api.anthropic.com/v1/messages", and rca_model_api_key to your Claude
+# API key (authenticated with a bare api_key, no AWS auth needed). Anthropic
+# models also require a max_tokens param ('anthropic.params.max_tokens'); see the
+# WITH block below. Claude via AWS Bedrock (provider = "bedrock") remains an
+# option too, but is not required. See the create-model docs.
 # =============================================================================
 
 variable "enable_trace_rca" {
@@ -28,7 +31,7 @@ variable "enable_trace_rca" {
 }
 
 variable "rca_model_provider" {
-  description = "CCAF AI Model Inference provider for the RCA model (openai, bedrock, vertexai, azureopenai, googleai, sagemaker, azureml)."
+  description = "CCAF AI Model Inference provider for the RCA model (openai, anthropic, bedrock, vertexai, azureopenai, googleai, sagemaker, azureml)."
   type        = string
   default     = "openai"
 }
@@ -52,6 +55,18 @@ variable "rca_model_api_key" {
   sensitive   = true
 }
 
+variable "rca_model_max_tokens" {
+  description = "Max output tokens for the RCA model. Required by the Anthropic provider ('anthropic.params.max_tokens'); ignored for other providers."
+  type        = number
+  default     = 2048
+}
+
+locals {
+  # Anthropic requires an explicit max_tokens param; other providers don't take
+  # this key, so it's only emitted into the WITH block when provider=anthropic.
+  rca_provider_extra_with = var.rca_model_provider == "anthropic" ? "        'anthropic.params.max_tokens' = '${var.rca_model_max_tokens}',\n" : ""
+}
+
 # 1) Register the remote text-generation model. The provider name prefixes the
 #    provider-specific WITH keys; the api key is injected as a session secret.
 resource "confluent_flink_statement" "trace_rca_model" {
@@ -64,7 +79,7 @@ resource "confluent_flink_statement" "trace_rca_model" {
     WITH (
         'provider'                              = '${var.rca_model_provider}',
         'task'                                  = 'text_generation',
-        '${var.rca_model_provider}.model_version' = '${var.rca_model_version}',
+${local.rca_provider_extra_with}        '${var.rca_model_provider}.model_version' = '${var.rca_model_version}',
         '${var.rca_model_provider}.endpoint'      = '${var.rca_model_endpoint}',
         '${var.rca_model_provider}.api_key'       = '{{sessionconfig/sql.secrets.rca_api_key}}'
     );
