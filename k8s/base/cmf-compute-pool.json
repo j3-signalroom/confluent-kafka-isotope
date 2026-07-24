@@ -1,0 +1,28 @@
+{
+  "apiVersion": "cmf.confluent.io/v1",
+  "kind": "ComputePool",
+  "metadata": {
+    "name": "${COMPUTE_POOL_NAME}"
+  },
+  "spec": {
+    "type": "SHARED",
+    "clusterSpec": {
+      "flinkVersion": "${FLINK_VERSION}",
+      "image": "${POOL_IMAGE}",
+      "flinkConfiguration": {
+        "taskmanager.numberOfTaskSlots": "8",
+        "kafka.bootstrap.servers": "kafka:9071",
+        "s3.endpoint": "${MINIO_S3_ENDPOINT}",
+        "s3.path.style.access": "true",
+        "s3.access-key": "${MINIO_ACCESS_KEY}",
+        "s3.secret-key": "${MINIO_SECRET_KEY}"
+      },
+      "jobManager": {
+        "resource": { "memory": "2048m", "cpu": 0.5 }
+      },
+      "taskManager": {
+        "resource": { "memory": "2048m", "cpu": 0.5 }
+      }
+    }
+  }
+}

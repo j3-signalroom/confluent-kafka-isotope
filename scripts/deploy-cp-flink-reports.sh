@@ -155,6 +155,17 @@ cancel_job_by_name() {
 }
 
 if [ "${ACTION}" = "up" ]; then
+    # 0. Cancel any already-running report jobs first so `up` is
+    # idempotent. Each `sql-client.sh -f` submission adds a NEW job; without
+    # this, a re-run stacks a second copy of every report onto the session
+    # cluster (two writers to the same sink topic → double-counted rows).
+    # cancel_job_by_name cancels ALL JIDs matching a name, so this also
+    # cleans up any pre-existing duplicates. Safe no-op on a clean cluster.
+    echo "→ Cancelling any existing report jobs (idempotent re-deploy) ..."
+    for name in "${JOB_NAMES[@]}"; do
+        cancel_job_by_name "${name}"
+    done
+
     # 1. Build the PTF JAR if it isn't already there.
     if [ ! -f "${JAR_HOST_PATH}" ]; then
         echo "→ Building PTF shadow JAR..."

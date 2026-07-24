@@ -1,0 +1,30 @@
+# Helm values for CMF 2.4.x — enables the features required to run the isotope
+# reports as first-class CMF Statements (visible in CMF + Control Center):
+#
+#   * cmf.artifacts.*             — upload the PTF shadow JAR as a cmf:// artifact,
+#                                   backed by the in-cluster MinIO S3 store.
+#   * cmf.sql.environmentCatalog  — writable per-environment catalog so DDL
+#                                   (CREATE TABLE/VIEW) persists across statements
+#                                   and CREATE FUNCTION ... USING JAR works (2.4.0+).
+#
+# NOTE: the S3 endpoint + credentials below MUST match k8s/base/minio.yaml
+# (MINIO_ROOT_USER / MINIO_ROOT_PASSWORD) and the Makefile MINIO_* / CMF_ARTIFACT_*
+# defaults. They are static demo values for a local Minikube stack only.
+cmf:
+  sql:
+    # DEPRECATED alias for encryption.enabled; kept false for the demo (no secret
+    # encryption). Matches the prior --set cmf.sql.production=false.
+    production: false
+    environmentCatalog:
+      enabled: true
+  artifacts:
+    enabled: true
+    # s3://<bucket>/<prefix> — where CMF stores uploaded artifact JARs.
+    basePath: s3://cmf-artifacts/cmf
+    maxUploadSize: 100MB
+    # Flink filesystem config CMF uses for upload/download/delete against MinIO.
+    configuration:
+      s3.endpoint: http://minio.confluent.svc:9000
+      s3.path.style.access: "true"
+      s3.access-key: minioadmin
+      s3.secret-key: minioadmin123
