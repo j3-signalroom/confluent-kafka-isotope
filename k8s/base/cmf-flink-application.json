@@ -1,0 +1,29 @@
+{
+  "apiVersion": "cmf.confluent.io/v1",
+  "kind": "FlinkApplication",
+  "metadata": {
+    "name": "${APP_NAME}"
+  },
+  "spec": {
+    "image": "${POOL_IMAGE}",
+    "flinkVersion": "${APP_FLINK_VERSION}",
+    "flinkConfiguration": {
+      "taskmanager.numberOfTaskSlots": "8",
+      "execution.checkpointing.interval": "30s",
+      "kafka.bootstrap.servers": "kafka:9071",
+      "s3.endpoint": "${MINIO_S3_ENDPOINT}",
+      "s3.path.style.access": "true",
+      "s3.access-key": "${MINIO_ACCESS_KEY}",
+      "s3.secret-key": "${MINIO_SECRET_KEY}"
+    },
+    "serviceAccount": "flink",
+    "jobManager": { "resource": { "memory": "2048m", "cpu": 0.5 } },
+    "taskManager": { "resource": { "memory": "2048m", "cpu": 0.5 } },
+    "job": {
+      "jarURI": "cmf://${CMF_ENV_NAME}/${APP_ARTIFACT_NAME}?version=${APP_ARTIFACT_VERSION}",
+      "state": "running",
+      "parallelism": 1,
+      "upgradeMode": "stateless"
+    }
+  }
+}

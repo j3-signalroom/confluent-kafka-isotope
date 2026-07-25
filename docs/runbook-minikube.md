@@ -52,13 +52,24 @@ Center into the `confluent` namespace.
 ## 2. Flink
 
 ```bash
-make flink-up            # cert-manager → Flink operator → CMF → CMF env → session cluster
-make flink-status        # (~5 min the first time)
+make flink-up            # cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → app image
+make cmf-status          # (~5 min the first time)
 ```
 
-This installs cert-manager, the Confluent Flink Kubernetes Operator, CMF
-(Confluent Manager for Apache Flink), creates the `dev-local` Flink environment,
-and deploys a `cp-flink` **session cluster** (Flink 2.1.2) with 8 task slots.
+This installs cert-manager, the Confluent Flink Kubernetes Operator, **MinIO**
+(S3-compatible store for CMF artifacts), **CMF 2.4** (with artifact management +
+the writable environment catalog enabled), creates the `dev-local` Flink
+environment, applies the Flink RBAC, and builds the custom `cp-flink` 2.1 image
+(`isotope-cp-flink-sql:local`) that bakes in the Kafka + Avro SQL connectors and
+the S3 filesystem plugin.
+
+> **The reports run as a CMF _Application_, not SQL statements.** CMF's
+> SQL-statement runtime (`io.confluent.flink.FlinkCompiledPlanExecutor`) ships
+> only in the `cp-flink-sql` image, which exists only at **Flink 1.19** — and two
+> reports are `ProcessTableFunction`s, a **Flink 2.x** feature. So all seven
+> reports deploy as a single Flink 2.1 CMF **Application** (entry point
+> `IsotopeReportsJob`), which runs the same `.fql` and surfaces in CMF /
+> Control Center as a managed application. No raw session cluster is created.
 
 > **CMF license.** The `cp-cmf` image ships with a date-locked trial license. Once
 > it expires, the CMF pod `CrashLoopBackOff`s on startup (`LicenseInitiator` throws)
@@ -83,19 +94,22 @@ Prereq for everything the host-run gradle app does — `App.java`'s defaults
 already point at `localhost:30092` / `localhost:8081`. Stop with
 `make kafka-pf-down`.
 
-## 4. Deploy the 7 Flink SQL reports
+## 4. Deploy the 7 Flink reports (as a CMF Application)
 
 ```bash
-make flink-reports-up    # builds PTF shadow JAR → uploads to JobManager → pre-creates
-                         # 7 sink topics → applies source/view/sink DDL → submits
-                         # 7 INSERT INTO streaming jobs (one per report)
+make flink-reports-up    # builds the app shadow JAR (:ptf:shadowJar) → pre-creates
+                         # 4 source + 7 sink topics → uploads the JAR as a cmf://
+                         # artifact (MinIO) → deploys the FlinkApplication → waits RUNNING
 ```
 
-Five reports are pure Flink SQL; two are JAR-backed `ProcessTableFunction`s
-(`LatencyPercentilesPTF`, `StuckTracePTF`). Sink topics use Apache Flink's
+All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`):
+five pure Flink SQL plus two JAR-backed `ProcessTableFunction`s
+(`LatencyPercentilesPTF`, `StuckTracePTF`), executed together as a single
+`StatementSet` by `IsotopeReportsJob`. Sink topics use Apache Flink's
 `avro-confluent` format — SR-framed Avro, auto-registered on first write — so
-Control Center renders the rows natively. Drop everything with
-`make flink-reports-down`.
+Control Center renders the rows natively. The application appears in CMF's
+applications API and Control Center's Flink tab. Drop everything (application +
+artifact + sink topics) with `make flink-reports-down`.
 
 ## 5. Drive traffic (required to see report rows)
 

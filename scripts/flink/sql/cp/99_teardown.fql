@@ -2,11 +2,10 @@
 -- Teardown — drops the 5 report sink tables + upstream view + source
 -- table + functions. Safe to run repeatedly; uses IF EXISTS.
 --
--- Applied via `make flink-reports-down`. The deploy script
--- (scripts/deploy-cp-flink-reports.sh) cancels the running INSERT INTO
--- jobs via `flink cancel` *before* this FQL is applied, and deletes
--- the underlying Kafka topics + SR subjects *after*. Neither operation
--- is expressible in portable Flink SQL, so they live in the script.
+-- Reference teardown DDL (mirrors the CCAF drop set). The CP reports now run
+-- as a Flink 2.1 CMF Application, so `make flink-reports-down` tears them down
+-- by deleting the CMF Application + cmf:// artifact + Kafka sink topics — not by
+-- applying this file. Kept as the portable drop-SQL companion to sql/cp/.
 -- =====================================================================
 
 -- Sink tables (each backed by an isotope-report-* Kafka topic + SR Avro subject).

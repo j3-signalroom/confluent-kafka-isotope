@@ -22,7 +22,7 @@ for the full motivation.
 
 | Runtime | Reports | Sink format | Where the SQL lives |
 |---|---|---|---|
-| **Confluent Platform Flink** (cp-flink 2.1.2 session cluster on Minikube) | 7 (latency, topology, bipartite-topology, hop-distribution, coverage, stuck-trace, latency-percentiles) | `avro-confluent` (SR-framed Avro) | [scripts/flink/sql/cp/](sql/cp/) — applied by [scripts/deploy-cp-flink-reports.sh](../deploy-cp-flink-reports.sh) |
+| **Confluent Platform Flink** (Flink 2.1 CMF Application on Minikube) | 7 (latency, topology, bipartite-topology, hop-distribution, coverage, stuck-trace, latency-percentiles) | `avro-confluent` (SR-framed Avro) | [scripts/flink/sql/cp/](sql/cp/) — run by `IsotopeReportsJob`, deployed by [scripts/deploy-cmf-flink-reports.sh](../deploy-cmf-flink-reports.sh) |
 | **Confluent Cloud for Apache Flink (CCAF)** | 7 (same set as CP) | `proto-registry` (SR-framed Protobuf) | Inlined as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — applied by [scripts/deploy-cc-flink-reports.sh](../deploy-cc-flink-reports.sh) |
 
 Control Center deserializes both sink formats natively.
@@ -168,12 +168,15 @@ on CCAF).
 **CP Flink (Minikube):**
 
 ```bash
-make flink-up           # cert-manager → CFK Flink Operator → CMF → session cluster
-make flink-reports-up   # build PTF JAR, copy to JM, create sink topics, submit 7 INSERT INTO jobs
-make flink-sql          # interactive SQL Client (auto-loads sink DDL so SELECT * works)
-make flink-reports-down # cancel jobs, drop tables, delete sink topics + SR subjects
-make flink-down         # tear down cluster + operator + cert-manager
+make flink-up           # cert-manager → CFK Flink Operator → MinIO → CMF 2.4 → env → app image
+make kafka-pf-up        # localhost:30092 → Kafka, localhost:8081 → SR
+make flink-reports-up   # build app JAR → upload as cmf:// artifact → deploy the CMF Application
+make flink-reports-down # delete the CMF Application + artifact + sink topics
+make flink-down         # tear down the application, CMF, MinIO, operator, cert-manager
 ```
+
+The 7 reports run as a single Flink 2.1 CMF **Application** (`isotope-reports`,
+entry point `IsotopeReportsJob`) — visible in CMF and Control Center's Flink tab.
 
 **CCAF (Confluent Cloud, Terraform-driven):**
 
