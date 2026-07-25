@@ -35,7 +35,7 @@ A producer interceptor stamps the isotope and appends one hop per `send()` (the 
 
 ## **2.0 Architecture**
 
-A bird's-eye view of the moving parts. The demo CLI in [app/](app/) consumes the external tracing library ([`ai.signalroom:kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope)), which registers a Kafka producer interceptor that stamps the isotope into record headers on every `send()`; consume-then-produce services adopt the inbound trace via an explicit `IsotopeContext.adoptFromRecord(record)` call; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube applies `.fql` files under [scripts/flink/sql/cp/](scripts/flink/sql/cp/), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The shadow JAR from [ptf/](ptf/) (which powers two of the seven reports) registers identically on both. (Kafka is drawn once below for brevity — each runtime provisions its own cluster.)
+A bird's-eye view of the moving parts. The demo CLI in [app/](app/) consumes the external tracing library ([`ai.signalroom:kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope)), which registers a Kafka producer interceptor that stamps the isotope into record headers on every `send()`; consume-then-produce services adopt the inbound trace via an explicit `IsotopeContext.adoptFromRecord(record)` call; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube runs the `.fql` under [scripts/flink/sql/cp/](scripts/flink/sql/cp/) as a single Flink 2.1 CMF **Application** (`IsotopeReportsJob`), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The shadow JAR from [ptf/](ptf/) (which powers two of the seven reports) runs on both runtimes — bundled into the CP application JAR, uploaded as a Flink artifact on CCAF. (Kafka is drawn once below for brevity — each runtime provisions its own cluster.)
 
 ```mermaid
 flowchart TB
@@ -65,9 +65,9 @@ flowchart TB
 
     subgraph Flink["Flink SQL reports — identical source/view DDL; sink format differs by runtime"]
         direction LR
-        subgraph CP["Minikube · cp-flink 2.1.2"]
-            SQLCP["scripts/flink/sql/cp/*.fql"]
-            JCP["7 × INSERT INTO TUMBLE(1 MIN)<br/>Avro+SR sinks"]
+        subgraph CP["Minikube · Flink 2.1 CMF Application"]
+            SQLCP["scripts/flink/sql/cp/*.fql<br/>(bundled in the app JAR)"]
+            JCP["IsotopeReportsJob<br/>1 StatementSet · 7 × INSERT INTO TUMBLE(1 MIN)<br/>Avro+SR sinks"]
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
@@ -79,8 +79,8 @@ flowchart TB
 
     Kafka -- "read headers only" --> CP
     Kafka -- "read headers only" --> CC
-    PTF -. "CREATE FUNCTION" .-> CP
-    PTF -. "CREATE FUNCTION" .-> CC
+    PTF -- "bundled in app JAR<br/>registered programmatically" --> CP
+    PTF -. "CREATE FUNCTION USING JAR" .-> CC
 
     R["report sink topics<br/>latency · topology · bipartite_topology ·<br/>hop_distribution · coverage · stuck_trace ·<br/>latency_percentiles"]
     JCP --> R
@@ -88,7 +88,7 @@ flowchart TB
 
     subgraph Infra["Infrastructure"]
         direction LR
-        K8S["k8s/base/ + CFK Operator<br/>Makefile: cp-up · flink-up · kafka-pf-up"]
+        K8S["k8s/base/ + CFK Operator + CMF 2.4 + MinIO<br/>Makefile: cp-up · flink-up · flink-reports-up"]
         TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 25 statements (+3 optional AI)<br/>Makefile: cc-flink-reports-up"]
     end
 
