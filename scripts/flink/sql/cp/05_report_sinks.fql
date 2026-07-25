@@ -6,9 +6,9 @@
 -- Schemas auto-register in Schema Registry on first write under subject
 -- `<topic>-value`. Control Center deserializes these topics natively.
 --
--- Format jar: `flink-sql-avro-confluent-registry-2.1.2.jar`, installed
--- into /opt/flink/lib by the init container in
--- k8s/base/flink-basic-deployment.yaml.
+-- Format jar: `flink-sql-avro-confluent-registry-2.1.2.jar`, baked into
+-- /opt/flink/lib by the reports application image
+-- (k8s/base/flink-sql-isotope.Dockerfile).
 --
 -- Why Avro and not Protobuf:
 --   * cp-flink (the session-cluster image) doesn't ship an SR-integrated

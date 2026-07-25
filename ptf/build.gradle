@@ -13,6 +13,12 @@ dependencies {
     compileOnly libs.flink.table.api.java
     compileOnly libs.flink.table.common
 
+    // Additional Flink APIs the IsotopeReportsJob application driver needs —
+    // also provided by the cp-flink runtime, so compileOnly (never bundled).
+    compileOnly libs.flink.table.api.java.bridge
+    compileOnly libs.flink.streaming.java
+    compileOnly libs.flink.clients
+
     // T-Digest is what we actually need bundled — it's not part of Flink.
     implementation libs.t.digest
 
@@ -42,6 +48,19 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
+// Bundle the report .fql files into the jar (under sql/) so IsotopeReportsJob
+// reads them from the classpath. Copied from scripts/flink/sql/cp/ at build time
+// — that directory stays the single source of truth for the report SQL.
+def generatedSqlDir = layout.buildDirectory.dir('generated-sql-resources')
+tasks.register('copyReportSql', Copy) {
+    from(rootProject.file('scripts/flink/sql/cp')) {
+        include '*.fql'
+    }
+    into generatedSqlDir.map { it.dir('sql') }
+}
+sourceSets.main.resources.srcDir(generatedSqlDir)
+tasks.named('processResources') { dependsOn 'copyReportSql' }
+
 // The shadow jar is what gets uploaded to the Flink session cluster
 // (via init container or `make flink-reports-up`). It bundles t-digest
 // and the LatencyPercentilesPTF + StuckTracePTF + TDigests classes;
@@ -49,5 +68,10 @@ tasks.named('test') {
 shadowJar {
     archiveBaseName.set('isotope-flink-udf')
     archiveClassifier.set('')
+    // Runnable as a CMF Application: IsotopeReportsJob is the entry point. The
+    // jar doubles as the PTF UDF library (its classes are also loaded as UDFs).
+    manifest {
+        attributes 'Main-Class': 'ai.signalroom.kafka.isotope.flink.IsotopeReportsJob'
+    }
     mergeServiceFiles()
 }

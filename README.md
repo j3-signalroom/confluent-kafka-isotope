@@ -127,7 +127,8 @@ ptf/                                    Flink PTF shadow JAR (powers 2 of 7 repo
   src/test/java/.../                    TDigestsTest
 k8s/base/                               CFK manifests (applied by `make cp-up` / `flink-up`)
   confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
-  flink-basic-deployment.yaml           cp-flink session cluster + CMF
+  flink-cluster-deployment.yaml         optional cp-flink session cluster for ad-hoc
+                                        `make flink-deploy` / `make flink-sql`
   flink-rbac.yaml                       RBAC for the cp-flink operator
 k8s/monitoring/                         optional metrics showcase (§ 4.6) — `make metrics-up`
   00-namespace.yaml                     dedicated 'monitoring' namespace
@@ -140,8 +141,9 @@ k8s/monitoring/                         optional metrics showcase (§ 4.6) — `
 scripts/
   port-forward-kafka.sh                 localhost:30092 → Kafka, localhost:8081 → SR
   port-forward-taskmanager.sh           Flink TaskManager web UI forward
-  deploy-cp-flink-reports.sh            builds shadow JAR + applies sql/cp/*.fql to
-                                        the cp-flink session cluster
+  deploy-cmf-flink-reports.sh           builds shadow JAR + uploads it as a cmf://
+                                        artifact + deploys the reports as a Flink 2.1
+                                        CMF Application (runs sql/cp/*.fql)
   deploy-cc-flink-reports.sh            builds shadow JAR + wraps `terraform apply`
                                         for the CCAF path
   cc-cli-env.sh                         pulls Kafka + SR creds from `terraform output`,

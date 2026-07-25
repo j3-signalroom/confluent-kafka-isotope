@@ -41,17 +41,51 @@ FLINK_IMAGE         ?= confluentinc/cp-flink:2.1.2-cp1-java21$(if $(filter arm64
 FLINK_OPERATOR_VER  ?= 1.140.1
 FLINK_VERSION       ?= v2_1
 FLINK_CLUSTER_NAME  ?= flink-basic
-FLINK_MANIFEST      ?= k8s/base/flink-basic-deployment.yaml
+FLINK_MANIFEST      ?= k8s/base/flink-cluster-deployment.yaml
 FLINK_RBAC_MANIFEST ?= k8s/base/flink-rbac.yaml
 CERT_MANAGER_VER    ?= v1.18.2
-CMF_VER             ?= 2.3.1
+# CMF 2.4.0+ is required for SQL UDFs (cmf:// artifacts) + the writable
+# environment catalog — both needed to run the reports as CMF Statements.
+CMF_VER             ?= 2.4.0
 CMF_ENV_NAME        ?= dev-local
+# Helm values enabling CMF artifacts (MinIO-backed) + environment catalog.
+CMF_VALUES          ?= k8s/base/cmf-values.yaml
 # CMF's embedded trial license is date-locked and expires. To run past expiry,
 # create a secret holding your Confluent license (key MUST be license.txt):
 #   kubectl create secret generic confluent-license-for-cmf -n $(NAMESPACE) \
 #     --from-file=license.txt=/path/to/license.txt
 # then set CMF_LICENSE_SECRET to its name (env var or `make ... CMF_LICENSE_SECRET=...`).
 CMF_LICENSE_SECRET  ?=
+
+# CMF-statement deployment (reports run as first-class CMF Statements on a
+# CMF-managed compute pool, visible in CMF + Control Center's Flink tab).
+# The two PTF reports require CMF 2.4.0+ (SQL UDFs / cmf:// artifacts / writable
+# environment catalog) plus S3-compatible blob storage for the artifact JAR.
+MINIO_MANIFEST      ?= k8s/base/minio.yaml
+MINIO_ACCESS_KEY    ?= minioadmin
+MINIO_SECRET_KEY    ?= minioadmin123
+# In-cluster S3 endpoint MinIO exposes (used by CMF and the compute-pool clusters).
+MINIO_S3_ENDPOINT   ?= http://minio.confluent.svc:9000
+CMF_ARTIFACT_BUCKET ?= cmf-artifacts
+# s3://<bucket>/<prefix> — CMF's cmf.artifacts.basePath.
+CMF_ARTIFACT_PATH   ?= s3://$(CMF_ARTIFACT_BUCKET)/cmf
+# The 7 reports deploy as a single Flink 2.1 CMF **Application** (not SQL
+# statements). Rationale: CMF's SQL-statement runtime
+# (io.confluent.flink.FlinkCompiledPlanExecutor) ships only in the cp-flink-sql
+# image, which exists only at Flink 1.19 — and 2 of the reports are
+# ProcessTableFunctions, a Flink 2.x feature. An application on cp-flink 2.1
+# runs all 7 (PTFs included), reuses the existing .fql verbatim, and still
+# surfaces in CMF. See scripts/deploy-cmf-flink-reports.sh + IsotopeReportsJob.
+APP_NAME            ?= isotope-reports
+APP_FLINK_VERSION   ?= v2_1
+APP_ARTIFACT_NAME   ?= isotope-reports-app
+APP_MANIFEST        ?= k8s/base/cmf-flink-application.json
+APP_JAR             ?= ptf/build/libs/isotope-flink-udf.jar
+# The application's Flink image: cp-flink 2.1 + the Kafka/Avro SQL connectors
+# and S3 fs plugin baked in (CMF clusterSpec has no podTemplate). Built by
+# 'make flink-image-build' from k8s/base/flink-sql-isotope.Dockerfile.
+POOL_IMAGE          ?= isotope-cp-flink-sql:local
+FLINK_SQL_DOCKERFILE ?= k8s/base/flink-sql-isotope.Dockerfile
 
 # Optional metrics showcase (Prometheus + Grafana) — see k8s/monitoring/README.md
 MONITORING_MANIFEST ?= k8s/monitoring
@@ -425,6 +459,38 @@ metrics-delete: metrics-down ## Tear down the entire metrics showcase (pods, con
 	@echo "✔ Metrics showcase removed."
 
 # ------------------------------------------------------------------------------
+# MinIO — S3-compatible blob store backing CMF artifact (cmf:// JAR) storage.
+# ------------------------------------------------------------------------------
+.PHONY: minio-up
+minio-up: namespace ## Deploy MinIO (S3-compatible store for CMF artifacts) and create the bucket
+	@echo "→ Deploying MinIO from $(MINIO_MANIFEST)..."
+	@test -f $(MINIO_MANIFEST) || (echo "✘ $(MINIO_MANIFEST) not found." && exit 1)
+	kubectl apply -f $(MINIO_MANIFEST)
+	@echo "→ Waiting for MinIO to be ready..."
+	@kubectl rollout status deployment/minio -n $(NAMESPACE) --timeout=180s
+	@echo "→ Waiting for the bucket-create job to complete..."
+	@kubectl wait --for=condition=complete job/minio-make-bucket -n $(NAMESPACE) --timeout=120s
+	@echo "✔ MinIO ready at $(MINIO_S3_ENDPOINT) (bucket: $(CMF_ARTIFACT_BUCKET))."
+
+.PHONY: flink-image-build
+flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S3 plugin) and load it into Minikube
+	@echo "→ Building $(POOL_IMAGE) FROM $(FLINK_IMAGE)..."
+	@test -f $(FLINK_SQL_DOCKERFILE) || (echo "✘ $(FLINK_SQL_DOCKERFILE) not found." && exit 1)
+	docker build --build-arg FLINK_IMAGE=$(FLINK_IMAGE) -t $(POOL_IMAGE) -f $(FLINK_SQL_DOCKERFILE) k8s/base
+	@echo "→ Loading $(POOL_IMAGE) into Minikube (so the Kubelet needs no registry pull)..."
+	minikube image load $(POOL_IMAGE)
+	@echo "✔ $(POOL_IMAGE) built and loaded."
+
+# MinIO — S3-compatible blob store backing CMF artifact (cmf:// JAR) storage.
+# ------------------------------------------------------------------------------
+.PHONY: minio-down
+minio-down: ## Delete MinIO and its data (safe to run even if not deployed)
+	@echo "→ Deleting MinIO..."
+	@kubectl delete -f $(MINIO_MANIFEST) --ignore-not-found
+	@kubectl delete pvc minio-data -n $(NAMESPACE) --ignore-not-found
+	@echo "✔ MinIO removed."
+
+# ------------------------------------------------------------------------------
 # Phase 6: Apache Flink
 # ------------------------------------------------------------------------------
 .PHONY: flink-cert-manager
@@ -528,13 +594,24 @@ flink-delete: ## Delete the Flink session cluster (safe to run even if cluster i
 		&& echo "✔ Flink cluster '$(FLINK_CLUSTER_NAME)' deleted." \
 		|| echo "→ Flink cluster not found or API server unreachable, skipping."
 
+.PHONY: reports-jar
+reports-jar: ## Build the reports application shadow JAR (IsotopeReportsJob + 2 PTFs + bundled .fql)
+	@echo "→ Building reports application JAR ($(APP_JAR))..."
+	./gradlew :ptf:shadowJar -q
+
 .PHONY: flink-reports-up
-flink-reports-up: ## Build PTF JAR, upload to JM pod, register source + reports (pure-SQL + JAR-backed)
-	@$(mkfile_dir)scripts/deploy-cp-flink-reports.sh up
+flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication)
+	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
+		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' APP_MANIFEST='$(APP_MANIFEST)' APP_JAR='$(APP_JAR)' \
+		POOL_IMAGE='$(POOL_IMAGE)' APP_FLINK_VERSION='$(APP_FLINK_VERSION)' \
+		MINIO_S3_ENDPOINT='$(MINIO_S3_ENDPOINT)' MINIO_ACCESS_KEY='$(MINIO_ACCESS_KEY)' MINIO_SECRET_KEY='$(MINIO_SECRET_KEY)' \
+		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh up
 
 .PHONY: flink-reports-down
-flink-reports-down: ## Drop the registered reports / views / functions (safe to run repeatedly)
-	@$(mkfile_dir)scripts/deploy-cp-flink-reports.sh down
+flink-reports-down: ## Tear down the reports CMF Application + artifact + sink topics (safe to run repeatedly)
+	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
+		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' \
+		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh down
 
 # ------------------------------------------------------------------------------
 # Confluent Cloud for Apache Flink (CCAF) — Terraform-driven deploy
@@ -601,13 +678,17 @@ ifeq ($(strip $(CMF_LICENSE_SECRET)),)
 	@echo "⚠ No CMF_LICENSE_SECRET set — relying on the image's embedded trial license."
 	@echo "  If the trial has expired, CMF will CrashLoopBackOff; see the CMF_LICENSE_SECRET notes in the Makefile."
 endif
+	@test -f $(CMF_VALUES) || (echo "✘ $(CMF_VALUES) not found." && exit 1)
 	helm upgrade --install cmf confluentinc/confluent-manager-for-apache-flink \
 		--version "~$(CMF_VER)" \
 		--namespace $(NAMESPACE) \
-		--set cmf.sql.production=false \
+		-f $(CMF_VALUES) \
 		$(if $(strip $(CMF_LICENSE_SECRET)),--set license.secretRef=$(CMF_LICENSE_SECRET),)
-	@echo "→ Waiting for CMF pod to be ready (timeout 3m)..."
-	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=confluent-manager-for-apache-flink -n $(NAMESPACE) --timeout=180s
+	@echo "→ Waiting for CMF rollout to finish (timeout 5m)..."
+	@# rollout status (not `kubectl wait pod`) so a Recreate-strategy upgrade
+	@# waits for the NEW pod, not a still-terminating old one. The image pull of
+	@# a new CMF version can be slow, hence 5m.
+	@kubectl rollout status deploy/confluent-manager-for-apache-flink -n $(NAMESPACE) --timeout=300s
 	@echo "✔ CMF v$(CMF_VER) installed."
 
 .PHONY: cmf-env-create
@@ -717,10 +798,12 @@ cp-core-up: operator-install cp-deploy ## Phases 3-5: install CFK Operator → d
 	@echo "  Once all pods are Running, run 'make c3-open' to access Control Center."
 
 .PHONY: flink-up
-flink-up: flink-cert-manager flink-operator-install cmf-install cmf-env-create flink-deploy ## Install cert-manager → Confluent Flink Operator → CMF → Flink cluster
+flink-up: flink-cert-manager flink-operator-install minio-up cmf-install cmf-env-create flink-rbac flink-image-build ## cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → build app image (reports deploy via 'make flink-reports-up')
 	@echo ""
-	@echo "✔ Flink + CMF are deploying."
-	@echo "  Run 'make flink-status' to check Flink pod status."
+	@echo "✔ Flink + CMF 2.4 are deploying (reports run as a CMF Application)."
+	@echo "  The reports themselves deploy separately:"
+	@echo "    make kafka-pf-up && make flink-reports-up"
+	@echo "  Run 'make cmf-status' to verify CMF and the Flink environment."
 	@echo "  Run 'make cmf-status' to verify CMF and Flink environments."
 	@echo "  Once running, open the Flink UI with 'make flink-ui'."
 
@@ -729,8 +812,14 @@ cp-down: cp-delete operator-uninstall ## Tear down CP and Operator (keeps Miniku
 	@echo "✔ Confluent Platform and Operator removed."
 
 .PHONY: flink-down
-flink-down: flink-delete cmf-uninstall flink-operator-uninstall cert-manager-uninstall ## Tear down Flink cluster, CMF, operator, and cert-manager
-	@echo "✔ Flink cluster, CMF, operator, and cert-manager removed."
+flink-down: ## Tear down the reports application, CMF, MinIO, operator, and cert-manager
+	-@$(MAKE) flink-reports-down    # delete the CMF Application + artifact while CMF is still up
+	-@$(MAKE) flink-delete          # remove any leftover raw FlinkDeployment (legacy)
+	$(MAKE) cmf-uninstall
+	$(MAKE) minio-down
+	$(MAKE) flink-operator-uninstall
+	$(MAKE) cert-manager-uninstall
+	@echo "✔ Reports application, CMF, MinIO, operator, and cert-manager removed."
 
 .PHONY: cert-manager-uninstall
 cert-manager-uninstall: ## Uninstall cert-manager (safe to run even if not installed)
