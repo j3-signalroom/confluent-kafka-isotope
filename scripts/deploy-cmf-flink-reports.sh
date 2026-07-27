@@ -19,6 +19,12 @@
 #   3. render + POST the FlinkApplication (image=$POOL_IMAGE, jarURI=cmf://…)
 #   4. wait for the application job to reach RUNNING
 #
+# Flow (down):
+#   1. delete the application + its cmf:// artifact
+#   2. purge leftover CMF statements / compute pools (see purge_statements — the
+#      retired statement path leaves records that crashloop on every restart)
+#   3. delete the sink topics
+#
 # Usage: scripts/deploy-cmf-flink-reports.sh {up|down}
 # Prereqs: make minio-up, cmf-install (2.4.x), cmf-env-create, flink-image-build,
 #          and the app jar built (./gradlew :ptf:shadowJar).
@@ -68,6 +74,52 @@ cmf_pf_start() {
 cmf_pf_stop() { [ -n "${PF_PID}" ] && kill "${PF_PID}" 2>/dev/null || true; }
 trap cmf_pf_stop EXIT
 
+# Purge every CMF Statement + compute pool in the environment, plus the K8s
+# residue CMF leaves behind.
+#
+# WHY: this application-based deployment creates NO statements and NO compute
+# pool, so anything here is a leftover from the retired statement-based path.
+# Leftovers are not inert — CMF re-reconciles a non-terminal statement into a
+# FlinkDeployment on every cluster restart, and that JobManager crashloops
+# forever on `JAR file does not exist '/opt/flink/job/ce-flink-sql-job.jar'`:
+# the statement runner ships only in the cp-flink-sql (1.19) image, never in the
+# cp-flink 2.1 image this project's pool/app uses. A lingering statement also
+# pins its compute pool in DELETING indefinitely.
+#
+# Deleting the statement clears the CMF record but leaves the FlinkDeployment CR
+# and the cmf-stmt-plan-* ConfigMap orphaned, so sweep those explicitly.
+purge_statements() {
+    local names n
+    names=$(curl -s "${ENV_API}/statements?size=500" | python3 -c \
+        "import sys,json;print('\n'.join(i['metadata']['name'] for i in json.load(sys.stdin).get('items',[])))" 2>/dev/null || true)
+    if [ -n "${names}" ]; then
+        while IFS= read -r n; do
+            [ -n "${n}" ] || continue
+            printf '  ↳ %-32s ' "${n}"
+            curl -s -o /dev/null -w "HTTP %{http_code}\n" -X DELETE "${ENV_API}/statements/${n}"
+        done <<< "${names}"
+    else
+        echo "  (no statements)"
+    fi
+
+    names=$(curl -s "${ENV_API}/compute-pools?size=500" | python3 -c \
+        "import sys,json;print('\n'.join(i['metadata']['name'] for i in json.load(sys.stdin).get('items',[])))" 2>/dev/null || true)
+    if [ -n "${names}" ]; then
+        while IFS= read -r n; do
+            [ -n "${n}" ] || continue
+            printf '  ↳ compute pool %-19s ' "${n}"
+            curl -s -o /dev/null -w "HTTP %{http_code}\n" -X DELETE "${ENV_API}/compute-pools/${n}"
+        done <<< "${names}"
+    fi
+
+    # Orphaned K8s residue: statement/pool FlinkDeployments and compiled-plan ConfigMaps.
+    kubectl delete flinkdeployment -n "${NAMESPACE}" \
+        -l 'confluent.io/cmfResource in (Statement,ComputePool)' --ignore-not-found --timeout=120s 2>/dev/null || true
+    kubectl get cm -n "${NAMESPACE}" --no-headers -o custom-columns=":metadata.name" 2>/dev/null \
+        | grep '^cmf-stmt-plan-' \
+        | xargs -r kubectl delete cm -n "${NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+}
+
 if [ "${ACTION}" = "up" ]; then
     [ -f "${APP_JAR}" ] || { echo "✘ ${APP_JAR} not found. Run './gradlew :ptf:shadowJar'." >&2; exit 1; }
     echo "→ Pre-creating ${#EVENT_TOPICS[@]} source + ${#SINK_TOPICS[@]} sink topics on ${KAFKA_POD}..."
@@ -115,6 +167,8 @@ else
     curl -s -o /dev/null -w "  delete app: HTTP %{http_code}\n" -X DELETE "${ENV_API}/applications/${APP_NAME}"
     echo "→ Deleting artifact '${ARTIFACT_NAME}'..."
     curl -s -o /dev/null -w "  delete artifact: HTTP %{http_code}\n" -X DELETE "${ENV_API}/artifacts/${ARTIFACT_NAME}"
+    echo "→ Purging leftover CMF statements / compute pools (retired statement-based path)..."
+    purge_statements
     echo "→ Deleting ${#SINK_TOPICS[@]} sink topics..."
     for t in "${SINK_TOPICS[@]}"; do echo "  ↳ ${t}"; delete_topic "${t}"; done
     echo "✔ Reports application torn down."
