@@ -744,7 +744,7 @@ cmf-proxy-logs: ## Show logs from the cmf-proxy sidecar in the C3 pod (debug Fli
 	kubectl logs -n $(NAMESPACE) controlcenter-0 -c cmf-proxy --tail=50 -f
 
 .PHONY: cmf-proxy-inject
-cmf-proxy-inject: ## Patch C3 StatefulSet with socat sidecar (localhost:8080 → cmf-service:80) and pause CFK reconciliation
+cmf-proxy-inject: ## Patch C3 StatefulSet with socat sidecar (localhost:8080 → cmf-service:80) + a working liveness probe, and pause CFK reconciliation
 	@echo "→ Pausing CFK reconciliation for controlcenter..."
 	kubectl annotate controlcenter controlcenter \
 		platform.confluent.io/pause-reconciliation=true \
@@ -753,15 +753,57 @@ cmf-proxy-inject: ## Patch C3 StatefulSet with socat sidecar (localhost:8080 →
 	@printf '%s' '[{"op":"add","path":"/spec/template/spec/containers/-","value":{"name":"cmf-proxy","image":"alpine/socat:latest","args":["TCP-LISTEN:8080,fork,reuseaddr","TCP:cmf-service.confluent.svc.cluster.local:80"]}}]' \
 		> /tmp/cmf-proxy-patch.json
 	kubectl patch statefulset controlcenter -n $(NAMESPACE) --type=json --patch-file=/tmp/cmf-proxy-patch.json
+	# Give the controlcenter container a liveness probe that can actually fail.
+	#
+	# WHY: C3 resolves kafka:9071 once at startup and never retries. `kafka` is a
+	# HEADLESS Service, so its DNS A record does not exist until kafka-0 is Ready.
+	# On a cold start — and on every minikube stop/start, where the kubelet restarts
+	# every pod at once — C3 can lose that race by ~30s and its main thread dies with
+	# "No resolvable bootstrap urls given in bootstrap.servers". The JVM does NOT exit
+	# (a non-daemon pool thread keeps it alive), so nothing ever binds :9021 and the
+	# pod sits at 2/3 indefinitely.
+	#
+	# CFK's default liveness probe cannot catch that. It renders as
+	#   [ -x /mnt/config/cfkprober ] && exec /mnt/config/cfkprober http 9021 ...; exit 0
+	# and /mnt/config/cfkprober does not exist in the image, so `&&` short-circuits
+	# and the probe always exits 0 — a dead C3 reports healthy forever.
+	#
+	# The replacement greps /proc/net/tcp{,6} for :233D (hex 9021) and fails when
+	# nothing is listening, so the kubelet restarts C3 ~195s (120 + 5x15) after a
+	# failed start and it re-resolves Kafka. Healthy startup binds 9021 in ~60-75s.
+	#
+	# This MUST be a targeted StatefulSet patch, not ControlCenter.spec.podTemplate.probe:
+	# that CRD field is POD-WIDE, so CFK stamps the same port-9021 probe onto the
+	# prometheus (9090) and alertmanager (9093) sidecars and restart-loops them, and
+	# services.{prometheus,alertmanager}.containerTemplate has no probe field to undo it.
+	# Setting path/port WITHOUT useProcNetPortCheck is also useless — CFK keeps the
+	# inert cfkprober exec form and only re-parameterizes it.
+	@echo "→ Patching controlcenter liveness probe (default probe can never fail)..."
+	@CONTAINERS=$$(kubectl get statefulset controlcenter -n $(NAMESPACE) \
+		-o jsonpath='{.spec.template.spec.containers[*].name}'); \
+	IDX=$$(echo "$$CONTAINERS" | tr ' ' '\n' | grep -n '^controlcenter$$' | cut -d: -f1); \
+	if [ -z "$$IDX" ]; then \
+		echo "✘ controlcenter container not found in StatefulSet; skipping probe patch." >&2; \
+	else \
+		IDX=$$((IDX - 1)); \
+		printf '%s' '[{"op":"replace","path":"/spec/template/spec/containers/'"$$IDX"'/livenessProbe","value":{"exec":{"command":["/bin/sh","-c","[ -r /proc/net/tcp ] || exit 0; exec grep -q \":233D \" /proc/net/tcp /proc/net/tcp6 2>/dev/null"]},"initialDelaySeconds":120,"periodSeconds":15,"timeoutSeconds":10,"failureThreshold":5,"successThreshold":1}}]' \
+			> /tmp/c3-liveness-patch.json; \
+		kubectl patch statefulset controlcenter -n $(NAMESPACE) --type=json --patch-file=/tmp/c3-liveness-patch.json; \
+	fi
 	@echo "→ Deleting pod to restart from patched StatefulSet (avoids CFK rollout reconciliation)..."
 	kubectl delete pod controlcenter-0 -n $(NAMESPACE)
 	@echo "→ Waiting for pod to be ready (timeout 3m)..."
 	kubectl wait --for=condition=ready pod/controlcenter-0 -n $(NAMESPACE) --timeout=180s
 	@echo "✔ cmf-proxy sidecar injected. C3 localhost:8080 now proxies to cmf-service:80."
+	@echo "✔ controlcenter liveness probe replaced — a dead C3 now self-heals in ~195s"
+	@echo "   instead of wedging at 2/3. Both patches live behind paused CFK"
+	@echo "   reconciliation; 'make cmf-proxy-remove' reverts them."
 	@echo "   Verify with: make cmf-proxy-logs"
 
 .PHONY: cmf-proxy-remove
-cmf-proxy-remove: ## Remove the cmf-proxy sidecar and resume CFK reconciliation (will trigger C3 pod restart)
+# Resuming reconciliation makes CFK rewrite the StatefulSet, which restores its own
+# (inert) liveness probe — so the probe patch needs no explicit removal step here.
+cmf-proxy-remove: ## Remove the cmf-proxy sidecar + liveness patch, and resume CFK reconciliation (will trigger C3 pod restart)
 	@echo "→ Resuming CFK reconciliation for controlcenter..."
 	kubectl annotate controlcenter controlcenter \
 		platform.confluent.io/pause-reconciliation- \
