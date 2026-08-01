@@ -1,17 +1,17 @@
 # Confluent Kafka Isotope
-`confluent-kafka-isotope` is a reference implementation of an e-commerce order pipeline that uses Kafka Interceptors with Apache Flink to capture and report event tracing data — both in batch and near real time.
+`confluent-kafka-isotope` is a reference implementation of an **_e-commerce order pipeline that uses Kafka Interceptors, Prometheus, and Apache Flink to capture, analyze, and report end-to-end event-tracing data in both batch and near real time_**.
 
-Much like isotopes traced through a biochemical pathway, each event carries metadata that allows it to be tracked as it moves through Kafka topics and distributed microservices.
+Much like isotopes used to trace molecules through a biochemical pathway, each event carries lightweight metadata that allows it to be followed as it moves through Kafka topics and distributed microservices.
 
-Kafka topics become the connective tissue between services, while Kafka Interceptors quietly transform the pipeline itself into an observable distributed system.
+**_Kafka topics become the connective tissue between services_**, while Kafka Interceptors quietly transform the event pipeline itself into an observable distributed system.
 
 ---
 
 **Table of Contents**
 <!-- toc -->
-- [**1.0 How the isotope is carried**](#10-how-the-isotope-is-carried)
+- [**1.0 How an Isotope Traverses an Event Pipeline**](#10-how-an-isotope-traverses-an-event-pipeline)
 - [**2.0 Architecture**](#20-architecture)
-- [**3.0 Repo layout**](#30-repo-layout)
+- [**3.0 Project layout**](#30-project-layout)
 - [**4.0 Running**](#40-running)
   - [**4.1. Unit tests (no broker, instant)**](#41-unit-tests-no-broker-instant)
   - [**4.2 Demo CLI — see one trace propagate live**](#42-demo-cli--see-one-trace-propagate-live)
@@ -25,17 +25,25 @@ Kafka topics become the connective tissue between services, while Kafka Intercep
 
 ---
 
-## **1.0 How the isotope is carried**
+## **1.0 How an Isotope Traverses an Event Pipeline**
 
-An isotope is a lightweight tracing artifact attached to Kafka record headers. Like a biochemical isotope used to trace molecules through a metabolic pathway, it lets the journey of a record through an event-driven architecture be observed and analyzed. This project renders a Kafka pipeline as a **bipartite graph** — services on one vertex set, topics on the other — so every produce edge, consume edge, and terminal consumer becomes a first-class node in a single topology view.
+An **Isotope** is a **_lightweight tracing artifact attached to Kafka record headers_**. Like a biochemical isotope used to trace molecules through a metabolic pathway, it allows the journey of a record through an event-driven architecture to be observed and analyzed.
 
-A producer interceptor stamps the isotope and appends one hop per `send()` (the produce edges); consumers call `IsotopeContext.recordConsume(...)` to emit a value-less marker on `isotope_consume_edge_markers` (the consume edges), and consume-then-produce services call `IsotopeContext.adoptFromRecord(...)` so the trace identity survives each hop. Apache Flink reads only the headers and reconstructs end-to-end latency, the full service→topic→service topology, drop/duplication rates, and coverage — identically on **Confluent Platform** (self-managed) and **CCAF** (managed).
+This project models a Kafka pipeline as a **bipartite graph**: *services occupy one vertex set*, *topics the other*, and *every produce and consume operation forms an edge between them*. The resulting graph provides a unified view of the complete event topology, from producers to intermediate processing services to terminal consumers.
+
+A `ProducerInterceptor` stamps each record with an isotope and appends one hop for every `send()` operation, capturing the produce edges. Consumers call `IsotopeContext.recordConsume(...)` to emit a lightweight marker representing the corresponding consume edges, while services that consume and then produce invoke `IsotopeContext.adoptFromRecord(...)` so the trace identity persists across every hop. Apache Flink reconstructs the complete **service → topic → service** graph from the isotope headers alone, producing reports such as end-to-end latency, topology discovery, coverage analysis, duplicate and loss detection, and forensic trace replay. The same implementation runs unchanged on both Confluent Platform (self-managed) with Confluent Managed Flink (CMF) and Confluent Cloud for Apache Flink (CCAF).
 
 > **Full design** — the header layout (`x-isotope` JSON + seven scalar headers with a worked example), how the producer interceptor gets invoked, why the consume side uses explicit calls instead of a `ConsumerInterceptor`, and the bipartite-graph rationale — is in **[docs/design.md](docs/design.md)**.
 
 ## **2.0 Architecture**
 
-A bird's-eye view of the moving parts. The demo CLI in [app/](app/) consumes the external tracing library ([`ai.signalroom:kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope)), which registers a Kafka producer interceptor that stamps the isotope into record headers on every `send()`; consume-then-produce services adopt the inbound trace via an explicit `IsotopeContext.adoptFromRecord(record)` call; records flow through a 3-topic chain; Flink SQL reads only the headers and emits 1-minute aggregate reports. The same source/view DDL deploys to both runtimes — **CP** on Minikube runs the `.fql` under [scripts/flink/sql/cp/](scripts/flink/sql/cp/) as a single Flink 2.1 CMF **Application** (`IsotopeReportsJob`), and **CCAF** in Confluent Cloud applies inline `confluent_flink_statement` resources under [terraform/](terraform/). The shadow JAR from [ptf/](ptf/) (which powers two of the seven reports) runs on both runtimes — bundled into the CP application JAR, uploaded as a Flink artifact on CCAF. (Kafka is drawn once below for brevity — each runtime provisions its own cluster.)
+A bird's-eye view of the moving parts. The demo CLI in [`app/`](app/) consumes the external tracing library ([`ai.signalroom:kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope)), which registers a Kafka `ProducerInterceptor` that stamps an isotope into record headers on every `send()`. Consume-then-produce services propagate the inbound trace by explicitly calling `IsotopeContext.adoptFromRecord(record)`. Business events then flow through a three-topic Kafka pipeline, where Flink SQL reads the isotope metadata and emits one-minute aggregate reports.
+
+The same source and view DDL deploy unchanged to both runtimes. **Confluent Platform (CP)** on Minikube executes the `.fql` files under [`scripts/flink/sql/cp/`](scripts/flink/sql/cp/) as a single Flink 2.1 CMF Application (`IsotopeReportsJob`), while **Confluent Cloud for Apache Flink (CCAF)** applies the same logical SQL as inline `confluent_flink_statement` Terraform resources under [`terraform/`](terraform/). The shadow JAR from [`ptf/`](ptf/)—which powers two of the seven reports—runs unchanged on both runtimes: bundled into the CP application JAR and uploaded as a Flink artifact on CCAF.
+
+Alongside that—**additive, opt-in, and disabled by default**—the interceptor can also emit **Micrometer** metrics for **Prometheus**, with **Grafana** providing visualization ([§ 4.6](#46-stateless-reports-via-micrometer--prometheusgrafana-optional)). This path produces the three **stateless** reports (`latency_1m`, `topology_1m`, and `hop_distribution_1m`) without requiring a stream processor. The remaining four reports continue to run in Flink because they depend on per-`trace_id` state or absence-of-event analysis, which falls outside Prometheus's query model.
+
+*(Kafka is drawn once below for brevity; each runtime provisions its own Kafka cluster.)*
 
 ```mermaid
 flowchart TB
@@ -57,6 +65,17 @@ flowchart TB
     IPI -- "produce (x-isotope JSON + 7 scalar headers)" --> Kafka
     Kafka -- "consume + adopt" --> Adopt
     Mark -- "produce (forwarded headers + x-isotope-consumer-service)" --> TC
+
+    subgraph Metrics["Optional metrics path (§ 4.6) — 3 of the 7 reports"]
+        direction LR
+        PIM["PrometheusIsotopeMetrics<br/>(kafka-isotope-metrics)<br/>Micrometer meters · GET /metrics :9404"]
+        PROM["Prometheus<br/>windows at read time — no watermark wait"]
+        GRAF["Grafana<br/>latency · topology · hop_distribution"]
+        PIM --> PROM --> GRAF
+    end
+
+    IPI -. "opt-in flag<br/>produce-side meters" .-> PIM
+    Mark -. "consume-side meters" .-> PIM
 
     subgraph PTF["ptf/ — isotope-flink-udf shadow JAR"]
         Pcts["LatencyPercentilesPTF<br/>T-Digest p50/p95/p99"]
@@ -90,17 +109,20 @@ flowchart TB
         direction LR
         K8S["k8s/base/ + CFK Operator + CMF 2.4 + MinIO<br/>Makefile: cp-up · flink-up · flink-reports-up"]
         TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 25 statements (+3 optional AI)<br/>Makefile: cc-flink-reports-up"]
+        MON["k8s/monitoring/<br/>Prometheus + Grafana pods; scrape host<br/>stages via host.minikube.internal<br/>Makefile: metrics-up"]
     end
 
     K8S -. provisions .-> Kafka
     K8S -. provisions .-> CP
     TF -. provisions .-> Kafka
     TF -. provisions .-> CC
+    MON -. provisions .-> PROM
+    MON -. provisions .-> GRAF
 ```
 
 See [§ 3.0](#30-repo-layout) for the file tree behind each box, and [§ 4.0](#40-running) for the run commands.
 
-## **3.0 Repo layout**
+## **3.0 Project layout**
 
 The isotope tracing library lives in its own repo — **[j3-signalroom/kafka-isotope](https://github.com/j3-signalroom/kafka-isotope)** (`ai.signalroom:kafka-isotope-core` + `ai.signalroom:kafka-isotope-metrics`). This repo is the runnable demo that consumes it.
 
