@@ -1,23 +1,26 @@
 # Stateless reports via Micrometer → Prometheus/Grafana (optional)
-
-A metrics-native alternative to three of the seven Flink reports: emit them as
-Micrometer meters from the producer interceptor and let Prometheus do the
-windowing at read time. **Additive and opt-in** — it does not replace the Flink
-reports. The companion one-command showcase (Prometheus + Grafana on Minikube)
-has its own runbook: [k8s/monitoring/README.md](../k8s/monitoring/README.md).
-
-**Contents**
-- [Why three of seven](#why-three-of-seven)
-- [Enabling the exporter](#enabling-the-exporter)
-- [The three reports as PromQL](#the-three-reports-as-promql)
-- [Consume-side meters](#consume-side-meters)
-- [What stays in Flink — and two deliberate gaps](#what-stays-in-flink--and-two-deliberate-gaps)
-- [One-command showcase](#one-command-showcase-prometheus--grafana-on-minikube)
+A metrics-native alternative to three of the seven Flink reports: emit them as Micrometer meters from the producer interceptor and let Prometheus do the windowing at read time. **Additive and opt-in** — it does not replace the Flink reports. The companion one-command showcase (Prometheus + Grafana on Minikube) has its own runbook: [k8s/monitoring/README.md](../k8s/monitoring/README.md).
 
 ---
 
-## Why three of seven
+**Table of Contents**
+<!-- toc -->
+- [**1.0 Why three of seven**](#10-why-three-of-seven)
+- [**2.0 Enabling the exporter**](#20-enabling-the-exporter)
+- [**3.0 The three reports as PromQL**](#30-the-three-reports-as-promql)
+- [**4.0 Consume-side meters**](#40-consume-side-meters)
+- [**5.0 Operational queries (cookbook)**](#50-operational-queries-cookbook)
+- [**6.0 Mapping questions to PromQL (Easy → Medium)**](#60-mapping-questions-to-promql-easy--medium)
+  + [**6.1 Easy — single record, single trace**](#61-easy--single-record-single-trace)
+  + [**6.2 Easy → Medium — single per-minute aggregates**](#62-easy--medium--single-per-minute-aggregates)
+  + [**6.3 Medium — cross-window deltas, anomalies, multi-report joins**](#63-medium--cross-window-deltas-anomalies-multi-report-joins)
+- [**7.0 What stays in Flink — and two deliberate gaps**](#70-what-stays-in-flink--and-two-deliberate-gaps)
+- [**8.0 One-command showcase: Prometheus + Grafana on Minikube**](#80-one-command-showcase-prometheus--grafana-on-minikube)
+<!-- tocstop -->
 
+---
+
+## **1.0 Why three of seven**
 Is Flink overkill for these reports? **Yes and no** — it's not all about stateless aggregation. Of the seven reports, **three are pure stateless scalar aggregation** keyed on bounded-cardinality dimensions (service / topic / hop_count — never `trace_id`):
 
 - **`latency_1m`** ([10_latency_report.fql](../scripts/flink/sql/cp/10_latency_report.fql)) — avg/max latency per `(pipeline, origin_service, this_topic)`.
@@ -30,8 +33,7 @@ Emission lives in one place — [PrometheusIsotopeMetrics.java](https://github.c
 
 > **Packaged as a library.** The tracing is an adoptable, publishable library, split so metrics are optional: [`kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope/tree/main/kafka-isotope-core) carries the propagation (interceptor, headers, consume markers — Jackson + Kafka only), and [`kafka-isotope-metrics`](https://github.com/j3-signalroom/kafka-isotope/tree/main/kafka-isotope-metrics) adds the Micrometer/Prometheus exporter. The core routes emissions through a no-op `IsotopeMetricsSink` until `kafka-isotope-metrics` registers the Prometheus one, so propagation pulls no metrics dependency. The runnable stages below (`:app`) are the reference consumer — see [kafka-isotope-core/README.md](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-core/README.md) to adopt it elsewhere.
 
-## Enabling the exporter
-
+## **2.0 Enabling the exporter**
 Pass `-Dmetrics.prometheus.enabled=true` to any long-running stage. **Producing** stages (`hop` / `enrich` / `fulfill`) emit the produce-side meters via the interceptor; **consuming** stages emit the consume-side meters via the marker path ([Consume-side meters](#consume-side-meters)) — `hop` does both (it consumes *and* produces), and the terminal `consume` / `ship` stages emit the consume side alone. The app serves the meters at `GET /metrics` on `metrics.prometheus.port` (default `9404`) via the JDK's built-in HTTP server — no extra runtime.
 
 ```bash
@@ -54,8 +56,7 @@ Point a Prometheus scrape job at each stage's `:9404` and the three reports beco
 > ./gradlew :app:run -Dmetrics.prometheus.enabled=true -Disotope.consume.from=latest --args="enrich"
 > ```
 
-## The three reports as PromQL
-
+## **3.0 The three reports as PromQL**
 Two meters cover all three reports — a `Timer` whose count doubles as the topology edge count, plus a `Counter` for the hop histogram:
 
 | Report | Meter (Prometheus name) | Labels |
@@ -78,8 +79,7 @@ sum by (pipeline, origin_service, this_service, this_topic) (increase(isotope_ho
 sum by (pipeline, this_topic, hop_count) (increase(isotope_hop_records_total[1m]))
 ```
 
-## Consume-side meters
-
+## **4.0 Consume-side meters**
 The three meters above all come from the **produce** side — the interceptor on `send()`. The **consume** side adds three more. Two — the edge counter and the time-to-consume latency — are emitted by [`IsotopeContext.recordConsume`](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-core/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java) right beside the consume-edge marker it writes to `isotope_consume_edge_markers`. The third, `isotope.consume.age`, is emitted **once per consumed record on whichever path the consumer takes**: continuing consumers report it from the **adoption path** ([`IsotopeContext.adoptFromRecord(record, service)`](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-core/src/main/java/ai/signalroom/kafka/isotope/IsotopeContext.java)), and terminal consumers — which never adopt — report it from the **marker path** (`recordConsume`, guarded on `current() == null` so a stage that does both, like `hop`, never double-counts). So age fires on every consuming stage: `hop` via adoption, the terminal `consume` / `ship` stages via the marker. Same gating — no-op unless the exporter is started.
 
 | Signal | Meter (Prometheus name) | Labels |
@@ -107,8 +107,7 @@ These are **net-new signals**, not a port of a Flink report. `isotope_consume_re
 
 > The same **backlog caveat** from [Enabling the exporter](#enabling-the-exporter) applies: `hop` / `consume` / `ship` use a random consumer group with `auto.offset.reset=earliest`, so a fresh stage replays from offset 0 and both `isotope_consume_latency_seconds_sum` and `isotope_consume_age_seconds_sum` then reflect days-old origins, not steady-state. Read the windowed `rate(...sum[1m]) / rate(...count[1m])`, or start with `-Disotope.consume.from=latest`.
 
-## Operational queries (cookbook)
-
+## **5.0 Operational queries (cookbook)**
 The queries above mirror the three reports. These are the **operational** angles you'd reach for when running the demo or alerting on it — they lean on the `status` label (present on every meter: `success` on the happy path) and on read-time ratios. All are `pipeline`-scoped via `{pipeline=~"$pipeline"}` when used in the provisioned dashboard.
 
 ```promql
@@ -139,18 +138,16 @@ up{job="isotope-stages"} == 0
 
 > **Why no `histogram_quantile`?** These are Micrometer `Timer`s exported as `_sum`/`_count`/`_max` — there are **no `_bucket` series**, so percentiles aren't available. Use `rate(_sum)/rate(_count)` for the average and `_max` for the recent worst case (a decaying per-step max, not an all-time high). Enable client-side histograms in the exporter if you need true quantiles.
 
-## Mapping questions to PromQL (Easy → Medium)
-
+## **6.0 Mapping questions to PromQL (Easy → Medium)**
 What can you actually *ask* these meters? Below, each question carries a verdict:
 
 - ✅ **PromQL** — answerable directly from the meters.
 - 🟡 **PromQL (approx)** — answerable as a bounded-cardinality *aggregate*; the exact, per-trace form stays in Flink (or the record header).
 - 🔴 **Header / Flink** — per-`trace_id` or absence-of-event; **no Prometheus equivalent** (these meters never tag `trace_id` — see [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java)).
 
-### Easy — single record, single trace
-
+### **6.1 Easy — single record, single trace**
 Every question here is about **one** record or trace. Prometheus aggregates away identity, so the answer lives on the record's `isotope` header (inspect the record) or in Flink's per-trace reports — **not** in these meters.
-
+  
 | Question | Verdict | Where to look |
 |---|---|---|
 | Did my record get tagged? | 🔴 | The `isotope` header on the record itself — presence = tagged. |
@@ -160,8 +157,7 @@ Every question here is about **one** record or trace. Prometheus aggregates away
 | Did the trace ID survive a consume-then-produce hop? | 🔴 | App/Flink per-trace; a counter can't follow one `trace_id`. |
 | Which pipeline does this trace belong to? | 🔴 | Header `pipeline` field. (`pipeline` is a meter *label*, but can't isolate one trace.) |
 
-### Easy → Medium — single per-minute aggregates
-
+### **6.2 Easy → Medium — single per-minute aggregates**
 This is the meters' sweet spot: bounded-cardinality scalar aggregation, windowed at query time.
 
 ```promql
@@ -189,8 +185,7 @@ sum (increase(isotope_hop_records_total{hop_count="32"}[5m]))
 sum by (pipeline) (increase(isotope_hop_records_total[1m]))
 ```
 
-### Medium — cross-window deltas, anomalies, multi-report joins
-
+### **6.3 Medium — cross-window deltas, anomalies, multi-report joins**
 Cross-window deltas and "newly appeared" detection are a Prometheus *strength*; per-trace coverage and stuck-trace detection are where it hands off to Flink.
 
 ```promql
@@ -223,8 +218,7 @@ unless
 
 The pattern: **aggregates and time-deltas → PromQL; identity, dedup, and absence → Flink.** That boundary is the same one [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java) draws (3 metrics-native reports, 4 stay in Flink), and the next section spells out the two columns that can never cross it.
 
-## What stays in Flink — and two deliberate gaps
-
+## **7.0 What stays in Flink — and two deliberate gaps**
 Moving these out isn't free — two columns the Flink reports carry have **no Prometheus equivalent**, and both are documented in [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java):
 
 - **No `distinct_traces`.** All three SQL reports carry a `COUNT(DISTINCT trace_id)` column. A counter can't dedup, and `trace_id` is unbounded-cardinality so it can't be a label. If you need it, that column stays in Flink (or approximate it with a HyperLogLog sketch).
@@ -234,7 +228,7 @@ So the line between "metric" and "Flink job" runs *through* a couple of these re
 
 **Why `latency_percentiles_1m` is NOT in this list.** Percentiles *can* be served by Prometheus — but only via a *classic* histogram (`publishPercentileHistogram()` + `histogram_quantile()`), whose accuracy is **bucket-bound, not adaptive**: error is the width of fixed, pre-chosen buckets, so the tail (p99) is only as good as your bucket layout, and covering a range finely means emitting hundreds of `le` series per tag combo. Prometheus's adaptive answer — *native histograms* (exponential buckets, the closest thing to a [T-Digest](https://www.sciencedirect.com/science/article/pii/S2665963820300403)) — isn't emittable through Micrometer yet (experimental, protobuf-only as of late 2024). So the [T-Digest PTF](../scripts/flink/sql/cp/70_latency_percentiles_report.fql) wins on tail accuracy **and** scales better: its sketch is bounded (~few KB/key) and mergeable, whereas at production volume a Micrometer percentile-histogram's `le`-bucket cardinality grows with the range you need to resolve. The built-in Flink `PERCENTILE` aggregate (exact, pure SQL) is *also* the wrong call at high volume — it retains every value in the window — so percentiles stay a **T-Digest sketch PTF** on purpose (see that file's header for the full rationale). This is a 3-Micrometer / 4-Flink split, not 4/3.
 
-## One-command showcase: Prometheus + Grafana on Minikube
+## **8.0 One-command showcase: Prometheus + Grafana on Minikube**
 
 To *see* these meters instead of `curl`-ing `/metrics`, there's an optional, self-contained stack under [k8s/monitoring/](../k8s/monitoring/) — Prometheus + Grafana as Minikube pods, with the datasource and a dashboard (all six produce/consume signals above) **auto-provisioned**, so it opens straight to a populated board with no login.
 
