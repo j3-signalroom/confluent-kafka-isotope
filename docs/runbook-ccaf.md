@@ -106,7 +106,7 @@ Runs `terraform destroy -auto-approve` — deletes **every** resource above, inc
 
 ## **8.0 Troubleshooting**
 - **`CONFLUENT_API_KEY … must be set`.** The `make` target requires both vars on the command line (or exported and passed through) — see [§1.0 Prerequisites](#10-prerequisites).
-- **`aggregate functions are not supported`.** Expected if you try to add a UDAF — CCAF rejects user-defined aggregates, which is why percentiles is a PTF  — see [README §4.5](../README.md#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf).
+- **`Aggregate functions are not supported`.** Expected if you try to add a UDAF — CCAF rejects user-defined aggregates, which is why percentiles is a PTF — see [README §4.5](../README.md#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf).
 - **Typed `CREATE TABLE` silently no-ops.** A report sink topic was pre-created, so the Topic Catalog auto-imported it as `(key BYTES, val BYTES)` — don't pre-create the `isotope_report_*_1m` topics — see [§3.0 What gets created](#30-what-gets-created).
 - **No report rows.** Almost always the watermark — traffic must span multiple 1-minute windows; wait ~90s after the last record — see [§5.0 Drive traffic](#50-drive-traffic-required-to-see-report-rows).
 - **App can't authenticate.** `cc-cli-env.sh` couldn't read `terraform output` — re-run `make cc-flink-reports-up` so the rotated keys exist, then retry.
