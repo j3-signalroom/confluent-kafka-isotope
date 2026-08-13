@@ -1,9 +1,8 @@
 # Flink SQL reports
-
 Seven deterministic reports (plus an optional eighth, AI-generated one — see [Optional: AI root-cause analysis](#optional-ai-root-cause-analysis-ccaf-only-off-by-default))
 that read two streams of isotope metadata — the **produce side** (the `x-isotope-*` headers stamped on every event topic record by `IsotopeProducerInterceptor`) and the **consume side** (the value-less marker records on `isotope_consume_edge_markers` emitted by `IsotopeContext.recordConsume`) — and surface what's flowing where, how fast, and how reliably. Each report runs as a long-lived `INSERT INTO <report>_1m SELECT …` streaming job. The aggregation logic is identical across runtimes; only the source/sink DDL and function-registration glue differ.
 
-The headline addition is the `bipartite_topology` report: it unions the produce and consume views to render the pipeline as a literal [**bipartite graph**](https://en.wikipedia.org/wiki/Bipartite_graph) from graph theory — services in one vertex set, topics in the other, edges crossing between them in both directions. See [root README §1.0 "Background — why 'bipartite'?"](../../README.md#10-how-the-isotope-is-carried) for the full motivation.
+The headline addition is the `bipartite_topology` report: it unions the produce and consume views to render the pipeline as a literal [**bipartite graph**](https://en.wikipedia.org/wiki/Bipartite_graph) from graph theory — services in one vertex set, topics in the other, edges crossing between them in both directions. See [root README §1.0 "How an Isotope Traverses an Event Pipeline"](../../README.md#10-how-an-isotope-traverses-an-event-pipeline) for the full motivation.
 
 | Runtime | Reports | Sink format | Where the SQL lives |
 |---|---|---|---|
@@ -125,4 +124,4 @@ make cc-flink-reports-down CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
                            # terraform destroy: deletes the environment and everything in it
 ```
 
-See the [root README §4.5](../../README.md#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit.
+See the [root README §4.5 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit.
