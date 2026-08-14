@@ -154,7 +154,7 @@ if [ "${create_action}" = true ]; then
     terraform output artifact_id
     echo
 
-    # ----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # Smoke-load scripts/cc-cli-env.sh so the user sees the masked-credential
     # summary before being told to source it themselves. Running it here is
     # a subshell — the exports do NOT propagate to the parent shell that
@@ -167,7 +167,7 @@ if [ "${create_action}" = true ]; then
     terraform graph | dot -Tpng > "../docs/terraform.png"
 
     echo
-    print_info "Next step — drive the 4-stage demo (see README § 4.5):"
+    print_info "Next step — drive the 4-stage demo (see README §4.5):"
     print_info "    scripts/cc-app-run.sh place 'hello'    # kick the chain off"
     print_info "    scripts/cc-app-run.sh enrich"
     print_info "    scripts/cc-app-run.sh fulfill"

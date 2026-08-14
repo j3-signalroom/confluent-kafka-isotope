@@ -110,7 +110,7 @@ public final class App {
 
     // Consumer offset reset for the hop / consume / sink modes. Defaults to
     // "earliest" so a fresh random consumer group replays the whole topic —
-    // the § 4.4 sustained-traffic flow relies on that. Pass
+    // the §4.4 sustained-traffic flow relies on that. Pass
     // -Disotope.consume.from=latest to skip the backlog and measure only
     // records produced after the stage starts; useful when reading the latency
     // metric, since origin→hop latency for a days-old backlog record is
