@@ -1,12 +1,12 @@
--- =====================================================================
--- Teardown — drops the 5 report sink tables + upstream view + source
--- table + functions. Safe to run repeatedly; uses IF EXISTS.
+-- ================================================================================
+-- Teardown — drops the 6 report sink tables + upstream view + source table +
+-- functions. Safe to run repeatedly; uses IF EXISTS.
 --
--- Reference teardown DDL (mirrors the CCAF drop set). The CP reports now run
--- as a Flink 2.1 CMF Application, so `make flink-reports-down` tears them down
--- by deleting the CMF Application + cmf:// artifact + Kafka sink topics — not by
+-- Reference teardown DDL (mirrors the CCAF drop set). The CP reports now run as a
+-- Flink 2.1 CMF Application, so `make flink-reports-down` tears them down by
+-- deleting the CMF Application + cmf:// artifact + Kafka sink topics — not by
 -- applying this file. Kept as the portable drop-SQL companion to sql/cp/.
--- =====================================================================
+-- ================================================================================
 
 -- Sink tables (each backed by an isotope-report-* Kafka topic + SR Avro subject).
 DROP TABLE    IF EXISTS latency_percentiles_flat_1m;

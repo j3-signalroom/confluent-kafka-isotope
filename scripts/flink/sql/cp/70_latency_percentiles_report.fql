@@ -1,4 +1,4 @@
--- =====================================================================
+-- ================================================================================
 -- Latency-percentiles report — p50 / p95 / p99 of per-hop latency, per
 -- (pipeline, origin_service, this_topic), in 1-minute tumbling windows.
 -- Closes the "no portable percentiles in pure SQL" gap left by
@@ -52,7 +52,7 @@
 --   - The 1-minute window length is hard-coded inside the PTF
 --     (LatencyPercentilesPTF.WINDOW_MS): Flink 2.1.2 rejects extra
 --     user-declared scalar args alongside the implicit on_time / uid args.
--- =====================================================================
+-- ================================================================================
 
 SET 'pipeline.name' = 'isotope_report_latency_percentiles_1m';
 
