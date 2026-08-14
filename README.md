@@ -231,7 +231,8 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
 docs/                                   extracted long-form docs (linked from the README)
-  design.md                             how the isotope is carried (§1.0 deep-dive)
+  design.md                             isotope tracing deep-dive
+  gen_isotope_diagram.py                script to generate the isotope architecture diagram
   isotope_diagram.png                   visual representation of the isotope and its flow through Kafka headers 
   runbook-minikube.md                   full CP-on-Minikube run sequence (§4.4)
   runbook-ccaf.md                       full CCAF / Terraform run sequence (§4.5)
