@@ -26,7 +26,6 @@ Much like isotopes used to trace molecules through a biochemical pathway, each e
 ---
 
 ## **1.0 How an Isotope Traverses an Event Pipeline**
-
 An **Isotope** is a **_lightweight tracing artifact attached to Kafka record headers_**. Like a biochemical isotope used to trace molecules through a metabolic pathway, it allows the journey of a record through an event-driven architecture to be observed and analyzed.
 
 This project models a Kafka pipeline as a **bipartite graph**: *services occupy one vertex set*, *topics the other*, and *every produce and consume operation forms an edge between them*. The resulting graph provides a unified view of the complete event topology, from producers to intermediate processing services to terminal consumers.
@@ -36,7 +35,6 @@ A `ProducerInterceptor` stamps each record with an isotope and appends one hop f
 > **Full architectural design of Isotope Tracing** — the header layout (`x-isotope` JSON + seven scalar headers with a worked example), how the producer interceptor gets invoked, why the consume side uses explicit calls instead of a `ConsumerInterceptor`, and the bipartite-graph rationale — is in **[docs/design.md](docs/design.md)**.
 
 ## **2.0 Project's Architecture**
-
 A bird's-eye view of the moving parts. The demo CLI in [`app/`](app/) consumes the external tracing library ([`ai.signalroom:kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope)), which registers a Kafka `ProducerInterceptor` that stamps an isotope into record headers on every `send()`. Consume-then-produce services propagate the inbound trace by explicitly calling `IsotopeContext.adoptFromRecord(record)`. Business events then flow through a three-topic Kafka pipeline, where Flink SQL reads the isotope metadata and emits one-minute aggregate reports.
 
 Both runtimes run the same seven logical reports off the same source and view definitions, though each runtime keeps its own copy of the SQL. **Confluent Platform (CP)** on Minikube executes the `.fql` files under [`scripts/flink/sql/cp/`](scripts/flink/sql/cp/) as a single Flink 2.1 Confluent Manager for Apache Flink (CMF) Application (`IsotopeReportsJob`), while **Confluent Cloud for Apache Flink (CCAF)** applies the same logical SQL as inline `confluent_flink_statement` Terraform resources under [`terraform/`](terraform/). The shadow JAR from [`ptf/`](ptf/)—which powers two of the seven reports—runs unchanged on both runtimes: bundled into the CP application JAR and uploaded as a Flink artifact on CCAF.
@@ -90,7 +88,7 @@ flowchart TB
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/setup-confluent-flink.tf<br/>25 × confluent_flink_statement"]
+            TFSQL["terraform/setup-confluent-flink.tf<br/>25 × confluent_flink_statement<br/>(+3 when trace_rca is enabled)"]
             JCC["7 × INSERT INTO TUMBLE(1 MIN)<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
@@ -105,6 +103,18 @@ flowchart TB
     JCP --> R
     JCC --> R
 
+    subgraph AI["Optional AI trace-RCA (§4.5) — CCAF only, off by default"]
+        direction LR
+        MODEL["CREATE MODEL trace_rca<br/>remote text-generation model<br/>(openai · anthropic · bedrock)"]
+        RCAJ["INSERT … LATERAL TABLE(ML_PREDICT('trace_rca', …))<br/>one call per stuck-trace alert, never per record"]
+        MODEL --> RCAJ
+    end
+
+    RCA[("isotope_report_trace_rca_1m<br/>Protobuf+SR · root-cause hypothesis<br/>+ one-line remediation")]
+
+    R -. "stuck_trace alerts only" .-> RCAJ
+    RCAJ -. "own topic — deterministic reports untouched" .-> RCA
+
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator + CMF 2.4 + MinIO<br/>Makefile: cp-up · flink-up · flink-reports-up"]
@@ -118,12 +128,15 @@ flowchart TB
     TF -. provisions .-> CC
     MON -. provisions .-> PROM
     MON -. provisions .-> GRAF
+    TF -. "var.enable_trace_rca = true<br/>terraform/setup-ccaf-ai.tf" .-> AI
+
+    classDef optional stroke-dasharray: 5
+    class AI,MODEL,RCAJ,RCA optional
 ```
 
 See [§3.0](#30-project-layout) for the file tree behind each box, and [§4.0](#40-getting-started) for the run commands.
 
 ## **3.0 Project layout**
-
 The isotope tracing library lives in its own repo — **[j3-signalroom/kafka-isotope](https://github.com/j3-signalroom/kafka-isotope)** (`ai.signalroom:kafka-isotope-core` + `ai.signalroom:kafka-isotope-metrics`). This repo is the runnable demo that consumes it.
 
 ```
@@ -245,14 +258,12 @@ cd /path/to/confluent-kafka-isotope
 Then decide what you want to run:
 
 ### **4.1 Unit tests (no broker, instant)**
-
 ```bash
 ./gradlew test                       # runs :ptf:test (the app has no unit tests in this repo)
 # or scoped:
 ./gradlew :ptf:test                  # TDigestsTest — T-Digest sketch (de)serialization + accuracy
 ```
 ### **4.2 Demo CLI — see one trace propagate live**
-
 The fastest way to watch the isotope mechanic. Requires the cluster to be up and the Kafka + SR forwards running (see step 3 below for the bring-up commands). The CLI has two argument styles — **pipeline-position verbs** that bake in the orders.* topic chain (recommended for the demo) and **generic verbs** that take raw topic + service args (for ad-hoc inspection on any topic):
 
 | Verb | Args | What it does |
@@ -292,7 +303,6 @@ Terminal D's output for each record shows the same `trace_id` across all three h
 > **Just want the commands?** The full local stack-up sequence (cluster → Kafka → Flink → reports → traffic → teardown) is consolidated in **[docs/runbook-minikube.md](docs/runbook-minikube.md)**.
 
 ### **4.3 Integration tests (live Kafka via Minikube)**
-
 Bring up the local Confluent Platform stack and port-forward Kafka + SR:
 
 ```bash
@@ -332,7 +342,6 @@ The integration tests cover:
 | `BipartiteTopologyIT` | The 4-stage `order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service → topic-CD → shipping-notification-service` chain emits exactly three consume-edge markers to a per-test markers topic — one per consume edge. Every marker carries the trace ID, forwarded `x-isotope-*` scalars describing the upstream producer, and the new `x-isotope-consumer-service` naming the downstream consumer. Asserts the `(consumer_service, consumed_topic)` set is exactly the three pairs of stages 2-4 |
 
 ### **4.4 Confluent Platform on Minikube — Production-Like Streaming, Running Locally**
-
 > **Caveat:** Minikube is a single-node cluster. It is not a production-like environment, but it is sufficient for local development and testing. The Confluent Platform (CP) stack runs in Minikube, and you can port-forward Kafka and Schema Registry to your local machine.
 
 To **_run_**, **_test_**, and **_debug_** Apache Flink like a production engineer, this project provides a full Confluent Platform stack running locally on [Minikube](https://minikube.sigs.k8s.io/docs/) — no cloud required.
@@ -360,23 +369,19 @@ Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **si
 Report sink topics ride **Avro+SR** (`avro-confluent`, auto-registered on first write) so Control Center renders them natively — a deliberate *format-by-domain* split: app events are **Protobuf+SR** (`DemoEvent`), Flink aggregates are **Avro+SR** (cp-flink ships no SR-integrated Protobuf format), and the consume-edge marker topic `isotope_consume_edge_markers` is **null-value / headers-only**. Not a defect — a clean split by domain.
 
 ### **4.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**
-
 The CCAF parallel of [§4.4](#44-confluent-platform-on-minikube--production-like-streaming-running-locally), driven by Terraform under [terraform/](terraform/) — no local cluster. One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, compute pool, two rotating service-account API key pairs (Kafka + Schema Registry), the uploaded PTF JAR, and 25 `confluent_flink_statement` resources (4 ALTER TABLE + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION + 7 INSERT INTO, plus 2 transient DROP FUNCTION). The shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version and `iac-confluent-api_key_rotation-tf_module`.
 
 ![terraform-graph](docs/terraform.png)
 
 **The full provision → deploy → traffic → teardown sequence is consolidated in [docs/runbook-ccaf.md](docs/runbook-ccaf.md).** The short version: `export` a Cloud-level Confluent Cloud API key, `make cc-flink-reports-up` (~6–8 min first run; idempotent re-applies), drive traffic with `scripts/cc-app-run.sh place|enrich|fulfill|ship` across **multiple** 1-minute windows (a single burst sits in one open window forever, and you wait ~90s after the last record), then `make cc-flink-reports-down` to `terraform destroy` the whole environment.
 
-Two CCAF-specific design points worth keeping in the README:
-
-**Format-by-runtime (not -by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
+**Format-by-runtime (not-by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's WITH clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
 
 **Why percentiles is a PTF.** CCAF rejects all `CREATE FUNCTION` statements for user-defined *aggregate* functions ("aggregate functions are not supported"). Percentiles would naturally be an aggregate, so to keep the report portable it's implemented as a `ProcessTableFunction` instead — `LATENCY_PERCENTILES` (class `LatencyPercentilesPTF`) does its own 1-minute tumbling-window aggregation over a T-Digest sketch via per-window state and event-time timers. A PTF has no such restriction, so it registers and runs on **both** runtimes, exactly like `STUCK_TRACE_PTF`. Both runtimes therefore run the same seven reports: `latency` (avg/min/max), `topology` (produce-side), `bipartite_topology` (full service↔topic↔service graph), `hop_distribution`, `coverage`, `stuck_trace`, and `latency_percentiles` (p50/p95/p99).
 
 **Optional: AI root-cause analysis (CCAF-only, off by default).** Beyond the seven deterministic reports, [terraform/setup-ccaf-ai.tf](terraform/setup-ccaf-ai.tf) wires an **eighth, AI-generated report** that turns each stuck-trace *alert* into a natural-language root-cause hypothesis plus a one-line remediation. It adds three `confluent_flink_statement` resources — `CREATE MODEL trace_rca` (a remote text-generation model), a `proto-registry` sink `isotope_report_trace_rca_1m`, and an `INSERT … SELECT … LATERAL TABLE(ML_PREDICT('trace_rca', …))` — all **gated on `var.enable_trace_rca` (default `false`)**, so a normal `make cc-flink-reports-up` is completely un``affected. The model is invoked once per *alert* (the low-volume 1-minute stuck-trace report topic), never per record, and its output lands on its own topic — it never overwrites the deterministic reports. Defaults target OpenAI (`gpt-4o`); for Claude hosted by Anthropic — a **direct** CCAF provider — set `rca_model_provider = "anthropic"`, `rca_model_endpoint = "https://api.anthropic.com/v1/messages"`, a Claude `rca_model_version`, and your Claude `rca_model_api_key` (bare API key, no AWS auth), plus the Anthropic-required `rca_model_max_tokens`. Claude via AWS Bedrock (`rca_model_provider = "bedrock"`) also works but isn't required. The standalone SQL PoC — a `CREATE MODEL` + `ML_PREDICT` walkthrough with provider notes and alternative options — is in [scripts/flink/sql/ccaf-ai/trace_rca.fql](scripts/flink/sql/ccaf-ai/trace_rca.fql).
 
 ### **4.6 Stateless reports via Micrometer → Prometheus/Grafana (optional)**
-
 Three of the seven reports — `latency_1m`, `topology_1m`, `hop_distribution_1m` — are pure stateless scalar aggregation over bounded-cardinality dimensions (service / topic / hop_count, never `trace_id`). Those don't need a stream processor: the [producer interceptor](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-core/src/main/java/ai/signalroom/kafka/isotope/IsotopeProducerInterceptor.java) already has every value in scope on each `send()`, so it emits them as **Micrometer** meters ([PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java)) and lets **Prometheus** window them at read time, with **Grafana** on top. The other four (`latency_percentiles`, `coverage`, `bipartite_topology`, `stuck_trace`) are per-`trace_id` stateful or absence-of-event problems Prometheus can't express, so they **stay in Flink**. This path is **additive and opt-in** — a 3-Micrometer / 4-Flink split.
 
 > **Full details** — the meter/PromQL reference, the produce- and consume-side signals, the two deliberate gaps (`distinct_traces`, windowed `min`), and why percentiles stays a PTF — are in **[docs/metrics.md](docs/metrics.md)**. The one-command Prometheus + Grafana showcase has its own runbook: **[k8s/monitoring/README.md](k8s/monitoring/README.md)** (`make metrics-up`).
