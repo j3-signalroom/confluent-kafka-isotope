@@ -460,6 +460,8 @@ resource "confluent_flink_statement" "isotope_report_latency_1m" {
     );
   EOT
 
+  statement_name = "isotope_report_latency_1m"
+  
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -499,6 +501,8 @@ resource "confluent_flink_statement" "isotope_report_topology_1m" {
     );
   EOT
 
+  statement_name = "isotope_report_topology_1m"
+
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -537,6 +541,8 @@ resource "confluent_flink_statement" "isotope_report_bipartite_topology_1m" {
     );
   EOT
 
+  statement_name = "isotope_report_bipartite_topology_1m"
+
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -572,6 +578,8 @@ resource "confluent_flink_statement" "isotope_report_hop_distribution_1m" {
     );
   EOT
 
+  statement_name = "isotope_report_hop_distribution_1m"
+
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -606,6 +614,8 @@ resource "confluent_flink_statement" "isotope_report_coverage_1m" {
         'value.format' = 'proto-registry'
     );
   EOT
+
+  statement_name = "isotope_report_coverage_1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -643,6 +653,8 @@ resource "confluent_flink_statement" "isotope_report_stuck_trace_1m" {
     );
   EOT
 
+  statement_name = "isotope_report_stuck_trace_1m"
+
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -679,6 +691,8 @@ resource "confluent_flink_statement" "isotope_report_latency_percentiles_1m" {
         'value.format' = 'proto-registry'
     );
   EOT
+
+  statement_name = "isotope_report_latency_percentiles_1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint

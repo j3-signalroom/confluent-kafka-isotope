@@ -1,4 +1,4 @@
--- =====================================================================
+-- ============================================================================
 -- Source tables — Confluent Platform Flink (CMF on Minikube)
 --
 -- Apply via the Flink SQL Client against the CP Flink session cluster:
@@ -22,7 +22,7 @@
 -- orders.enriched / orders.fulfilled. isotope_consume_edge_markers
 -- carries value-less consume-edge markers that
 -- `IsotopeContext.recordConsume` emits.
--- =====================================================================
+-- ============================================================================
 
 -- ---------------------------------------------------------------------
 -- orders.placed — origin-of-trace producer topic.

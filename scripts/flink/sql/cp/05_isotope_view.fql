@@ -1,4 +1,4 @@
--- =====================================================================
+-- ============================================================================
 -- Typed view of the isotope-tagged stream
 --
 -- Decodes the seven scalar reporting headers written by
@@ -12,7 +12,7 @@
 --
 -- All downstream reports read from this view, so they are identical across
 -- CCAF and CP Flink.
--- =====================================================================
+-- ============================================================================
 
 CREATE VIEW IF NOT EXISTS isotope AS
 SELECT

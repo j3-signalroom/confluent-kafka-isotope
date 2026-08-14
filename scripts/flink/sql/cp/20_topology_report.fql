@@ -1,4 +1,4 @@
--- =====================================================================
+-- =========================================================================
 -- Topology report — per-minute counts of records written by each
 -- (producer_service → topic) edge.
 --
@@ -14,7 +14,7 @@
 --      via `origin_service`.
 --
 -- Sinks into `topology_report_1m` (Kafka, Avro+SR).
--- =====================================================================
+-- =========================================================================
 
 SET 'pipeline.name' = 'isotope_report_topology_1m';
 
