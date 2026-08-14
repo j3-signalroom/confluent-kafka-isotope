@@ -459,8 +459,6 @@ resource "confluent_flink_statement" "isotope_report_latency_1m" {
         'value.format' = 'proto-registry'
     );
   EOT
-
-  statement_name = "isotope_report_latency_1m"
   
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -501,8 +499,6 @@ resource "confluent_flink_statement" "isotope_report_topology_1m" {
     );
   EOT
 
-  statement_name = "isotope_report_topology_1m"
-
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -541,8 +537,6 @@ resource "confluent_flink_statement" "isotope_report_bipartite_topology_1m" {
     );
   EOT
 
-  statement_name = "isotope_report_bipartite_topology_1m"
-
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -578,8 +572,6 @@ resource "confluent_flink_statement" "isotope_report_hop_distribution_1m" {
     );
   EOT
 
-  statement_name = "isotope_report_hop_distribution_1m"
-
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -614,8 +606,6 @@ resource "confluent_flink_statement" "isotope_report_coverage_1m" {
         'value.format' = 'proto-registry'
     );
   EOT
-
-  statement_name = "isotope_report_coverage_1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -653,8 +643,6 @@ resource "confluent_flink_statement" "isotope_report_stuck_trace_1m" {
     );
   EOT
 
-  statement_name = "isotope_report_stuck_trace_1m"
-
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -691,8 +679,6 @@ resource "confluent_flink_statement" "isotope_report_latency_percentiles_1m" {
         'value.format' = 'proto-registry'
     );
   EOT
-
-  statement_name = "isotope_report_latency_percentiles_1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -879,6 +865,8 @@ resource "confluent_flink_statement" "insert_latency_report" {
         `this_topic`;
   EOT
 
+  statement_name = "isotope_report_latency_1m"
+
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -925,6 +913,8 @@ resource "confluent_flink_statement" "insert_topology_report" {
         `this_service`,
         `this_topic`;
   EOT
+
+  statement_name = "isotope_report_topology_1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -997,6 +987,8 @@ resource "confluent_flink_statement" "insert_bipartite_topology_report" {
         `consumed_topic`;
   EOT
 
+  statement_name = "isotope_report_bipartite_topology_1m"
+
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -1046,6 +1038,8 @@ resource "confluent_flink_statement" "insert_hop_distribution" {
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
+  statement_name = "isotope_report_hop_distribution_1m"
+
   credentials {
     key    = module.flink_api_key_rotation.active_api_key.id
     secret = module.flink_api_key_rotation.active_api_key.secret
@@ -1091,6 +1085,7 @@ resource "confluent_flink_statement" "insert_coverage_report" {
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
+  statement_name = "isotope_report_coverage_1m"
   credentials {
     key    = module.flink_api_key_rotation.active_api_key.id
     secret = module.flink_api_key_rotation.active_api_key.secret
@@ -1131,6 +1126,8 @@ resource "confluent_flink_statement" "insert_stuck_trace_alerts" {
         )
     );
   EOT
+
+  statement_name = "isotope_report_stuck_trace_1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -1185,6 +1182,8 @@ resource "confluent_flink_statement" "insert_latency_percentiles" {
         )
     );
   EOT
+
+  statement_name = "isotope_report_latency_percentiles_1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
