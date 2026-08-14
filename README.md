@@ -246,6 +246,9 @@ Makefile                                cp-up / flink-up / kafka-pf-up / flink-r
 </details>
 
 ## **3.0 Getting Started**
+
+![isotope-diagram](docs/isotope_diagram.png)
+
 First, clone the repo to your local machine using the [GitHub CLI](https://cli.github.com/):
 
 ```bash
@@ -258,7 +261,7 @@ Change to the repo directory:
 cd /path/to/confluent-kafka-isotope
 ```
 
-Then decide what you want to run:
+Then decide how you want to run repo:
 
 ### **3.1 Unit tests (no broker, instant)**
 ```bash
@@ -300,10 +303,6 @@ The fastest way to watch the isotope mechanic. Requires the cluster to be up and
 ```
 
 Terminal D's output for each record shows the same `trace_id` across all three hops, `origin = order-intake-service` (never reassigned), and `hops[]` listing `order-intake-service → order-enrichment-service → order-fulfillment-service` in order with per-hop timestamps. The bipartite-topology report sees all six edges: produce edges `order-intake-service → orders.placed`, `order-enrichment-service → orders.enriched`, `order-fulfillment-service → orders.fulfilled` and consume edges `orders.placed → order-enrichment-service`, `orders.enriched → order-fulfillment-service`, `orders.fulfilled → shipping-notification-service`. Swap `consume` for `sink` if you only want to inspect records without recording the terminal edge. Override endpoints via `-Dkafka.bootstrap=…` / `-Dschema.registry.url=…` if you're not on the default Minikube layout.
-
-![isotope-diagram](docs/isotope_diagram.png)
-
-> **Just want the commands?** The full local stack-up sequence (cluster → Kafka → Flink → reports → traffic → teardown) is consolidated in **[docs/runbook-minikube.md](docs/runbook-minikube.md#runbook--confluent-platform--flink-on-minikube)**.
 
 ### **3.3 Integration tests (live Kafka via Minikube)**
 Bring up the local Confluent Platform stack and port-forward Kafka + SR:
