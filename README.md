@@ -135,6 +135,7 @@ flowchart TB
 
 <details>
 <summary>See Repo Layout</summary>
+
 The isotope tracing library lives in its own repo — [j3-signalroom/kafka-isotope](https://github.com/j3-signalroom/kafka-isotope) (`ai.signalroom:kafka-isotope-core` + `ai.signalroom:kafka-isotope-metrics`). This repo is the runnable demo that consumes it.
 
 ```
