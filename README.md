@@ -41,7 +41,7 @@ A bird's-eye view of the moving parts. The demo CLI in [`app/`](app/) consumes t
 
 Both runtimes run the same seven logical reports off the same source and view definitions, though each runtime keeps its own copy of the SQL. **Confluent Platform (CP)** on Minikube executes the `.fql` files under [`scripts/flink/sql/cp/`](scripts/flink/sql/cp/) as a single Flink 2.1 Confluent Manager for Apache Flink (CMF) Application (`IsotopeReportsJob`), while **Confluent Cloud for Apache Flink (CCAF)** applies the same logical SQL as inline `confluent_flink_statement` Terraform resources under [`terraform/`](terraform/). The shadow JAR from [`ptf/`](ptf/)—which powers two of the seven reports—runs unchanged on both runtimes: bundled into the CP application JAR and uploaded as a Flink artifact on CCAF.
 
-Alongside that—**additive, opt-in, and disabled by default**—the interceptor can also emit **Micrometer** metrics for **Prometheus**, with **Grafana** providing visualization ([§ 4.6](#46-stateless-reports-via-micrometer--prometheusgrafana-optional)). This path produces the three **stateless** reports (`latency_1m`, `topology_1m`, and `hop_distribution_1m`) without requiring a stream processor. The remaining four reports continue to run in Flink because they depend on per-`trace_id` state or absence-of-event analysis, which falls outside Prometheus's query model.
+Alongside that—**additive, opt-in, and disabled by default**—the interceptor can also emit **Micrometer** metrics for **Prometheus**, with **Grafana** providing visualization ([§4.6](#46-stateless-reports-via-micrometer--prometheusgrafana-optional)). This path produces the three **stateless** reports (`latency_1m`, `topology_1m`, and `hop_distribution_1m`) without requiring a stream processor. The remaining four reports continue to run in Flink because they depend on per-`trace_id` state or absence-of-event analysis, which falls outside Prometheus's query model.
 
 *(Kafka is drawn once below for brevity; each runtime provisions its own Kafka cluster.)*
 
@@ -66,7 +66,7 @@ flowchart TB
     Kafka -- "consume + adopt" --> Adopt
     Mark -- "produce (forwarded headers + x-isotope-consumer-service)" --> TC
 
-    subgraph Metrics["Optional metrics path (§ 4.6) — 3 of the 7 reports"]
+    subgraph Metrics["Optional metrics path (§4.6) — 3 of the 7 reports"]
         direction LR
         PIM["PrometheusIsotopeMetrics<br/>(kafka-isotope-metrics)<br/>Micrometer meters · GET /metrics<br/>:9404 default; 9410/9411/9412 per stage"]
         PROM["Prometheus<br/>windows at read time — no watermark wait"]
@@ -120,7 +120,7 @@ flowchart TB
     MON -. provisions .-> GRAF
 ```
 
-See [§ 3.0](#30-project-layout) for the file tree behind each box, and [§ 4.0](#40-getting-started) for the run commands.
+See [§3.0](#30-project-layout) for the file tree behind each box, and [§4.0](#40-getting-started) for the run commands.
 
 ## **3.0 Project layout**
 
@@ -135,7 +135,7 @@ app/                                    demo CLI + tests (consumes the isotope l
                                         (place / enrich / fulfill / ship) + generic
                                         send / hop / consume / sink modes; registers
                                         IsotopeProducerInterceptor + starts the
-                                        PrometheusIsotopeMetrics exporter (§ 4.6)
+                                        PrometheusIsotopeMetrics exporter (§4.6)
   src/integrationTest/java/.../         BrokerSmokeIT, ProducerInterceptorIT,
                                         ThreeStageHopPropagationIT, BipartiteTopologyIT,
                                         IsotopeTestHarness — live-broker tests; produce/consume
@@ -165,7 +165,7 @@ k8s/base/                               CFK / CMF manifests (applied by `make cp
                                         `make flink-deploy` / `make flink-sql`
                                         (not used by the reports path)
   flink-rbac.yaml                       RBAC for the cp-flink operator
-k8s/monitoring/                         optional metrics showcase (§ 4.6) — `make metrics-up`
+k8s/monitoring/                         optional metrics showcase (§4.6) — `make metrics-up`
   00-namespace.yaml                     dedicated 'monitoring' namespace
   10-prometheus.yaml                    Prometheus pod/Service; scrapes host stages
                                         via host.minikube.internal:9410/9411/9412
@@ -218,12 +218,12 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
 docs/                                   extracted long-form docs (linked from the README)
-  design.md                             how the isotope is carried (§ 1.0 deep-dive)
+  design.md                             how the isotope is carried (§1.0 deep-dive)
   isotope_diagram.png                   visual representation of the isotope and its flow through Kafka headers 
-  runbook-minikube.md                   full CP-on-Minikube run sequence (§ 4.4)
-  runbook-ccaf.md                       full CCAF / Terraform run sequence (§ 4.5)
-  metrics.md                            Micrometer/Prometheus meter + PromQL reference (§ 4.6)
-  terraform.png                         rendered resource graph (embedded in § 4.5)
+  runbook-minikube.md                   full CP-on-Minikube run sequence (§4.4)
+  runbook-ccaf.md                       full CCAF / Terraform run sequence (§4.5)
+  metrics.md                            Micrometer/Prometheus meter + PromQL reference (§4.6)
+  terraform.png                         rendered resource graph (embedded in §4.5)
 Makefile                                cp-up / flink-up / kafka-pf-up / flink-reports-up /
                                         cc-flink-reports-up / cc-flink-reports-down /
                                         metrics-up / metrics-down / metrics-delete / ...
@@ -353,7 +353,7 @@ To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with ap
 
 > These settings ensure stable performance across all components. You can tune them as needed, but lower resource levels may cause pod restarts or degraded performance.
 
-Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, seven sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see **[§ 4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)** for that path; this section is the local-Minikube one.
+Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, seven sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see **[§4.5](#45-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)** for that path; this section is the local-Minikube one.
 
 **The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make flink-up` then `make flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
 
@@ -361,7 +361,7 @@ Report sink topics ride **Avro+SR** (`avro-confluent`, auto-registered on first 
 
 ### **4.5 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**
 
-The CCAF parallel of [§ 4.4](#44-confluent-platform-on-minikube--production-like-streaming-running-locally), driven by Terraform under [terraform/](terraform/) — no local cluster. One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, compute pool, two rotating service-account API key pairs (Kafka + Schema Registry), the uploaded PTF JAR, and 25 `confluent_flink_statement` resources (4 ALTER TABLE + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION + 7 INSERT INTO, plus 2 transient DROP FUNCTION). The shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version and `iac-confluent-api_key_rotation-tf_module`.
+The CCAF parallel of [§4.4](#44-confluent-platform-on-minikube--production-like-streaming-running-locally), driven by Terraform under [terraform/](terraform/) — no local cluster. One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, compute pool, two rotating service-account API key pairs (Kafka + Schema Registry), the uploaded PTF JAR, and 25 `confluent_flink_statement` resources (4 ALTER TABLE + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION + 7 INSERT INTO, plus 2 transient DROP FUNCTION). The shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version and `iac-confluent-api_key_rotation-tf_module`.
 
 ![terraform-graph](docs/terraform.png)
 

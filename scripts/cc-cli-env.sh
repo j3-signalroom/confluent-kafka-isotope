@@ -33,7 +33,7 @@
 #
 # NOTE: requires App.java to read the SASL_SSL + SR-basic-auth system
 # properties. As of this script's first commit, that wiring is a known
-# follow-up (see README § 3.5 for the demo-CLI status on CCAF).
+# follow-up (see README §3.5 for the demo-CLI status on CCAF).
 
 set -u
 

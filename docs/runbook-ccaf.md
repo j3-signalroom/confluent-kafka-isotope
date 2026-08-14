@@ -47,7 +47,7 @@ This runs [scripts/deploy-cc-flink-reports.sh](../scripts/deploy-cc-flink-report
 | `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for 7 INSERTs + ad-hoc SELECTs |
 | `confluent_flink_artifact` | `isotope-flink-udf` | Uploads `ptf/build/libs/isotope-flink-udf.jar` |
 | `confluent_flink_statement` × 25 | (see file) | 4 ALTER TABLE + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION (both PTFs) + 7 INSERT INTO (23 long-lived) + 2 transient DROP FUNCTION |
-| `confluent_flink_statement` × 3 (optional) | (see [terraform/setup-ccaf-ai.tf](../terraform/setup-ccaf-ai.tf)) | Optional AI trace-RCA report — `CREATE MODEL trace_rca` + 1 Protobuf sink + 1 `INSERT … ML_PREDICT`. **Gated on `var.enable_trace_rca` (default `false`)**, so a normal apply skips them entirely. Set `rca_model_api_key` (and `rca_model_provider`/`_version`/`_endpoint` for a non-OpenAI provider) to enable. See README § 4.5. |
+| `confluent_flink_statement` × 3 (optional) | (see [terraform/setup-ccaf-ai.tf](../terraform/setup-ccaf-ai.tf)) | Optional AI trace-RCA report — `CREATE MODEL trace_rca` + 1 Protobuf sink + 1 `INSERT … ML_PREDICT`. **Gated on `var.enable_trace_rca` (default `false`)**, so a normal apply skips them entirely. Set `rca_model_api_key` (and `rca_model_provider`/`_version`/`_endpoint` for a non-OpenAI provider) to enable. See README §4.5. |
 
 Two rotating service-account API key pairs (one Kafka, one Schema Registry) are managed by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](../terraform/setup-confluent-kafka.tf).
 
