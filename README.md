@@ -1,9 +1,9 @@
 # Confluent Kafka Isotope
 `confluent-kafka-isotope` is a reference implementation of an **_e-commerce order pipeline that uses Kafka Interceptors, Prometheus, and Apache Flink to capture, analyze, and report end-to-end event-tracing data in both batch and near real time_**.
 
-Much like isotopes used to trace molecules through a biochemical pathway, each event carries lightweight metadata that allows it to be followed as it moves through Kafka topics and distributed microservices.
+Much like isotopes used to trace molecules through a biochemical pathway, each event carries lightweight metadata that allows it to be followed as it travels through Kafka topics and distributed microservices.
 
-**_Kafka topics become the connective tissue between services_**, while Kafka Interceptors quietly transform the event pipeline itself into an observable distributed system.
+![visualize-kafka-interceptors-in-the-event-pipeline](docs/visualize-kafka-interceptors-in-the-event-pipeline.png)
 
 ---
 
