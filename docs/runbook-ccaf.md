@@ -2,7 +2,7 @@
 End-to-end operational guide for running the `confluent-kafka-isotope` reports on **Confluent Cloud for Apache Flink (CCAF)**: provision → deploy reports → drive
 traffic → observe → teardown. Unlike the [Confluent Platform + Flink on Minikube](runbook-minikube.md), this is **Terraform-driven** — no local cluster — and everything runs in a fresh Confluent Cloud environment under [terraform/](../terraform/).
 
-> This is the **managed CCAF** path. The self-managed **Confluent Platform + Flink on Minikube** path is in [docs/runbook-minikube.md](runbook-minikube.md). Both runtimes run the same seven reports from the same PTF JAR — see [root README §3.5](../README.md#35-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the format-by-runtime split.
+> This is the **managed CCAF** path. The self-managed **Confluent Platform + Flink on Minikube** path is in [docs/runbook-minikube.md](runbook-minikube.md). Both runtimes run the same seven reports from the same PTF JAR — see [root README §3.4](../README.md#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the format-by-runtime split.
 
 ---
 
@@ -47,7 +47,7 @@ This runs [scripts/deploy-cc-flink-reports.sh](../scripts/deploy-cc-flink-report
 | `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for 7 INSERTs + ad-hoc SELECTs |
 | `confluent_flink_artifact` | `isotope-flink-udf` | Uploads `ptf/build/libs/isotope-flink-udf.jar` |
 | `confluent_flink_statement` × 25 | (see file) | 4 ALTER TABLE + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION (both PTFs) + 7 INSERT INTO (23 long-lived) + 2 transient DROP FUNCTION |
-| `confluent_flink_statement` × 3 (optional) | (see [terraform/setup-ccaf-ai.tf](../terraform/setup-ccaf-ai.tf)) | Optional AI trace-RCA report — `CREATE MODEL trace_rca` + 1 Protobuf sink + 1 `INSERT … ML_PREDICT`. **Gated on `var.enable_trace_rca` (default `false`)**, so a normal apply skips them entirely. Set `rca_model_api_key` (and `rca_model_provider`/`_version`/`_endpoint` for a non-OpenAI provider) to enable. See root README §3.5. |
+| `confluent_flink_statement` × 3 (optional) | (see [terraform/setup-ccaf-ai.tf](../terraform/setup-ccaf-ai.tf)) | Optional AI trace-RCA report — `CREATE MODEL trace_rca` + 1 Protobuf sink + 1 `INSERT … ML_PREDICT`. **Gated on `var.enable_trace_rca` (default `false`)**, so a normal apply skips them entirely. Set `rca_model_api_key` (and `rca_model_provider`/`_version`/`_endpoint` for a non-OpenAI provider) to enable. See root README §3.4. |
 
 Two rotating service-account API key pairs (one Kafka, one Schema Registry) are managed by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](../terraform/setup-confluent-kafka.tf).
 
@@ -106,7 +106,7 @@ Runs `terraform destroy -auto-approve` — deletes **every** resource above, inc
 
 ## **8.0 Troubleshooting**
 - **`CONFLUENT_API_KEY … must be set`.** The `make` target requires both vars on the command line (or exported and passed through) — see [§1.0 Prerequisites](#10-prerequisites).
-- **`Aggregate functions are not supported`.** Expected if you try to add a UDAF — CCAF rejects user-defined aggregates, which is why percentiles is a PTF — see [root README §3.5](../README.md#35-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf).
+- **`Aggregate functions are not supported`.** Expected if you try to add a UDAF — CCAF rejects user-defined aggregates, which is why percentiles is a PTF — see [root README §3.4](../README.md#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf).
 - **Typed `CREATE TABLE` silently no-ops.** A report sink topic was pre-created, so the Topic Catalog auto-imported it as `(key BYTES, val BYTES)` — don't pre-create the `isotope_report_*_1m` topics — see [§3.0 What gets created](#30-what-gets-created).
 - **No report rows.** Almost always the watermark — traffic must span multiple 1-minute windows; wait ~90s after the last record — see [§5.0 Drive traffic](#50-drive-traffic-required-to-see-report-rows).
 - **App can't authenticate.** `cc-cli-env.sh` couldn't read `terraform output` — re-run `make cc-flink-reports-up` so the rotated keys exist, then retry.
