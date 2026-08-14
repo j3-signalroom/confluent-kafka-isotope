@@ -1,4 +1,4 @@
--- =====================================================================
+-- ==========================================================================
 -- Typed view of the consume-edge stream
 --
 -- Decodes the consume-edge markers that consumers emit to the
@@ -18,7 +18,7 @@
 -- Reads from the same isotope_raw source table as `isotope`. The two
 -- views partition that source by the presence/absence of
 -- x-isotope-consumer-service.
--- =====================================================================
+-- ==========================================================================
 
 CREATE VIEW IF NOT EXISTS consume_events AS
 SELECT

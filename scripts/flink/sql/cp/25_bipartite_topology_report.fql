@@ -1,4 +1,4 @@
--- =====================================================================
+-- ==========================================================================
 -- Bipartite-topology report — per-minute counts of records flowing across
 -- every (service, topic) edge in both directions:
 --
@@ -22,7 +22,7 @@
 --      `origin_service`).
 --
 -- Sinks into `bipartite_topology_report_1m` (Kafka, Avro+SR).
--- =====================================================================
+-- ==========================================================================
 
 SET 'pipeline.name' = 'isotope_report_bipartite_topology_1m';
 

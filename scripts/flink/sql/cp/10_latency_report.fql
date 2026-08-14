@@ -1,4 +1,4 @@
--- =====================================================================
+-- =========================================================================
 -- Latency report — per-hop latency from origin, aggregated by origin
 -- service and current hop topic, in 1-minute tumbling windows.
 --
@@ -15,7 +15,7 @@
 -- cp/05_report_sinks.fql). Schema auto-registers in SR on first write
 -- under subject `isotope_report_latency_1m-value`; Control Center
 -- renders the rows natively.
--- =====================================================================
+-- =========================================================================
 
 SET 'pipeline.name' = 'isotope_report_latency_1m';
 

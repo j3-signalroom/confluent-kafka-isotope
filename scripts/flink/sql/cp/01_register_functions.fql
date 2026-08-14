@@ -1,4 +1,4 @@
--- =====================================================================
+-- =====================================================================================
 -- Register the JAR-backed functions — Confluent Platform Flink (CMF on Minikube)
 --
 -- Prereqs:
@@ -15,7 +15,7 @@
 -- The version-coupling story: this JAR was compiled against Apache Flink
 -- 2.1.1 (matches confluentinc/cp-flink:2.1.1-cp1-java21). If you upgrade
 -- the cluster's Flink version, rebuild the JAR.
--- =====================================================================
+-- =====================================================================================
 
 -- Both functions are ProcessTableFunctions (PTFs), so they register and run
 -- identically on Confluent Platform Flink and on CCAF.
