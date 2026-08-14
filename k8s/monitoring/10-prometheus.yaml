@@ -12,7 +12,7 @@
 # Launch each stage with, e.g.:
 #   ./gradlew :app:run -Dmetrics.prometheus.enabled=true \
 #     -Dmetrics.prometheus.port=9410 -Disotope.consume.from=latest --args="enrich"
-# (the consume.from=latest flag skips the replay backlog — see README §4.6.1.)
+# (the consume.from=latest flag skips the replay backlog — see README §3.6.1.)
 ---
 apiVersion: v1
 kind: ConfigMap
