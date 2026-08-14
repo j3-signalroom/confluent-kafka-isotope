@@ -55,7 +55,7 @@ When enabled, it adds three `confluent_flink_statement` resources:
 
 The default provider is OpenAI (`gpt-4o`). Claude is supported two ways: directly via **Anthropic** (`rca_model_provider = "anthropic"`, endpoint `https://api.anthropic.com/v1/messages`, a bare `rca_model_api_key`, plus the required `rca_model_max_tokens`), or via **AWS Bedrock** (`rca_model_provider = "bedrock"` with AWS credentials). Other supported providers: `vertexai`, `azureopenai`, `googleai`, `sagemaker`, `azureml`.
 
-The standalone SQL walkthrough — a `CREATE MODEL` + `ML_PREDICT` PoC with provider notes and alternative options — is in [sql/ccaf-ai/trace_rca.fql](sql/ccaf-ai/trace_rca.fql). See also [root README §3.5](../../README.md#35-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf).
+The standalone SQL walkthrough — a `CREATE MODEL` + `ML_PREDICT` PoC with provider notes and alternative options — is in [sql/ccaf-ai/trace_rca.fql](sql/ccaf-ai/trace_rca.fql). See also [root README §3.4](../../README.md#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf).
 
 ## **3.0 Format-by-runtime, not by domain**
 The sink **format** differs by runtime for one platform-level reason:
@@ -124,4 +124,4 @@ make cc-flink-reports-down CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
                            # terraform destroy: deletes the environment and everything in it
 ```
 
-See the [root README §3.5 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#35-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit.
+See the [root README §3.4 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit.
