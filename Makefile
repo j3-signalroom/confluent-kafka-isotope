@@ -872,8 +872,14 @@ cert-manager-uninstall: ## Uninstall cert-manager (safe to run even if not insta
 
 .PHONY: confluent-teardown
 confluent-teardown: ## Full teardown: remove Flink, CP, Operator, namespace, and stop Minikube
-	@minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running" \
-		|| (echo "✘ Minikube is not running — nothing to tear down." && exit 1)
+	@if minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then \
+		$(MAKE) confluent-teardown-run; \
+	else \
+		echo "✔ Minikube is not running — nothing to tear down."; \
+	fi
+
+.PHONY: confluent-teardown-run
+confluent-teardown-run:
 	$(MAKE) flink-down
 	$(MAKE) cp-down
 	@echo "→ Deleting namespace '$(NAMESPACE)' and all remaining resources..."
@@ -888,7 +894,7 @@ confluent-teardown: ## Full teardown: remove Flink, CP, Operator, namespace, and
 nuke: ## Full wipe: confluent-teardown + minikube-delete + uninstall-prereqs (leaves machine as close to factory as possible)
 	@echo "⚠ This will destroy the Minikube cluster and uninstall all tools. Ctrl+C within 5s to abort."
 	@sleep 5
-	@minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running" && $(MAKE) confluent-teardown || echo "→ Minikube not running, skipping confluent-teardown."
+	$(MAKE) confluent-teardown
 	$(MAKE) minikube-delete
 	$(MAKE) uninstall-prereqs
 	@echo "✔ Nuke complete. Machine restored to pre-install state."
