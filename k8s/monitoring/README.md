@@ -1,6 +1,6 @@
 # Isotope metrics showcase — Prometheus + Grafana on Minikube
 
-A throwaway, opt-in observability stack that visualizes the three stateless Isotope reports (latency / topology / hop-distribution), the three consume-side signals, and a third **Health & ratios (operational)** row (hop failure ratio, hop completion — share reaching hop 3, consume throughput) straight from the app's Micrometer meters — no Flink, no Control Center. See [root README §3.5](../../README.md#35-optional-stateless-reports-via-micrometer--prometheus--grafana) for what each meter means.
+A throwaway, opt-in observability stack that visualizes the three stateless Isotope reports (latency / topology / hop-distribution), the three consume-side signals, and a third **Health & ratios (operational)** row (hop failure ratio, hop completion — share reaching hop 3, consume throughput) straight from the app's Micrometer meters — no Flink, no Control Center. See [root README §3.5](../../README.md#35-optional-prometheus-metrics-reporting-with-grafana-visualization) for what each meter means.
 
 ---
 
