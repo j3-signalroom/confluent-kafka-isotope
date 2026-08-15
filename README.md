@@ -10,7 +10,7 @@
   - [**3.2 Code Integration Tests using Confluent Platform on Minikube**](#32-code-integration-tests-using-confluent-platform-on-minikube)
   - [**3.3 Confluent Platform + Flink on Minikube**](#33-confluent-platform--flink-on-minikube)
   - [**3.4 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**](#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)
-  - [****3.5 [OPTIONAL] Stateless reports via Micrometer → Prometheus → Grafana**](#35-optional-stateless-reports-via-micrometer--prometheus--grafana)
+  - [**3.5 [OPTIONAL] Stateless reports via Micrometer → Prometheus → Grafana**](#35-optional-stateless-reports-via-micrometer--prometheus--grafana)
 - [**Resources**](#resources)
 <!-- tocstop -->
 
