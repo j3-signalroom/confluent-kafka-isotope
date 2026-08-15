@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Generate the confluent-kafka-isotope architecture diagram.
-    python3 gen_isotope_diagram.py [--out-dir docs/images] [--no-png]
+    python3 generate_isotope_diagram.py [--out-dir docs/images] [--no-png]
 
-Emits isotope_diagram.svg, and isotope_diagram.png if cairosvg is installed
+Emits isotope-diagram.svg, and isotope-diagram.png if cairosvg is installed
 (pip install cairosvg).
 
 Layout is data-driven: edit PALETTE / the *_ROWS lists / OPTIONAL_BOX and
@@ -230,7 +230,7 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
-    svg_path = os.path.join(args.out_dir, "isotope_diagram.svg")
+    svg_path = os.path.join(args.out_dir, "isotope-diagram.svg")
     with open(svg_path, "w", encoding="utf-8") as fh:
         fh.write(build())
     print(f"wrote {svg_path}")
@@ -241,7 +241,7 @@ def main():
         except ImportError:
             print("cairosvg not installed; skipping PNG (pip install cairosvg)")
             return
-        png_path = os.path.join(args.out_dir, "isotope_diagram.png")
+        png_path = os.path.join(args.out_dir, "isotope-diagram.png")
         cairosvg.svg2png(url=svg_path, write_to=png_path, output_width=W)
         print(f"wrote {png_path}")
 
