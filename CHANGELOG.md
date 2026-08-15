@@ -11,6 +11,7 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 - Issues[`#228`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/228)
 - Issues[`#233`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/233)
 - Issues[`#235`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/235)
+- Issues[`#237`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/237)
 
 ### Fixed
 - Issues[`#230`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/230)

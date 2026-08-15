@@ -1,4 +1,4 @@
-# Stateless reports via Micrometer → Prometheus/Grafana (optional)
+# [OPTIONAL] Prometheus Metrics Reporting with Grafana Visualization
 A metrics-native alternative to three of the seven Flink reports: emit them as Micrometer meters from the producer interceptor and let Prometheus do the windowing at read time. **Additive and opt-in** — it does not replace the Flink reports. The companion one-command showcase (Prometheus + Grafana on Minikube) has its own runbook: [k8s/monitoring/README.md](../k8s/monitoring/README.md).
 
 ---
