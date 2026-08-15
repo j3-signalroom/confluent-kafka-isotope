@@ -13,7 +13,7 @@ Much like isotopes used to trace molecules through a biochemical pathway, each e
 - [**2.0 Architecture**](#20-architecture)
 - [**3.0 Getting Started**](#30-getting-started)
   - [**3.1 Unit tests (no broker, instant)**](#31-unit-tests-no-broker-instant)
-  - [**3.2 Integration tests (live Kafka via Minikube)**](#32-integration-tests-live-kafka-via-minikube)
+  - [**3.2 Code Integration Tests using Confluent Platform on Minikube**](#32-code-integration-tests-using-confluent-platform-on-minikube)
   - [**3.3 Confluent Platform + Flink on Minikube**](#33-confluent-platform--flink-on-minikube)
   - [**3.4 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**](#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)
   - [**3.5 Stateless reports via Micrometer + Prometheus/Grafana (optional)**](#35-stateless-reports-via-micrometer--prometheusgrafana-optional)
@@ -268,7 +268,7 @@ Then decide how you want to run repo:
 ./gradlew :ptf:test                  # TDigestsTest — T-Digest sketch (de)serialization + accuracy
 ```
 
-### **3.2 Integration tests (live Kafka via Minikube)**
+### **3.2 Code Integration Tests using Confluent Platform on Minikube**
 ```bash
 make install-prereqs     # docker, kubectl, minikube, helm, gettext, gradle, openjdk17
 make check-prereqs       # verify they're on PATH
