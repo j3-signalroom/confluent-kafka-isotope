@@ -1,16 +1,4 @@
 # Confluent Kafka Isotope
-`confluent-kafka-isotope` is a reference implementation of an **_e-commerce order pipeline that uses Kafka Interceptors, Prometheus, and Apache Flink to capture, analyze, and report end-to-end event-tracing data in both batch and near real time_**.
-
-Much like isotopes used to trace molecules through a biochemical pathway, each event carries lightweight metadata that allows it to be followed as it travels through Kafka topics and distributed microservices.
-
-**Kafka topics** become the **connective tissue between services**, while **Kafka Interceptors quietly transform** the event pipeline itself into an **observable distributed system**.  (As depicted in the diagram below.)
-
-![visualize-kafka-interceptors-in-the-event-pipeline](docs/visualize-kafka-interceptors-in-the-event-pipeline.png)
-
-This project demonstrates how **Kafka Interceptors become collectors** — inserting the isotope into record headers in place and, at terminal consumers, emitting consume-edge markers — while **Flink SQL serves as the interpreter**, reading those headers directly to produce seven 1-minute reports from a single JAR on both Confluent Platform and Confluent Cloud for Apache Flink (CCAF). Optionally, the producer interceptor can **emit Micrometer metrics to Prometheus/Grafana as an always-on aggregate layer** alongside the per-trace Flink reports.  (As depicted in the diagram below.)
-
-![isotope-diagram](docs/isotope_diagram.png)
----
 
 **Table of Contents**
 <!-- toc -->
@@ -24,6 +12,81 @@ This project demonstrates how **Kafka Interceptors become collectors** — inser
   - [**3.5 Stateless reports via Micrometer + Prometheus/Grafana (optional)**](#35-stateless-reports-via-micrometer--prometheusgrafana-optional)
 - [**4.0 Resources**](#40-resources)
 <!-- tocstop -->
+
+---
+
+`confluent-kafka-isotope` is a reference implementation of an **_e-commerce order pipeline that uses Kafka Interceptors, Prometheus, and Apache Flink to capture, analyze, and report end-to-end event-tracing data in both batch and near real time_**.
+
+Much like isotopes used to trace molecules through a biochemical pathway, each event carries lightweight metadata that allows it to be followed as it travels through Kafka topics and distributed microservices.
+
+**Kafka topics** become the **connective tissue between services**, while **Kafka Interceptors quietly transform** the event pipeline itself into an **observable distributed system**.  (As depicted in the diagram below.)
+
+![visualize-kafka-interceptors-in-the-event-pipeline](docs/visualize-kafka-interceptors-in-the-event-pipeline.png)
+
+This project demonstrates how **Kafka Interceptors become collectors** — inserting the isotope into record headers in place and, at terminal consumers, emitting consume-edge markers — while **Flink SQL serves as the interpreter**, reading those headers directly to produce seven 1-minute reports from a single JAR on both Confluent Platform and Confluent Cloud for Apache Flink (CCAF). Optionally, the producer interceptor can **emit Micrometer metrics to Prometheus/Grafana as an always-on aggregate layer** alongside the per-trace Flink reports.  (As depicted in the diagram below.)
+
+![isotope-diagram](docs/isotope_diagram.png)
+
+With this approach, developers gain **end-to-end observability** into the flow of events through the Kafka-based microservices architecture, enabling both **real-time monitoring** and **post-hoc analysis** of event traces.
+
+This end-to-end observability of the isotope tracing pipeline creates a **ladder of insights**, allowing developers to trace each event’s journey, identify bottlenecks, and improve the performance and reliability of the entire system. The ladder is organized into **five tiers that answer 30 questions**.  (As depicted in the diagram below.)
+
+![tier-ladder](docs/tier-ladder.png)
+
+<details>
+<summary>Easy — single-record, single-trace</summary>
+
+- Did my record get tagged?
+- What’s the origin of this trace?
+- How many hops has this record taken?
+- Where did this trace go?
+- Did the trace ID survive a consume-then-produce hop?
+- Which pipeline does this trace belong to?
+</details>
+
+<details>
+<summary>Easy to Medium — single per-minute aggregates</summary>
+
+- End-to-end latency from order-intake-service through to shipping-notification-service over the last minute?
+- What is the actual service graph?
+- How many distinct traces hit each topic per minute?
+- Is the hop-count distribution as expected, or are there long tails suggesting retry storms?
+- Are any traces hitting the 32-hop ceiling and getting eviction-marked?
+- How many traces is each pipeline carrying, minute by minute?
+</details>
+
+<details>
+<summary>Medium — cross-window deltas, anomalies, multi-report joins</summary>
+
+- Did latency get worse after the 2 pm deploy?
+- What percentage of traces that entered at orders.placed made it all the way through orders.fulfilled to the shipping consumer?
+- Where in the pipeline are records being dropped?
+- Are some traces being duplicated at the terminal sink?
+- Which traces went in but never came out within 60 seconds of event time?
+- Where did each stuck trace last get seen?
+- When a new service goes live, when does it first appear in the topology?
+</details>
+
+<details>
+<summary>Hard — tail behavior, drift detection, correlated analysis</summary>
+
+- What are the p50/p95/p99 latencies across the whole pipeline?
+- Which one-minute window had the worst tail latency yesterday, and which traces drove it?
+- Is the deployed topology what we documented, or has it drifted?
+- Has the stuck-trace rate spiked since a recent deploy?
+- Do stuck traces correlate with a specific producer, partition, or time of day?
+- Does the same isotope mechanism work identically on OSS Apache Flink (Confluent Platform) and Confluent Cloud for Apache Flink (CCAF)?
+</details>
+
+<details>
+<summary>Harder — forensic replay, compliance, cross-system joins</summary>
+
+- For a specific business event two weeks ago, what path did its trace take?
+- Did this customer’s order traverse all the services it should have?
+- Can we reconstruct the full per-trace journey for an audit?
+- For SOX: prove that every transaction was either completed or logged as stuck.
+- Correlate isotope trace IDs with Application Performance Monitoring (APM) spans, OpenTelemetry (OTel) traces, or business transaction IDs.
+</details>
 
 ---
 
