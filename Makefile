@@ -43,6 +43,14 @@ FLINK_VERSION       ?= v2_1
 FLINK_CLUSTER_NAME  ?= flink-basic
 FLINK_MANIFEST      ?= k8s/base/flink-cluster-deployment.yaml
 FLINK_RBAC_MANIFEST ?= k8s/base/flink-rbac.yaml
+# DDL preloaded into every 'make flink-sql' session, applied in listed order.
+# The report files (10_…70_) and 99_teardown.fql are deliberately excluded: the
+# SQL Client rejects anything but DDL/SET in an -i init file, and those contain
+# INSERT INTO. Run them by hand from the client if you want the jobs.
+FLINK_SQL_DDL_DIR   ?= $(mkfile_dir)scripts/flink/sql/cp
+FLINK_SQL_INIT_DDL  ?= 00_source_table.fql 01_register_functions.fql \
+                       05_isotope_view.fql 05_report_sinks.fql \
+                       06_consume_events_view.fql
 CERT_MANAGER_VER    ?= v1.18.2
 # CMF 2.4.0+ is required for SQL UDFs (cmf:// artifacts) + the writable
 # environment catalog — both needed to run the reports as CMF Statements.
@@ -92,7 +100,22 @@ MONITORING_MANIFEST ?= k8s/monitoring
 
 # Ports for port-forwarding to local machine (Control Center, CMF, Flink UI)
 C3_PORT             ?= 9021
-FLINK_UI_PORT       ?= 8081
+# How long 'c3-open' waits for the Control Center pod to report Ready before
+# giving up. Port-forwarding to a Running-but-not-Ready pod succeeds and then
+# refuses connections in the browser, so the gate is worth the wait.
+C3_READY_TIMEOUT    ?= 180s
+# NOT 8081: scripts/port-forward-kafka.sh ('make kafka-pf-up', a prerequisite for
+# the host-run gradle app) forwards Schema Registry to localhost:8081. Sharing the
+# port made 'flink-ui' silently skip its port-forward and open Schema Registry,
+# whose root endpoint answers '{}'.
+FLINK_UI_PORT       ?= 8082
+# Which Flink cluster 'flink-ui' opens. Defaults to the reports Application, since
+# that is the one worth watching; set to $(FLINK_CLUSTER_NAME) for the ad-hoc SQL
+# session cluster. Both carry component=jobmanager, so the name disambiguates.
+FLINK_UI_TARGET     ?= $(APP_NAME)
+# The JobManager's 'rest' container port. Fixed at 8081 by Flink, so the
+# port-forward maps $(FLINK_UI_PORT) → this, not port → same port.
+FLINK_UI_REMOTE_PORT ?= 8081
 CMF_PORT            ?= 8080
 GRAFANA_PORT        ?= 3000
 PROMETHEUS_PORT     ?= 9090
@@ -367,8 +390,41 @@ cp-delete: ## Remove all CP components, wait for termination, and clean up PVCs
 # ------------------------------------------------------------------------------
 # Phase 5: Control Center access
 # ------------------------------------------------------------------------------
+.PHONY: c3-ready
+c3-ready: ## Wait for the Control Center pod to report Ready (gate used by 'c3-open')
+	@if ! kubectl get pod controlcenter-0 -n $(NAMESPACE) >/dev/null 2>&1; then \
+		echo "✘ Pod 'controlcenter-0' not found in namespace '$(NAMESPACE)'. Run 'make cp-core-up' first."; \
+		exit 1; \
+	fi
+	@if kubectl get pod controlcenter-0 -n $(NAMESPACE) \
+			-o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q True; then \
+		echo "✔ Control Center is Ready."; \
+	else \
+		echo "→ Control Center is not Ready yet — waiting up to $(C3_READY_TIMEOUT)..."; \
+		if kubectl wait --for=condition=Ready pod/controlcenter-0 \
+				-n $(NAMESPACE) --timeout=$(C3_READY_TIMEOUT) >/dev/null 2>&1; then \
+			echo "✔ Control Center is Ready."; \
+		else \
+			echo "✘ Control Center never became Ready — port $(C3_PORT) would refuse connections."; \
+			echo "  Container status:"; \
+			kubectl get pod controlcenter-0 -n $(NAMESPACE) \
+				-o jsonpath='{range .status.containerStatuses[*]}    {.name}: ready={.ready} restarts={.restartCount}{"\n"}{end}' 2>/dev/null || true; \
+			echo ""; \
+			if kubectl logs controlcenter-0 -n $(NAMESPACE) -c controlcenter 2>/dev/null \
+					| grep -q "No resolvable bootstrap urls"; then \
+				echo "  Cause: C3 started before the 'kafka' Service resolved, so its main thread died"; \
+				echo "         on 'No resolvable bootstrap urls given in bootstrap.servers'. The JVM"; \
+				echo "         stays alive, so Kubernetes never restarts it. See KNOWN_ISSUES.md."; \
+				echo "  Fix:   kubectl delete pod controlcenter-0 -n $(NAMESPACE)"; \
+			else \
+				echo "  Inspect the logs: kubectl logs controlcenter-0 -n $(NAMESPACE) -c controlcenter"; \
+			fi; \
+			exit 1; \
+		fi; \
+	fi
+
 .PHONY: c3-open
-c3-open: ## Port-forward Control Center in the background and open it in your browser ('make c3-stop' to kill)
+c3-open: c3-ready ## Port-forward Control Center in the background and open it in your browser ('make c3-stop' to kill)
 	@if (lsof -iTCP:$(C3_PORT) -sTCP:LISTEN -t >/dev/null 2>&1) || \
 	   (ss -tlnp 2>/dev/null | grep -q ':$(C3_PORT) '); then \
 		echo "→ Port $(C3_PORT) is already in use."; \
@@ -557,13 +613,19 @@ flink-ui: ## Port-forward the Flink UI in the background and open it in your bro
 		echo "  Open in your browser: http://localhost:$(FLINK_UI_PORT)"; \
 		$(OPEN_CMD) http://localhost:$(FLINK_UI_PORT); \
 	else \
-		FLINK_POD=$$(kubectl get pods -n $(NAMESPACE) -l component=jobmanager --no-headers -o custom-columns=":metadata.name" | head -1); \
+		FLINK_POD=$$(kubectl get pods -n $(NAMESPACE) -l app=$(FLINK_UI_TARGET),component=jobmanager \
+			--no-headers -o custom-columns=":metadata.name" 2>/dev/null | head -1); \
 		if [ -z "$$FLINK_POD" ]; then \
-			echo "✘ No Flink JobManager pod found. Is the cluster deployed?"; exit 1; \
+			echo "✘ No JobManager pod found for cluster '$(FLINK_UI_TARGET)' in namespace '$(NAMESPACE)'."; \
+			echo "  Deployed Flink clusters:"; \
+			kubectl get flinkdeployment -n $(NAMESPACE) --no-headers -o custom-columns=":metadata.name" 2>/dev/null \
+				| sed 's/^/    /' || true; \
+			echo "  Override with: make flink-ui FLINK_UI_TARGET=<name>"; \
+			exit 1; \
 		fi; \
 		echo "→ Forwarding Flink UI to http://localhost:$(FLINK_UI_PORT) (background)"; \
-		echo "   Pod: $$FLINK_POD"; \
-		kubectl port-forward -n $(NAMESPACE) $$FLINK_POD $(FLINK_UI_PORT):$(FLINK_UI_PORT) >/dev/null 2>&1 & \
+		echo "   Cluster: $(FLINK_UI_TARGET)   Pod: $$FLINK_POD"; \
+		kubectl port-forward -n $(NAMESPACE) $$FLINK_POD $(FLINK_UI_PORT):$(FLINK_UI_REMOTE_PORT) >/dev/null 2>&1 & \
 		echo $$! > /tmp/flink-ui-pf.pid; \
 		sleep 1; \
 		if kill -0 $$(cat /tmp/flink-ui-pf.pid) 2>/dev/null; then \
@@ -647,24 +709,43 @@ cc-flink-reports-down: ## Tear down CCAF reports + env via `terraform destroy` (
 		--confluent-api-secret=$(CONFLUENT_API_SECRET)
 
 .PHONY: flink-sql
-flink-sql: ## Open an interactive Flink SQL Client inside the JobManager pod (auto-loads sink DDL if 'flink-reports-up' has run)
-	@JM_POD=$$(kubectl get pods -n $(NAMESPACE) -l component=jobmanager \
+flink-sql: ## Open an interactive Flink SQL Client on the '$(FLINK_CLUSTER_NAME)' session cluster, report DDL preloaded
+	@# Select the session cluster by name. Matching on component=jobmanager alone
+	@# also matches the reports Application cluster ('isotope-reports'), which runs
+	@# one compiled job under execution.target=kubernetes-application — a SQL
+	@# Client there gets an empty catalog and fails any job submission with
+	@# "The Flink cluster isotope-reports already exists."
+	@JM_POD=$$(kubectl get pods -n $(NAMESPACE) -l app=$(FLINK_CLUSTER_NAME),component=jobmanager \
 		--no-headers -o custom-columns=":metadata.name" 2>/dev/null | head -1); \
 	if [ -z "$$JM_POD" ]; then \
-		echo "✘ No Flink JobManager pod found. Run 'make flink-up' first."; exit 1; \
+		echo "✘ No '$(FLINK_CLUSTER_NAME)' session cluster JobManager found in namespace '$(NAMESPACE)'."; \
+		echo "  Ad-hoc SQL runs on the session cluster — run 'make flink-deploy' first."; \
+		echo "  ('make flink-reports-up' deploys the reports as an Application cluster,"; \
+		echo "   which runs one compiled job and cannot accept ad-hoc SQL.)"; \
+		exit 1; \
 	fi; \
 	JAR_PATH=/opt/flink/lib/isotope-flink-udf.jar; \
-	JAR_ARG=""; \
-	if kubectl exec -n $(NAMESPACE) $$JM_POD -- test -f $$JAR_PATH 2>/dev/null; then \
-		JAR_ARG="-j $$JAR_PATH"; \
+	if ! kubectl exec -n $(NAMESPACE) $$JM_POD -- test -f $$JAR_PATH 2>/dev/null; then \
+		if [ ! -f $(APP_JAR) ]; then \
+			echo "✘ $(APP_JAR) not found — run 'make reports-jar' first."; exit 1; \
+		fi; \
+		echo "→ Installing $(APP_JAR) → $$JM_POD:$$JAR_PATH (needed by the USING JAR clauses) ..."; \
+		kubectl exec -i -n $(NAMESPACE) $$JM_POD -- sh -c "cat > $$JAR_PATH" < $(APP_JAR); \
 	fi; \
-	if kubectl exec -n $(NAMESPACE) $$JM_POD -- test -f /tmp/isotope-report-sinks.fql 2>/dev/null; then \
-		echo "→ Opening SQL Client in $$JM_POD (loading /tmp/isotope-report-sinks.fql $$JAR_ARG; Ctrl-D to exit) ..."; \
-		kubectl exec -n $(NAMESPACE) -it $$JM_POD -- /opt/flink/bin/sql-client.sh $$JAR_ARG -i /tmp/isotope-report-sinks.fql; \
-	else \
-		echo "→ Opening SQL Client in $$JM_POD (no sink DDL found — run 'make flink-reports-up' to register report tables; Ctrl-D to exit) ..."; \
-		kubectl exec -n $(NAMESPACE) -it $$JM_POD -- /opt/flink/bin/sql-client.sh $$JAR_ARG; \
-	fi
+	INIT_LOCAL=$$(mktemp); \
+	for f in $(FLINK_SQL_INIT_DDL); do \
+		if [ ! -f "$(FLINK_SQL_DDL_DIR)/$$f" ]; then \
+			echo "✘ DDL file not found: $(FLINK_SQL_DDL_DIR)/$$f"; rm -f $$INIT_LOCAL; exit 1; \
+		fi; \
+		cat "$(FLINK_SQL_DDL_DIR)/$$f" >> $$INIT_LOCAL; \
+		printf '\n' >> $$INIT_LOCAL; \
+	done; \
+	echo "→ Preloading $(words $(FLINK_SQL_INIT_DDL)) DDL files into $$JM_POD:/tmp/isotope-sql-init.fql ..."; \
+	kubectl exec -i -n $(NAMESPACE) $$JM_POD -- sh -c "cat > /tmp/isotope-sql-init.fql" < $$INIT_LOCAL; \
+	rm -f $$INIT_LOCAL; \
+	echo "→ Opening SQL Client in $$JM_POD (Ctrl-D to exit) ..."; \
+	kubectl exec -n $(NAMESPACE) -it $$JM_POD -- \
+		/opt/flink/bin/sql-client.sh -j $$JAR_PATH -i /tmp/isotope-sql-init.fql
 
 # ------------------------------------------------------------------------------
 # Phase 7: Confluent Manager for Apache Flink (CMF)
