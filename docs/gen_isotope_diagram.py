@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Generate the confluent-kafka-isotope architecture diagram.
-    pip install cairosvg          # PNG only; SVG needs no deps
     python3 gen_isotope_diagram.py [--out-dir docs/images] [--no-png]
 
 Emits isotope_diagram.svg, and isotope_diagram.png if cairosvg is installed
