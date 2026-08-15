@@ -248,10 +248,7 @@ if [ "${create_action}" = true ]; then
 
     echo
     print_info "Produce 30 records spaced 5 seconds apart ≈ 2.5 minutes of event-time → spans 3+ windows:"
-    print_info "    for i in {1..30}; do"
-    print_info "        scripts/cc-app-run.sh place \"burst-\$i\""
-    print_info "        sleep 5"
-    print_info "    done"
+    print_info "    for i in {1..30}; do scripts/cc-app-run.sh place \"burst-\$i\"; sleep 5; done"
 else
     print_step "terraform destroy"
     terraform destroy -auto-approve -input=false
