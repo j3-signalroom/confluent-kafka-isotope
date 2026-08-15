@@ -7,9 +7,9 @@
 - [**2.0 Architecture**](#20-architecture)
 - [**3.0 Getting Started**](#30-getting-started)
   - [**3.1 Unit tests (no broker, instant)**](#31-unit-tests-no-broker-instant)
-  - [**3.2 Code Integration Tests using Confluent Platform on Minikube**](#32-code-integration-tests-using-confluent-platform-on-minikube)
-  - [**3.3 Confluent Platform + Flink on Minikube**](#33-confluent-platform--flink-on-minikube)
-  - [**3.4 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**](#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)
+  - [**3.2 Code Integration Tests with Confluent Platform on Minikube**](#32-code-integration-tests-with-confluent-platform-on-minikube)
+  - [**3.3 Flink SQL reporting with Apache Flink on Minikube**](#33-flink-sql-reporting-with-apache-flink-on-minikube)
+  - [**3.4 Flink SQL reporting with Confluent Cloud for Apache Flink**](#34-flink-sql-reporting-with-confluent-cloud-for-apache-flink)
   - [**3.5 [OPTIONAL] Stateless reports via Micrometer → Prometheus → Grafana**](#35-optional-stateless-reports-via-micrometer--prometheus--grafana)
 - [**Resources**](#resources)
 <!-- tocstop -->
@@ -337,7 +337,7 @@ Then decide how you want to run repo:
 ./gradlew :ptf:test                  # TDigestsTest — T-Digest sketch (de)serialization + accuracy
 ```
 
-### **3.2 Code Integration Tests using Confluent Platform on Minikube**
+### **3.2 Code Integration Tests with Confluent Platform on Minikube**
 ```bash
 make install-prereqs     # docker, kubectl, minikube, helm, gettext, gradle, openjdk17
 make check-prereqs       # verify they're on PATH
@@ -383,7 +383,7 @@ The integration tests cover:
 | `ThreeStageHopPropagationIT` | `order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `order-intake-service`, this = `order-enrichment-service`, hop count = 2) at the terminal; consume-then-produce hops use `IsotopeContext.adoptFromRecord` to carry the trace forward |
 | `BipartiteTopologyIT` | The 4-stage `order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service → topic-CD → shipping-notification-service` chain emits exactly three consume-edge markers to a per-test markers topic — one per consume edge. Every marker carries the trace ID, forwarded `x-isotope-*` scalars describing the upstream producer, and the new `x-isotope-consumer-service` naming the downstream consumer. Asserts the `(consumer_service, consumed_topic)` set is exactly the three pairs of stages 2-4 |
 
-### **3.3 Confluent Platform + Flink on Minikube**
+### **3.3 Flink SQL reporting with Apache Flink on Minikube**
 > **Caveat:** Minikube is a single-node cluster. It is not a production-like environment, but it is sufficient for local development and testing. The Confluent Platform (CP) + Flink stack runs in Minikube, and you can port-forward Kafka and Schema Registry to your local machine.
 
 To **_run_**, **_test_**, and **_debug_** Apache Flink like a production engineer, this project provides a full Confluent Platform + Flink stack running locally on [Minikube](https://minikube.sigs.k8s.io/docs/) — no cloud required.
@@ -404,14 +404,14 @@ To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with ap
 
 > These settings ensure stable performance across all components. You can tune them as needed, but lower resource levels may cause pod restarts or degraded performance.
 
-Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, seven sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.4](#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for that path; this section is the local-Minikube one.
+Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, seven sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.4](#34-flink-sql-reporting-with-confluent-cloud-for-apache-flink) for that path; this section is the local-Minikube one.
 
 **The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make flink-up` then `make flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
 
 Report sink topics ride **Avro+SR** (`avro-confluent`, auto-registered on first write) so Control Center renders them natively — a deliberate *format-by-domain* split: app events are **Protobuf+SR** (`DemoEvent`), Flink aggregates are **Avro+SR** (cp-flink ships no SR-integrated Protobuf format), and the consume-edge marker topic `isotope_consume_edge_markers` is **null-value / headers-only**. Not a defect — a clean split by domain.
 
-### **3.4 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**
-The CCAF parallel of [§3.3](#33-confluent-platform--flink-on-minikube), driven by Terraform under [terraform/](terraform/) — no local cluster. One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, compute pool, two rotating service-account API key pairs (Kafka + Schema Registry), the uploaded PTF JAR, and 25 `confluent_flink_statement` resources (4 ALTER TABLE + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION + 7 INSERT INTO, plus 2 transient DROP FUNCTION). The shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version and `iac-confluent-api_key_rotation-tf_module`.
+### **3.4 Flink SQL reporting with Confluent Cloud for Apache Flink**
+The CCAF parallel of [§3.3](#33-flink-sql-reporting-with-apache-flink-on-minikube), driven by Terraform under [terraform/](terraform/) — no local cluster. One `make` target spins up a fresh Confluent Cloud environment, Kafka cluster, compute pool, two rotating service-account API key pairs (Kafka + Schema Registry), the uploaded PTF JAR, and 25 `confluent_flink_statement` resources (4 ALTER TABLE + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION + 7 INSERT INTO, plus 2 transient DROP FUNCTION). The shape mirrors [`apache_flink-kickstarter-ii`](https://github.com/j3-signalroom/apache_flink-kickstarter-ii) — same provider version and `iac-confluent-api_key_rotation-tf_module`.
 
 ![terraform-graph](docs/terraform.png)
 
