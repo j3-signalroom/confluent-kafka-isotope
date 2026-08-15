@@ -2,6 +2,7 @@
 
 **Table of Contents**
 <!-- toc -->
+- [**Purpose**](#purpose)
 - [**1.0 How an Isotope Traverses an Event Pipeline**](#10-how-an-isotope-traverses-an-event-pipeline)
 - [**2.0 Architecture**](#20-architecture)
 - [**3.0 Getting Started**](#30-getting-started)
@@ -10,10 +11,12 @@
   - [**3.3 Confluent Platform + Flink on Minikube**](#33-confluent-platform--flink-on-minikube)
   - [**3.4 Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)**](#34-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf)
   - [**3.5 Stateless reports via Micrometer + Prometheus/Grafana (optional)**](#35-stateless-reports-via-micrometer--prometheusgrafana-optional)
-- [**4.0 Resources**](#40-resources)
+- [**Resources**](#resources)
 <!-- tocstop -->
 
 ---
+
+# Purpose
 
 `confluent-kafka-isotope` is a reference implementation of an **_e-commerce order pipeline that uses Kafka Interceptors, Prometheus, and Apache Flink to capture, analyze, and report end-to-end event-tracing data in both batch and near real time_**.
 
@@ -425,5 +428,5 @@ Three of the seven reports — `latency_1m`, `topology_1m`, `hop_distribution_1m
 
 > **Full details** — the meter/PromQL reference, the produce- and consume-side signals, the two deliberate gaps (`distinct_traces`, windowed `min`), and why percentiles stays a PTF — are in **[docs/metrics.md](docs/metrics.md)**. The one-command Prometheus + Grafana showcase has its own runbook: **[k8s/monitoring/README.md](k8s/monitoring/README.md)** (`make metrics-up`).
 
-## **4.0 Resources**
+## **Resources**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)
