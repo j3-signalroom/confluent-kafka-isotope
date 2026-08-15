@@ -2,9 +2,9 @@
 """
 Generate the five-tier observability question ladder figure.
 
-    python3 gen_tier_ladder.py [--out-dir docs/images] [--scale 2] [--no-png]
+    python3 generate_tier_ladder_diagram.py [--out-dir docs/images] [--scale 2] [--no-png]
 
-Emits tier-ladder.svg, and tier-ladder.png if cairosvg is installed
+Emits tier-ladder-diagram.svg, and tier-ladder-diagram.png if cairosvg is installed
 (pip install cairosvg).
 
 Everything that changes between revisions lives in TIERS and DIVIDER:
@@ -126,7 +126,7 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
-    svg_path = os.path.join(args.out_dir, "tier-ladder.svg")
+    svg_path = os.path.join(args.out_dir, "tier-ladder-diagram.svg")
     with open(svg_path, "w", encoding="utf-8") as fh:
         fh.write(build())
     print(f"wrote {svg_path}")
@@ -138,7 +138,7 @@ def main():
     except ImportError:
         print("cairosvg not installed; skipping PNG (pip install cairosvg)")
         return
-    png_path = os.path.join(args.out_dir, "tier-ladder.png")
+    png_path = os.path.join(args.out_dir, "tier-ladder-diagram.png")
     cairosvg.svg2png(url=svg_path, write_to=png_path,
                      output_width=int(VB_W * args.scale))
     print(f"wrote {png_path}")
