@@ -36,56 +36,56 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 <details>
 <summary>Easy — single-record, single-trace</summary>
 
-- Did my record get tagged?
-- What’s the origin of this trace?
-- How many hops has this record taken?
-- Where did this trace go?
-- Did the trace ID survive a consume-then-produce hop?
-- Which pipeline does this trace belong to?
+- _Did my record get tagged?_
+- _What’s the origin of this trace?_
+- _How many hops has this record taken?_
+- _Where did this trace go?_
+- _Did the trace ID survive a consume-then-produce hop?_
+- _Which pipeline does this trace belong to?_
 </details>
 
 <details>
 <summary>Easy to Medium — single per-minute aggregates</summary>
 
-- End-to-end latency from order-intake-service through to shipping-notification-service over the last minute?
-- What is the actual service graph?
-- How many distinct traces hit each topic per minute?
-- Is the hop-count distribution as expected, or are there long tails suggesting retry storms?
-- Are any traces hitting the 32-hop ceiling and getting eviction-marked?
-- How many traces is each pipeline carrying, minute by minute?
+- _End-to-end latency from order-intake-service through to shipping-notification-service over the last minute?_
+- _What is the actual service graph?_
+- _How many distinct traces hit each topic per minute?_
+- _Is the hop-count distribution as expected, or are there long tails suggesting retry storms?_
+- _Are any traces hitting the 32-hop ceiling and getting eviction-marked?_
+- _How many traces is each pipeline carrying, minute by minute?_
 </details>
 
 <details>
 <summary>Medium — cross-window deltas, anomalies, multi-report joins</summary>
 
-- Did latency get worse after the 2 pm deploy?
-- What percentage of traces that entered at orders.placed made it all the way through orders.fulfilled to the shipping consumer?
-- Where in the pipeline are records being dropped?
-- Are some traces being duplicated at the terminal sink?
-- Which traces went in but never came out within 60 seconds of event time?
-- Where did each stuck trace last get seen?
-- When a new service goes live, when does it first appear in the topology?
+- _Did latency get worse after the 2 pm deploy?_
+- _What percentage of traces that entered at orders.placed made it all the way through orders.fulfilled to the shipping consumer?_
+- _Where in the pipeline are records being dropped?_
+- _Are some traces being duplicated at the terminal sink?_
+- _Which traces went in but never came out within 60 seconds of event time?_
+- _Where did each stuck trace last get seen?_
+- _When a new service goes live, when does it first appear in the topology?_
 </details>
 
 <details>
 <summary>Hard — tail behavior, drift detection, correlated analysis</summary>
 
-- What are the p50/p95/p99 latencies across the whole pipeline?
-- Which one-minute window had the worst tail latency yesterday, and which traces drove it?
-- Is the deployed topology what we documented, or has it drifted?
-- Has the stuck-trace rate spiked since a recent deploy?
-- Do stuck traces correlate with a specific producer, partition, or time of day?
-- Does the same isotope mechanism work identically on OSS Apache Flink (Confluent Platform) and Confluent Cloud for Apache Flink (CCAF)?
+- _What are the p50/p95/p99 latencies across the whole pipeline?_
+- _Which one-minute window had the worst tail latency yesterday, and which traces drove it?_
+- _Is the deployed topology what we documented, or has it drifted?_
+- _Has the stuck-trace rate spiked since a recent deploy?_
+- _Do stuck traces correlate with a specific producer, partition, or time of day?_
+- _Does the same isotope mechanism work identically on OSS Apache Flink (Confluent Platform) and Confluent Cloud for Apache Flink (CCAF)?_
 </details>
 
 <details>
 <summary>Harder — forensic replay, compliance, cross-system joins</summary>
 
-- For a specific business event two weeks ago, what path did its trace take?
-- Did this customer’s order traverse all the services it should have?
-- Can we reconstruct the full per-trace journey for an audit?
-- For SOX: prove that every transaction was either completed or logged as stuck.
-- Correlate isotope trace IDs with Application Performance Monitoring (APM) spans, OpenTelemetry (OTel) traces, or business transaction IDs.
+- _For a specific business event two weeks ago, what path did its trace take?_
+- _Did this customer’s order traverse all the services it should have?_
+- _Can we reconstruct the full per-trace journey for an audit?_
+- _For SOX: prove that every transaction was either completed or logged as stuck._
+- _Correlate isotope trace IDs with Application Performance Monitoring (APM) spans, OpenTelemetry (OTel) traces, or business transaction IDs._
 </details>
 
 ---
