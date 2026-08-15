@@ -167,6 +167,17 @@ resource "confluent_flink_artifact" "isotope_udf" {
 # Statements 1-4 — ALTER TABLE on each isotope event topic to expose Kafka
 # record headers as a column. CCAF's auto-imported topic tables do not
 # include `headers` by default; the source view below references it.
+#
+# NOT IDEMPOTENT, and CCAF offers no per-column IF NOT EXISTS (only
+# `ALTER TABLE IF EXISTS`, which guards the table, not the column). The added
+# column lives with the TOPIC's catalog entry, so it survives destroying or
+# replacing these statement resources — re-creating one against a table that
+# already has `headers` fails with "Column `headers` already exists in the
+# table." and taints the resource, blocking every downstream statement on the
+# next apply. scripts/deploy-cc-flink-reports.sh untaints these four before
+# `terraform apply` for exactly that reason; if you run terraform by hand,
+# do the same:
+#     terraform state list | grep _add_headers$ | xargs -n1 terraform untaint
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "alter_orders_placed_add_headers" {
@@ -459,7 +470,7 @@ resource "confluent_flink_statement" "isotope_report_latency_1m" {
         'value.format' = 'proto-registry'
     );
   EOT
-  
+
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -838,6 +849,22 @@ resource "confluent_flink_statement" "register_latency_percentiles" {
 # the `SET 'pipeline.name'` directive (CCAF rejects SET in submitted
 # statements — it's a SQL-Client interactive command, not a Flink SQL
 # statement).
+#
+# Two CCAF constraints shape every resource below:
+#
+#   * `statement_name` is a Kubernetes-style name — lowercase alphanumerics and
+#     hyphens only, starting with an alphanumeric, ≤ 100 chars. The sink TABLE
+#     names keep their underscores (`isotope_report_latency_1m`); only the
+#     statement names are hyphenated (`isotope-report-latency-1m`). Underscores
+#     here fail at create with "400 Bad Request: Request is malformed. name
+#     needs to contain lowercase alphanumeric characters and hyphens only".
+#
+#   * A statement cannot be UPDATED in place — the provider only accepts
+#     changes to `stopped` / `properties_sensitive`. Editing the SQL below
+#     produces a plan Terraform shows as an in-place update, which then fails at
+#     apply. scripts/deploy-cc-flink-reports.sh detects those and re-runs them
+#     as `-replace=` (see tf-statement-updates.py); driving terraform by hand
+#     means passing `-replace=<address>` yourself.
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "insert_latency_report" {
@@ -865,7 +892,7 @@ resource "confluent_flink_statement" "insert_latency_report" {
         `this_topic`;
   EOT
 
-  statement_name = "isotope_report_latency_1m"
+  statement_name = "isotope-report-latency-1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -914,7 +941,7 @@ resource "confluent_flink_statement" "insert_topology_report" {
         `this_topic`;
   EOT
 
-  statement_name = "isotope_report_topology_1m"
+  statement_name = "isotope-report-topology-1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -987,7 +1014,7 @@ resource "confluent_flink_statement" "insert_bipartite_topology_report" {
         `consumed_topic`;
   EOT
 
-  statement_name = "isotope_report_bipartite_topology_1m"
+  statement_name = "isotope-report-bipartite-topology-1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -1038,7 +1065,7 @@ resource "confluent_flink_statement" "insert_hop_distribution" {
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
-  statement_name = "isotope_report_hop_distribution_1m"
+  statement_name = "isotope-report-hop-distribution-1m"
 
   credentials {
     key    = module.flink_api_key_rotation.active_api_key.id
@@ -1085,7 +1112,7 @@ resource "confluent_flink_statement" "insert_coverage_report" {
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
-  statement_name = "isotope_report_coverage_1m"
+  statement_name = "isotope-report-coverage-1m"
   credentials {
     key    = module.flink_api_key_rotation.active_api_key.id
     secret = module.flink_api_key_rotation.active_api_key.secret
@@ -1127,7 +1154,7 @@ resource "confluent_flink_statement" "insert_stuck_trace_alerts" {
     );
   EOT
 
-  statement_name = "isotope_report_stuck_trace_1m"
+  statement_name = "isotope-report-stuck-trace-1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
@@ -1183,7 +1210,7 @@ resource "confluent_flink_statement" "insert_latency_percentiles" {
     );
   EOT
 
-  statement_name = "isotope_report_latency_percentiles_1m"
+  statement_name = "isotope-report-latency-percentiles-1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
