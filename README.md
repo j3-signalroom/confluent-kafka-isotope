@@ -3,8 +3,13 @@
 
 Much like isotopes used to trace molecules through a biochemical pathway, each event carries lightweight metadata that allows it to be followed as it travels through Kafka topics and distributed microservices.
 
+**Kafka topics** become the **connective tissue between services**, while **Kafka Interceptors quietly transform** the event pipeline itself into an **observable distributed system**.  (As depicted in the diagram below.)
+
 ![visualize-kafka-interceptors-in-the-event-pipeline](docs/visualize-kafka-interceptors-in-the-event-pipeline.png)
 
+This project demonstrates how **Kafka Interceptors become collectors** — inserting the isotope into record headers in place and, at terminal consumers, emitting consume-edge markers — while **Flink SQL serves as the interpreter**, reading those headers directly to produce seven 1-minute reports from a single JAR on both Confluent Platform and Confluent Cloud for Apache Flink (CCAF). Optionally, the producer interceptor can **emit Micrometer metrics to Prometheus/Grafana as an always-on aggregate layer** alongside the per-trace Flink reports.  (As depicted in the diagram below.)
+
+![isotope-diagram](docs/isotope_diagram.png)
 ---
 
 **Table of Contents**
@@ -244,8 +249,6 @@ Makefile                                cp-up / flink-up / kafka-pf-up / flink-r
 </details>
 
 ## **3.0 Getting Started**
-
-![isotope-diagram](docs/isotope_diagram.png)
 
 First, clone the repo to your local machine using the [GitHub CLI](https://cli.github.com/):
 
