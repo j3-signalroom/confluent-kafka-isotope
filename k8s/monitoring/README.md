@@ -1,12 +1,12 @@
 # Isotope metrics showcase — Prometheus + Grafana on Minikube
 
-A throwaway, opt-in observability stack that visualizes the three stateless Isotope reports (latency / topology / hop-distribution), the three consume-side signals, and a third **Health & ratios (operational)** row (hop failure ratio, hop completion — share reaching hop 3, consume throughput) straight from the app's Micrometer meters — no Flink, no Control Center. See [root README §3.5](../../README.md#35-optional-prometheus-metrics-reporting-with-grafana-visualization) for what each meter means.
+A throwaway, opt-in observability stack that visualizes the three stateless Isotope reports (latency / topology / hop-distribution), the three consume-side signals, and a third **Health & ratios (operational)** row (hop failure ratio, hop completion — share reaching hop 3, consume throughput) straight from the app's Micrometer meters — no Flink, no Control Center. See [root README §3.4](../../README.md#34-optional-prometheus-metrics-reporting-with-grafana-visualization) for what each meter means.
 
 ---
 
 **Table of Contents**
 <!-- toc -->
-- [1.0 Architecture (A — scrape host stages)](#10-architecture-a-—-scrape-host-stages)
+- [1.0 Architecture (A — scrape host stages)](#10-architecture-a--scrape-host-stages)
   - [1.1 Deploy the stack](#11-deploy-the-stack)
   - [1.2 Run the stages on the host (with metrics on)](#12-run-the-stages-on-the-host-with-metrics-on)
   - [1.3 Open the dashboards](#13-open-the-dashboards)
@@ -37,7 +37,7 @@ kubectl wait --for=condition=available deploy/prometheus deploy/grafana \
 ```
   
 ## **1.2 Run the stages on the host (with metrics on)**
-Prereq: Kafka reachable from the host (`make kafka-pf-up`, or the CCAF env via `scripts/cc-app-run.sh`). Launch each stage in its own terminal on its mapped port. `-Disotope.consume.from=latest` skips the replay backlog so latency/age read steady-state — see [docs/metrics.md](../../docs/metrics.md#enabling-the-exporter).
+Prereq: Kafka reachable from the host (`make kafka-pf-up`, or the CCAF env via `scripts/cc-app-run.sh`). Launch each stage in its own terminal on its mapped port. `-Disotope.consume.from=latest` skips the replay backlog so latency/age read steady-state — see [docs/metrics.md](../../docs/metrics.md#20-enabling-the-exporter).
 
 ```bash
 # Local CP via gradle:
@@ -80,5 +80,5 @@ kubectl delete -k k8s/monitoring
 ## **3.0 Troubleshooting**
 - **Targets DOWN / `connection refused`.** The stage isn't running on that port, or `host.minikube.internal` doesn't resolve. It resolves out of the box on the Docker and Hyperkit drivers; if not, run `minikube ssh -- getent hosts host.minikube.internal` to check, and confirm the stage binds the port with `curl -s localhost:9410/metrics | grep isotope_` on the host.
 - **No data, targets UP.** The meters are lazily registered on first emission — drive some traffic (step 2). Until a stage produces/consumes, `/metrics` has no `isotope_*` series.
-- **Huge latency/age values.** Backlog replay, not steady-state — use `-Disotope.consume.from=latest` ([docs/metrics.md](../../docs/metrics.md#enabling-the-exporter)).
+- **Huge latency/age values.** Backlog replay, not steady-state — use `-Disotope.consume.from=latest` ([docs/metrics.md](../../docs/metrics.md#20-enabling-the-exporter)).
   

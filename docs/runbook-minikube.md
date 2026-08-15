@@ -1,7 +1,7 @@
 # Runbook — Confluent Platform + Flink on Minikube
 End-to-end operational guide for running `confluent-kafka-isotope` locally on **Minikube**: cluster → Kafka/Confluent Platform → Flink → SQL reports → traffic → observe → teardown. Every step maps to a target in the [Makefile](../Makefile), which is the source of truth.
 
-> This is the **Confluent Platform + Flink (self-managed) on Minikube** path. The Confluent Cloud for Apache Flink (CCAF) path is entirely different — Terraform-driven via `make cc-flink-reports-up`, no Minikube — see [root README §3.4](../README.md#34-flink-sql-reporting-with-confluent-cloud-for-apache-flink).
+> This is the **Confluent Platform + Flink (self-managed) on Minikube** path. The Confluent Cloud for Apache Flink (CCAF) path is entirely different — Terraform-driven via `make cc-flink-reports-up`, no Minikube — see [root README §3.3](../README.md#33-flink-sql-reporting-with-confluent-cloud-for-apache-flink).
 
 ---
 

@@ -240,7 +240,7 @@ if [ "${create_action}" = true ]; then
     terraform graph | dot -Tpng > "../docs/terraform.png"
 
     echo
-    print_info "Next step — drive the 4-stage demo (see root README §3.4):"
+    print_info "Next step — drive the 4-stage demo (see root README §3.3):"
     print_info "    scripts/cc-app-run.sh place 'hello'    # kick the chain off"
     print_info "    scripts/cc-app-run.sh enrich"
     print_info "    scripts/cc-app-run.sh fulfill"

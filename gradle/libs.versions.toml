@@ -32,7 +32,7 @@ protobuf-plugin = "0.9.4"
 # topology produce-edges, hop distribution) as Micrometer meters; the app
 # serves them at GET /metrics for Prometheus to scrape (Grafana on top).
 # This is the metrics-native alternative to the Flink latency_1m /
-# topology_1m / hop_distribution_1m SQL reports — see root README §3.5.
+# topology_1m / hop_distribution_1m SQL reports — see root README §3.4.
 micrometer = "1.14.2"
 
 [libraries]
