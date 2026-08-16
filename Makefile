@@ -991,3 +991,16 @@ nuke: ## Full wipe: confluent-teardown + minikube-delete + uninstall-prereqs (le
 	$(MAKE) minikube-delete
 	$(MAKE) uninstall-prereqs
 	@echo "✔ Nuke complete. Machine restored to pre-install state."
+
+
+
+# ------------------------------------------------------------------------------
+# Generate diagrams
+# ------------------------------------------------------------------------------
+.PHONY: generate_isotope_diagram
+generate_isotope_diagram: ## Generate the isotope diagram SVG and PNG
+	cd ./docs/image_generators && DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib uv run python generate_isotope_diagram.py
+
+.PHONY: generate_tier_ladder_diagram
+generate_tier_ladder_diagram: ## Generate the tier ladder diagram SVG and PNG
+	cd ./docs/image_generators && DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib uv run python generate_tier_ladder_diagram.py

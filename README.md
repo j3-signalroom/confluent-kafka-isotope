@@ -29,13 +29,13 @@ Much like isotopes used to trace molecules through a biochemical pathway, each e
 
 This project demonstrates how **Kafka Interceptors become collectors** — inserting the isotope into record headers in place and, at terminal consumers, emitting consume-edge markers — while **Flink SQL serves as the interpreter**, reading those headers directly to produce seven 1-minute reports from a single JAR on both Confluent Platform and Confluent Cloud for Apache Flink (CCAF). Optionally, the producer interceptor can **emit Micrometer metrics to Prometheus as an always-on aggregate layer** alongside the per-trace Flink reports.  (As depicted in the diagram below.)
 
-![isotope-diagram](docs/isotope-diagram.png)
+![isotope-diagram](docs/image_generators/isotope-diagram.png)
 
 With this approach, developers gain **end-to-end observability** into the flow of events through the Kafka-based microservices architecture, enabling both **real-time monitoring** and **post-hoc analysis** of event traces.
 
 This end-to-end observability of the isotope tracing pipeline creates a **ladder of insights**, allowing developers to trace each event’s journey, identify bottlenecks, and improve the performance and reliability of the entire system. The ladder is organized into **five tiers that answer 30 questions**.  (As depicted in the diagram below.)
 
-![tier-ladder-diagram](docs/tier-ladder-diagram.png)
+![tier-ladder-diagram](docs/image_generators/tier-ladder-diagram.png)
 
 <details>
 <summary>Easy — single-record, single-trace</summary>

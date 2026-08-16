@@ -60,9 +60,9 @@ SINKS = [
 ]
 # Set to None to drop the opt-in AI path from the chart entirely.
 OPTIONAL_BOX = {
-    "title": "AI root-cause analysis",
-    "mono": ["CREATE MODEL \u00b7 ML_PREDICT", "rca_findings_1m"],
-    "foot": "CCAF only \u00b7 off by default",
+    "title": "AI Root-Cause Analysis",
+    "mono": ["CREATE MODEL", "rca_findings_1m"],
+    "foot": "off by default",
     "feeds_from_sink": 6,          # 1-based index into SINKS
 }
 
@@ -238,8 +238,8 @@ def main():
     if not args.no_png:
         try:
             import cairosvg
-        except ImportError:
-            print("cairosvg not installed; skipping PNG (pip install cairosvg)")
+        except (ImportError, OSError):
+            print("PNG skipped: cairosvg unavailable (missing native libcairo? try DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib)")
             return
         png_path = os.path.join(args.out_dir, "isotope-diagram.png")
         cairosvg.svg2png(url=svg_path, write_to=png_path, output_width=W)
