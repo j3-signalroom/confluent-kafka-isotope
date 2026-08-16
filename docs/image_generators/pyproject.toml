@@ -1,0 +1,9 @@
+[project]
+name = "image-generators"
+version = "0.22.00.000"
+description = "Image Generators"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cairosvg>=2.9.0",
+]

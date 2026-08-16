@@ -135,7 +135,7 @@ def main():
         return
     try:
         import cairosvg
-    except ImportError:
+    except (ImportError, OSError):
         print("cairosvg not installed; skipping PNG (pip install cairosvg)")
         return
     png_path = os.path.join(args.out_dir, "tier-ladder-diagram.png")
