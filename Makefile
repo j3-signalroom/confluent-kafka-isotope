@@ -694,9 +694,21 @@ cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topic
 		echo "  e.g. make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=..."; \
 		exit 1; \
 	fi
-	@$(mkfile_dir)scripts/deploy-cc-flink-reports.sh create \
-		--confluent-api-key=$(CONFLUENT_API_KEY) \
-		--confluent-api-secret=$(CONFLUENT_API_SECRET)
+	@set -- --confluent-api-key='$(CONFLUENT_API_KEY)' \
+		--confluent-api-secret='$(CONFLUENT_API_SECRET)'; \
+	if [ "$(ENABLE_TRACE_RCA)" = "true" ]; then \
+		if [ -z "$(RCA_MODEL_API_KEY)" ]; then \
+			echo "✘ ENABLE_TRACE_RCA=true also requires RCA_MODEL_API_KEY."; \
+			exit 1; \
+		fi; \
+		set -- "$$@" --enable-trace-rca=true --rca-model-api-key='$(RCA_MODEL_API_KEY)'; \
+		if [ -n "$(RCA_MODEL_PROVIDER)" ];   then set -- "$$@" --rca-model-provider='$(RCA_MODEL_PROVIDER)'; fi; \
+		if [ -n "$(RCA_MODEL_VERSION)" ];    then set -- "$$@" --rca-model-version='$(RCA_MODEL_VERSION)'; fi; \
+		if [ -n "$(RCA_MODEL_ENDPOINT)" ];   then set -- "$$@" --rca-model-endpoint='$(RCA_MODEL_ENDPOINT)'; fi; \
+		if [ -n "$(RCA_MODEL_MAX_TOKENS)" ]; then set -- "$$@" --rca-model-max-tokens='$(RCA_MODEL_MAX_TOKENS)'; fi; \
+	fi; \
+	$(mkfile_dir)scripts/deploy-cc-flink-reports.sh create "$$@"
+
 
 .PHONY: cc-flink-reports-down
 cc-flink-reports-down: ## Tear down CCAF reports + env via `terraform destroy` (deletes the environment and all resources in it)

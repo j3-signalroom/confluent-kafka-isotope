@@ -15,13 +15,6 @@
 # The AI output is a hypothesis on its own topic; it never overwrites the
 # deterministic reports.
 #
-# NOTE: Anthropic IS a direct CCAF provider — for Claude hosted by Anthropic,
-# set rca_model_provider = "anthropic", rca_model_endpoint =
-# "https://api.anthropic.com/v1/messages", and rca_model_api_key to your Claude
-# API key (authenticated with a bare api_key, no AWS auth needed). Anthropic
-# models also require a max_tokens param ('anthropic.params.max_tokens'); see the
-# WITH block below. Claude via AWS Bedrock (provider = "bedrock") remains an
-# option too, but is not required. See the create-model docs.
 # =============================================================================
 
 variable "enable_trace_rca" {
@@ -31,13 +24,13 @@ variable "enable_trace_rca" {
 }
 
 variable "rca_model_provider" {
-  description = "CCAF AI Model Inference provider for the RCA model (openai, anthropic, bedrock, vertexai, azureopenai, googleai, sagemaker, azureml)."
+  description = "CCAF AI Model Inference provider for the RCA model (openai, bedrock, vertexai, azureopenai, googleai, sagemaker, azureml)."
   type        = string
   default     = "openai"
 }
 
 variable "rca_model_version" {
-  description = "Provider model id/version used for RCA text generation (e.g. gpt-4o, or a Bedrock Claude model id)."
+  description = "Provider model id/version used for RCA text generation (e.g. gpt-4o)."
   type        = string
   default     = "gpt-4o"
 }
@@ -55,20 +48,36 @@ variable "rca_model_api_key" {
   sensitive   = true
 }
 
-variable "rca_model_max_tokens" {
-  description = "Max output tokens for the RCA model. Required by the Anthropic provider ('anthropic.params.max_tokens'); ignored for other providers."
-  type        = number
-  default     = 2048
+locals {
+  # The model references its credential by connection name, never inline.
+  rca_connection_name = "trace-rca-connection"
 }
 
-locals {
-  # Anthropic requires an explicit max_tokens param; other providers don't take
-  # this key, so it's only emitted into the WITH block when provider=anthropic.
-  rca_provider_extra_with = var.rca_model_provider == "anthropic" ? "        'anthropic.params.max_tokens' = '${var.rca_model_max_tokens}',\n" : ""
+resource "confluent_flink_connection" "trace_rca" {
+  count = var.enable_trace_rca ? 1 : 0
+
+  display_name = local.rca_connection_name
+  type         = upper(var.rca_model_provider)
+  endpoint     = var.rca_model_endpoint
+  api_key      = var.rca_model_api_key
+
+  rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
+
+  credentials {
+    key    = module.flink_api_key_rotation.active_api_key.id
+    secret = module.flink_api_key_rotation.active_api_key.secret
+  }
+
+  organization { id = data.confluent_organization.current.id }
+  environment { id = confluent_environment.isotope.id }
+  principal { id = confluent_service_account.flink_sql_runner.id }
+  compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  depends_on = [confluent_flink_compute_pool.isotope]
 }
 
 # 1) Register the remote text-generation model. The provider name prefixes the
-#    provider-specific WITH keys; the api key is injected as a session secret.
+#    provider-specific WITH keys; auth comes from the Connection above.
 resource "confluent_flink_statement" "trace_rca_model" {
   count = var.enable_trace_rca ? 1 : 0
 
@@ -77,18 +86,14 @@ resource "confluent_flink_statement" "trace_rca_model" {
     INPUT  (`prompt` STRING)
     OUTPUT (`analysis` STRING)
     WITH (
-        'provider'                              = '${var.rca_model_provider}',
-        'task'                                  = 'text_generation',
-${local.rca_provider_extra_with}        '${var.rca_model_provider}.model_version' = '${var.rca_model_version}',
-        '${var.rca_model_provider}.endpoint'      = '${var.rca_model_endpoint}',
-        '${var.rca_model_provider}.api_key'       = '{{sessionconfig/sql.secrets.rca_api_key}}'
+        'provider'                                = '${var.rca_model_provider}',
+        'task'                                    = 'text_generation',
+        '${var.rca_model_provider}.model_version' = '${var.rca_model_version}',
+        '${var.rca_model_provider}.connection'    = '${local.rca_connection_name}'
     );
   EOT
 
-  # Inject the provider key as a statement-scoped secret referenced above.
-  properties = merge(local.flink_statement_properties, {
-    "sql.secrets.rca_api_key" = var.rca_model_api_key
-  })
+  properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
   credentials {
@@ -105,7 +110,10 @@ ${local.rca_provider_extra_with}        '${var.rca_model_provider}.model_version
     ignore_changes = [statement, compute_pool]
   }
 
-  depends_on = [confluent_flink_compute_pool.isotope]
+  depends_on = [
+    confluent_flink_compute_pool.isotope,
+    confluent_flink_connection.trace_rca,
+  ]
 }
 
 # 2) Sink table/topic for the AI report (Protobuf+SR, like the other reports).
@@ -172,6 +180,8 @@ resource "confluent_flink_statement" "insert_trace_rca" {
              || ' In 2 sentences: most likely root cause, and one remediation.'
          )) AS p;
   EOT
+
+  statement_name = "isotope-report-trace-rca-1m"
 
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
