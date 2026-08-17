@@ -405,7 +405,9 @@ Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **si
 Report sink topics ride **Avro+SR** (`avro-confluent`, auto-registered on first write) so Control Center renders them natively — a deliberate *format-by-domain* split: app events are **Protobuf+SR** (`DemoEvent`), Flink aggregates are **Avro+SR** (cp-flink ships no SR-integrated Protobuf format), and the consume-edge marker topic `isotope_consume_edge_markers` is **null-value / headers-only**. Not a defect — a clean split by domain.
 
 ### **3.3 Seven Scalar Headers Flink SQL Reports with Confluent Cloud for Apache Flink**
-The CCAF parallel of [§3.2](#32-flink-sql-reporting-with-apache-flink-on-minikube), driven by Terraform under [terraform/](terraform/) — no local cluster. 
+The CCAF parallel of [§3.2](#32-flink-sql-reporting-with-apache-flink-on-minikube), driven by Terraform under [terraform/](terraform/). The Terraform graph below depicts the Confluent Cloud resources that will be created.
+
+![terraform-graph](docs/terraform.png)
 
 `make cc-flink-reports-up` provisions a fresh Confluent Cloud environment containing:
 - Kafka cluster
@@ -413,8 +415,6 @@ The CCAF parallel of [§3.2](#32-flink-sql-reporting-with-apache-flink-on-miniku
 - Two rotating service-account API key pairs (Kafka + Schema Registry)
 - The uploaded PTF JAR
 - 25 `confluent_flink_statement` resources (4 `ALTER TABLE` + 3 `VIEW` + 7 sink `CREATE TABLE` + 2 `CREATE FUNCTION` + 7 `INSERT INTO`, plus 2 transient `DROP FUNCTION`)
-
-![terraform-graph](docs/terraform.png)
 
 **The full provision → deploy → traffic → teardown sequence is consolidated in [docs/runbook-ccaf.md](docs/runbook-ccaf.md).** `make cc-flink-reports-up` (~6–8 min first run; idempotent re-applies), drive traffic with `scripts/cc-app-run.sh place|enrich|fulfill|ship` across **multiple** 1-minute windows (a single burst sits in one open window forever, and you wait ~90s after the last record), then `make cc-flink-reports-down` to `terraform destroy` the whole environment.
 
