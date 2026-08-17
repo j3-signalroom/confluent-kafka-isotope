@@ -88,7 +88,7 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 - _For a specific business event two weeks ago, what path did its trace take?_
 - _Did this customer’s order traverse all the services it should have?_
 - _Can we reconstruct the full per-trace journey for an audit?_
-- _For Sarbanes-Oxley Act (SOX): prove that every transaction was either completed or logged as stuck._
+- _For Sarbanes-OXley Act (SOX): prove that every transaction was either completed or logged as stuck._
 - _Correlate isotope trace IDs with Application Performance Monitoring (APM) spans, OpenTelemetry (OTel) traces, or business transaction IDs._
 </details>
 
@@ -108,7 +108,7 @@ A bird's-eye view of the moving parts. The demo CLI in [`app/`](app/) consumes t
 
 Both runtimes run the same seven logical reports off the same source and view definitions, though each runtime keeps its own copy of the SQL. **Confluent Platform (CP) + Flink** on Minikube executes the `.fql` files under [`scripts/flink/sql/cp/`](scripts/flink/sql/cp/) as a single Flink 2.1 Confluent Manager for Apache Flink (CMF) Application (`IsotopeReportsJob`), while **Confluent Cloud for Apache Flink (CCAF)** applies the same logical SQL as inline `confluent_flink_statement` Terraform resources under [`terraform/`](terraform/). The shadow JAR from [`ptf/`](ptf/)—which powers two of the seven reports—runs unchanged on both runtimes: bundled into the CP application JAR and uploaded as a Flink artifact on CCAF.
 
-Alongside that—**additive, opt-in, and disabled by default**—the interceptor can also emit **Micrometer** metrics for **Prometheus**, with **Grafana** providing visualization ([§3.4](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)). This path produces the three **stateless** reports (`latency_1m`, `topology_1m`, and `hop_distribution_1m`) without requiring a stream processor. The remaining four reports continue to run in Flink because they depend on per-`trace_id` state or absence-of-event analysis, which falls outside Prometheus's query model.
+Alongside that—**additive, opt-in, and disabled by default**—the interceptor can also emit **Micrometer** metrics for **Prometheus**, with **Grafana** providing visualization ([§3.4 Prometheus Metrics Reporting with Grafana Visualization](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)). This path produces the three **stateless** reports (`latency_1m`, `topology_1m`, and `hop_distribution_1m`) without requiring a stream processor. The remaining four reports continue to run in Flink because they depend on per-`trace_id` state or absence-of-event analysis, which falls outside Prometheus's query model.
 
 *(Kafka is drawn once below for brevity; each runtime provisions its own Kafka cluster.)*
 
@@ -407,14 +407,14 @@ To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with ap
 
 > These settings ensure stable performance across all components. You can tune them as needed, but lower resource levels may cause pod restarts or degraded performance.
 
-Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, seven sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3](#33-flink-sql-reporting-with-confluent-cloud-for-apache-flink) for that path; this section is the local-Minikube one.
+Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, seven sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-Minikube one.
 
 **The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make flink-up` then `make flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
 
 Report sink topics ride **Avro+SR** (`avro-confluent`, auto-registered on first write) so Control Center renders them natively — a deliberate *format-by-domain* split: app events are **Protobuf+SR** (`DemoEvent`), Flink aggregates are **Avro+SR** (cp-flink ships no SR-integrated Protobuf format), and the consume-edge marker topic `isotope_consume_edge_markers` is **null-value / headers-only**. Not a defect — a clean split by domain.
 
 ### **3.3 Seven Scalar Headers Flink SQL Reports with Confluent Cloud for Apache Flink**
-The Confluent Cloud for Apache Flink (CCAF) parallel of [§3.2 CP + Apache Flink on MiniKube](#32-flink-sql-reporting-with-apache-flink-on-minikube), driven by Terraform under [terraform/](terraform/). The Terraform graph below depicts the resources deployed in Confluent Cloud.
+The Confluent Cloud for Apache Flink (CCAF) parallel of [§3.2 CP + Apache Flink on MiniKube](#32-seven-scalar-headers-flink-sql-reports-with-apache-flink-on-minikube), driven by Terraform under [terraform/](terraform/). The Terraform graph below depicts the resources deployed in Confluent Cloud.
 
 ![terraform-graph](docs/terraform.png)
 
