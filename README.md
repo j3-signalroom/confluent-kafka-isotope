@@ -299,10 +299,19 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
                                         var.enable_trace_rca (default false)
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
-docs/                                   extracted long-form docs (linked from the README)
-  design.md                             isotope tracing deep-dive
-  gen_isotope_diagram.py                script to generate the isotope architecture diagram
-  isotope_diagram.png                   visual representation of the isotope and its flow through Kafka headers 
+docs/                                   extracted long-form docs (linked from the README) and images
+  image_generators/                     folder for the Python scripts that generate certain images
+    .python-version                     single-line text file used to automatically lock and define the specific Python version
+    generate_isotope_diagram.py         script to generate the isotope architecture diagram
+    generate_tier_ladder_diagram.py     script to generate the tier ladder diagram
+    isotope-diagram.png                 visual representation (PNG) of the isotope and its flow through Kafka headers
+    isotope-diagram.svg                 visual representation (SVG) of the isotope and its flow through Kafka headers
+    pyproject.toml                      configuration file for packaging-related tools
+    README.md                           explains the image_generator Python scripts
+    tier-ladder-diagram.png             visual representation (PNG) of the tier ladder of the questions isotope answers
+    tier-ladder-diagram.svg             visual representation (SVG) of the tier ladder of the questions isotope answers
+    uv.lock                             an automatically generated file by uv, a fast Python package manager
+  design.md                             isotope tracing deep-dive 
   runbook-minikube.md                   full CP-on-Minikube run sequence (§3.2)
   runbook-ccaf.md                       full CCAF / Terraform run sequence (§3.3)
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
