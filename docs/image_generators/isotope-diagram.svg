@@ -80,7 +80,7 @@
 <polygon points="1590,1104 1600,1126 1610,1104" fill="#4FAE8B"/>
 <rect x="1540" y="1126" width="490" height="240" rx="20" fill="#E8F5EF" stroke="#4FAE8B" stroke-width="2" stroke-dasharray="16 12"/>
 <text x="1785" y="1185" text-anchor="middle" font-size="34" fill="#146A50">AI Root-Cause Analysis</text>
-<text x="1785" y="1236" text-anchor="middle" font-size="26" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">CREATE MODEL</text>
+<text x="1785" y="1236" text-anchor="middle" font-size="26" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">CREATE MODEL + ML_PREDICT</text>
 <text x="1785" y="1281" text-anchor="middle" font-size="26" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">rca_findings_1m</text>
 <text x="1785" y="1330" text-anchor="middle" font-size="28" fill="#4A7F6C">off by default</text>
 <text x="505" y="1092" text-anchor="start" font-size="35" fill="#44443F">Four-stage order workflow; traces ride in headers.</text>

@@ -61,7 +61,7 @@ SINKS = [
 # Set to None to drop the opt-in AI path from the chart entirely.
 OPTIONAL_BOX = {
     "title": "AI Root-Cause Analysis",
-    "mono": ["CREATE MODEL", "rca_findings_1m"],
+    "mono": ["CREATE MODEL + ML_PREDICT", "rca_findings_1m"],
     "foot": "off by default",
     "feeds_from_sink": 6,          # 1-based index into SINKS
 }
