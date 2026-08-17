@@ -23,8 +23,7 @@ Source of truth for the two hand-built diagrams in this repo's documentation. Ea
 ---
 
 ## **1.0 Prerequisites**
-
-- **uv** — this directory is a self-contained uv project (`pyproject.toml`, `uv.lock`, Python pinned to 3.13 in `.python-version`). `uv run` syncs `.venv/` on first use; there is nothing to `pip install`.
+- **[uv](https://docs.astral.sh/uv/)** — this directory is a self-contained uv project (`pyproject.toml`, `uv.lock`, Python pinned to 3.13 in `.python-version`). `uv run` syncs `.venv/` on first use; there is nothing to `pip install`.
 - **cairo** — `cairosvg` is a binding, not an implementation. The native library must be present for PNG output: `brew install cairo`. SVG generation needs nothing beyond Python.
 
 ## **2.0 Running**
