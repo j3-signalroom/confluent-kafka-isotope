@@ -1,13 +1,6 @@
 # =============================================================================
 # Optional: AI-enriched root-cause analysis for the stuck-trace report (CCAF).
 # =============================================================================
-# Wires the trace_rca PoC (scripts/flink/sql/ccaf-ai/trace_rca.fql, Option A)
-# into the managed Flink report set as `confluent_flink_statement` resources.
-#
-# DISABLED BY DEFAULT — every resource is gated on `var.enable_trace_rca`
-# (count = 0 when false), so a normal `terraform apply` is completely
-# unaffected. Turn it on only after setting `rca_model_api_key` (and, for a
-# non-OpenAI provider, the matching provider/endpoint/version vars).
 #
 # It registers a remote text-generation model, then calls it once per
 # stuck-trace alert (NOT per record — the source is the low-volume 1-min alert

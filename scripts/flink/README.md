@@ -55,8 +55,6 @@ When enabled, it adds three `confluent_flink_statement` resources:
 
 The default provider is OpenAI (`gpt-4o`). Claude is supported via **AWS Bedrock** (`rca_model_provider = "bedrock"` with AWS credentials). Other supported providers: `vertexai`, `azureopenai`, `googleai`, `sagemaker`, `azureml`.
 
-The standalone SQL walkthrough — a `CREATE MODEL` + `ML_PREDICT` PoC with provider notes and alternative options — is in [sql/ccaf-ai/trace_rca.fql](sql/ccaf-ai/trace_rca.fql). See also [root README §3.3](../../README.md#33-flink-sql-reporting-with-confluent-cloud-for-apache-flink).
-
 ## **3.0 Format-by-runtime, not by domain**
 The sink **format** differs by runtime for one platform-level reason:
 
@@ -82,9 +80,6 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
   60_stuck_trace_report.fql             INSERT INTO: stuck-trace alerts via STUCK_TRACE_PTF
   70_latency_percentiles_report.fql     INSERT INTO: p50/p95/p99 via LATENCY_PERCENTILES PTF (T-Digest)
   99_teardown.fql                       DROP TABLE/VIEW/FUNCTION (companion to flink-reports-down)
-
-scripts/flink/sql/ccaf-ai/            Optional AI report — CCAF only (see section below)
-  trace_rca.fql                         CREATE MODEL + ML_PREDICT PoC: LLM root-cause hypothesis per stuck-trace alert
 ```
 
 CCAF runs the same seven reports, but the SQL lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — 25 statements: ALTER (×4) + raw view + typed produce view + typed consume view + 7 sinks + `STUCK_TRACE_PTF` and `LATENCY_PERCENTILES` drop+register (×2 each = 4) + 7 INSERTs. The JAR is uploaded as a `confluent_flink_artifact` and referenced via `USING JAR 'confluent-artifact://<id>'`.
