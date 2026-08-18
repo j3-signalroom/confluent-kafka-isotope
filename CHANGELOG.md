@@ -20,6 +20,7 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 - Issues[`#244`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/244)
 - Issues[`#250`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/250)
 - Issues[`#262`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/262)
+- Issues[`#266`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/266)
 
 ### Fixed
 - Issues[`#230`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/230)
