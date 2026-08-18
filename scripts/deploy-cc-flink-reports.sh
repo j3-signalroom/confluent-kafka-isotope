@@ -14,6 +14,7 @@
 #       [--rca-model-version=<RCA_MODEL_VERSION>]
 #       [--rca-model-endpoint=<RCA_MODEL_ENDPOINT>]
 #       [--rca-model-api-key=<RCA_MODEL_API_KEY>]
+#       [--rca-model-system-prompt=<RCA_MODEL_SYSTEM_PROMPT>]
 #
 # The Confluent Cloud API key must have permissions to manage environments, Kafka clusters, 
 # Flink compute pools, service accounts, role bindings, and Flink artifacts/statements in the
@@ -39,7 +40,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TERRAFORM_DIR="${REPO_ROOT}/terraform"
 JAR_PATH="${REPO_ROOT}/ptf/build/libs/isotope-flink-udf.jar"
 
-argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>]"
+argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
 
 usage_and_exit() {
     echo
@@ -78,6 +79,7 @@ rca_model_provider=""
 rca_model_version=""
 rca_model_endpoint=""
 rca_model_api_key=""
+rca_model_system_prompt=""
 
 shift
 for arg in "$@"; do
@@ -105,6 +107,9 @@ for arg in "$@"; do
             ;;
         --rca-model-api-key=*)
             rca_model_api_key="${arg#--rca-model-api-key=}"
+            ;;
+        --rca-model-system-prompt=*)
+            rca_model_system_prompt="${arg#--rca-model-system-prompt=}"
             ;;
         *)
             print_error "(Error 003) Invalid argument: $arg"
@@ -159,9 +164,11 @@ export TF_VAR_enable_trace_rca="${enable_trace_rca}"
 # Only export the RCA model vars that were actually supplied. An exported but
 # empty TF_VAR_ does NOT fall through to the variable's Terraform default — it
 # overrides it with "", which blanks rca_model_provider/_version/_endpoint.
-[ -n "${rca_model_provider}" ]   && export TF_VAR_rca_model_provider="${rca_model_provider}"
-[ -n "${rca_model_version}" ]    && export TF_VAR_rca_model_version="${rca_model_version}"
-[ -n "${rca_model_endpoint}" ]   && export TF_VAR_rca_model_endpoint="${rca_model_endpoint}"
+[ -n "${rca_model_provider}" ]      && export TF_VAR_rca_model_provider="${rca_model_provider}"
+[ -n "${rca_model_version}" ]       && export TF_VAR_rca_model_version="${rca_model_version}"
+[ -n "${rca_model_endpoint}" ]      && export TF_VAR_rca_model_endpoint="${rca_model_endpoint}"
+[ -n "${rca_model_api_key}" ]       && export TF_VAR_rca_model_api_key="${rca_model_api_key}"
+[ -n "${rca_model_system_prompt}" ] && export TF_VAR_rca_model_system_prompt="${rca_model_system_prompt}"
 true  # the last [ -n ] above can be false; don't trip `set -e`
 
 cd "${TERRAFORM_DIR}"

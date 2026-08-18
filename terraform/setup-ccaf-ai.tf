@@ -48,10 +48,68 @@ variable "rca_model_api_key" {
   sensitive   = true
 }
 
+variable "rca_model_system_prompt" {
+  description = "Overrides the built-in RCA system prompt (behavioral instructions sent to the LLM once, at model-registration time). Leave empty to use the default in local.rca_default_system_prompt. Not all providers support a system prompt."
+  type        = string
+  default     = ""
+}
+
 locals {
   # The model references its credential by connection name, never inline.
   rca_connection_name = "trace-rca-connection"
-  sandbox_vpc_name      = "sandbox-${confluent_environment.non_prod.display_name}"
+
+  # CREATE MODEL WITH keys are prefixed with the provider name, so they have to
+  # be built from var.rca_model_provider rather than hard-coded to `openai.*`.
+  rca_model_connection_key    = "${var.rca_model_provider}.connection"
+  rca_model_version_key       = "${var.rca_model_provider}.model_version"
+  rca_model_system_prompt_key = "${var.rca_model_provider}.system_prompt"
+
+  # Behavioral instructions sent once, at CREATE MODEL time. Everything invariant
+  # lives here — persona, topology, failure vocabulary, output contract — so the
+  # per-alert prompt in `insert_trace_rca` carries only the facts of that trace.
+  # Joined into a single line because the value lands inside a single-quoted
+  # Flink SQL string literal.
+  rca_default_system_prompt = join(" ", [
+    "You are a senior SRE performing root-cause analysis on a Kafka event-streaming pipeline.",
+    "The pipeline is a linear chain: order-intake-service produces to orders.placed,",
+    "order-enrichment-service consumes orders.placed and produces to orders.enriched,",
+    "order-fulfillment-service consumes orders.enriched and produces to orders.fulfilled,",
+    "and shipping-notification-service consumes orders.fulfilled as the terminal hop.",
+    "Each input describes one trace that stopped advancing: the last service and topic",
+    "that observed it, how many hops it completed, and how long it has been idle.",
+    "Treat the last observed hop as the failure boundary and reason about which",
+    "downstream component failed to pick the message up. Consider the usual causes in a",
+    "Kafka chain: the downstream consumer being down, crash-looping, or stuck rebalancing;",
+    "consumer lag or partition starvation; a poison message failing deserialization;",
+    "an unhandled exception in the processing loop; a producer failing to publish the next",
+    "event; or partition skew starving one key. Do not propose causes that the reported hop",
+    "position cannot support, and do not claim any cause is confirmed. Respond with exactly",
+    "two sentences of plain prose: the first states the single most likely root cause, the",
+    "second states one concrete remediation an operator can act on immediately. Output only",
+    "those two sentences, with no markdown, no bullet points, no preamble, no restating of",
+    "the input values, and under 400 characters total.",
+  ])
+
+  # Single quotes would terminate the SQL literal early, so double them (SQL escape).
+  rca_system_prompt = replace(
+    coalesce(var.rca_model_system_prompt, local.rca_default_system_prompt),
+  "'", "''")
+}
+
+# Models are Kafka-cluster-scoped RBAC resources
+# (crn:.../kafka=<lkc>/model=<name>), so the org-level FlinkDeveloper binding is
+# NOT enough to run CREATE MODEL — without this the statement fails to provision
+# with "Permission denied to CREATE on Model". ResourceOwner covers
+# create/drop/describe plus invoking the model from ML_PREDICT, matching how
+# topic/group/transactional-id access is granted in setup-confluent-flink.tf.
+# Gated on the same flag as the rest of the file, so a normal apply grants
+# nothing extra.
+resource "confluent_role_binding" "flink_sql_runner_as_resource_owner_model_access" {
+  count = var.enable_trace_rca ? 1 : 0
+
+  principal   = "User:${confluent_service_account.flink_sql_runner.id}"
+  role_name   = "ResourceOwner"
+  crn_pattern = "${confluent_kafka_cluster.isotope.rbac_crn}/kafka=${confluent_kafka_cluster.isotope.id}/model=*"
 }
 
 resource "confluent_flink_connection" "trace_rca" {
@@ -87,15 +145,11 @@ resource "confluent_flink_statement" "trace_rca_model" {
     INPUT  (`prompt` STRING)
     OUTPUT (`analysis` STRING)
     WITH (
-        'provider'                                = '${var.rca_model_provider}',
-        'task'                                    = 'text_generation',
-        '${var.rca_model_provider}.model_version' = '${var.rca_model_version}',
-        '${var.rca_model_provider}.connection'    = '${local.rca_connection_name}'
-        WITH (
-  'openai.connection' = '<openai_connection>',
-  'openai.model_version' = 'gpt-3.5-turbo',
-  'openai.system_prompt' = 'Translate to spanish'
-);
+        'provider'                             = '${var.rca_model_provider}',
+        'task'                                 = 'text_generation',
+        '${local.rca_model_version_key}'       = '${var.rca_model_version}',
+        '${local.rca_model_connection_key}'    = '${local.rca_connection_name}',
+        '${local.rca_model_system_prompt_key}' = '${local.rca_system_prompt}'
     );
   EOT
 
@@ -119,6 +173,7 @@ resource "confluent_flink_statement" "trace_rca_model" {
   depends_on = [
     confluent_flink_compute_pool.isotope,
     confluent_flink_connection.trace_rca,
+    confluent_role_binding.flink_sql_runner_as_resource_owner_model_access,
   ]
 }
 
@@ -175,15 +230,12 @@ resource "confluent_flink_statement" "insert_trace_rca" {
         p.`analysis` AS `root_cause`
     FROM isotope_report_stuck_trace_1m AS a,
          LATERAL TABLE(ML_PREDICT('trace_rca',
-             'You are an SRE analyzing a Kafka pipeline. A trace is STUCK.'
-             || ' pipeline=' || a.`pipeline`
+             'pipeline=' || a.`pipeline`
              || ' trace_id=' || a.`trace_id`
-             || ' last_seen_at=' || a.`last_service` || ' -> ' || a.`last_topic`
+             || ' last_service=' || a.`last_service`
+             || ' last_topic=' || a.`last_topic`
              || ' hop_count=' || CAST(a.`last_hop_count` AS STRING)
              || ' idle_ms=' || CAST(a.`stuck_for_ms` AS STRING)
-             || '. Expected path: orders.placed -> orders.enriched ->'
-             || ' orders.fulfilled -> shipping-notification-service.'
-             || ' In 2 sentences: most likely root cause, and one remediation.'
          )) AS p;
   EOT
 

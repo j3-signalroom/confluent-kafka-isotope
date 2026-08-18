@@ -705,6 +705,7 @@ cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topic
 		if [ -n "$(RCA_MODEL_PROVIDER)" ];   then set -- "$$@" --rca-model-provider='$(RCA_MODEL_PROVIDER)'; fi; \
 		if [ -n "$(RCA_MODEL_VERSION)" ];    then set -- "$$@" --rca-model-version='$(RCA_MODEL_VERSION)'; fi; \
 		if [ -n "$(RCA_MODEL_ENDPOINT)" ];   then set -- "$$@" --rca-model-endpoint='$(RCA_MODEL_ENDPOINT)'; fi; \
+		if [ -n "$(RCA_MODEL_SYSTEM_PROMPT)" ]; then set -- "$$@" --rca-model-system-prompt='$(RCA_MODEL_SYSTEM_PROMPT)'; fi; \
 	fi; \
 	$(mkfile_dir)scripts/deploy-cc-flink-reports.sh create "$$@"
 
