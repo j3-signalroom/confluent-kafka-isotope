@@ -53,7 +53,7 @@ When enabled, it adds three `confluent_flink_statement` resources:
 - A `proto-registry` sink table `isotope_report_trace_rca_1m`.
 - An `INSERT … SELECT … LATERAL TABLE(ML_PREDICT('trace_rca', …))` that calls the model **once per alert** (reading the low-volume 1-minute stuck-trace report topic, never the source stream) and writes the hypothesis to its own topic — it never overwrites the deterministic reports.
 
-The default provider is OpenAI (`gpt-4o`). Claude is supported two ways: directly via **Anthropic** (`rca_model_provider = "anthropic"`, endpoint `https://api.anthropic.com/v1/messages`, a bare `rca_model_api_key`, plus the required `rca_model_max_tokens`), or via **AWS Bedrock** (`rca_model_provider = "bedrock"` with AWS credentials). Other supported providers: `vertexai`, `azureopenai`, `googleai`, `sagemaker`, `azureml`.
+The default provider is OpenAI (`gpt-4o`). Claude is supported via **AWS Bedrock** (`rca_model_provider = "bedrock"` with AWS credentials). Other supported providers: `vertexai`, `azureopenai`, `googleai`, `sagemaker`, `azureml`.
 
 The standalone SQL walkthrough — a `CREATE MODEL` + `ML_PREDICT` PoC with provider notes and alternative options — is in [sql/ccaf-ai/trace_rca.fql](sql/ccaf-ai/trace_rca.fql). See also [root README §3.3](../../README.md#33-flink-sql-reporting-with-confluent-cloud-for-apache-flink).
 

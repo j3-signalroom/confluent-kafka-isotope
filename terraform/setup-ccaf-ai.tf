@@ -51,6 +51,7 @@ variable "rca_model_api_key" {
 locals {
   # The model references its credential by connection name, never inline.
   rca_connection_name = "trace-rca-connection"
+  sandbox_vpc_name      = "sandbox-${confluent_environment.non_prod.display_name}"
 }
 
 resource "confluent_flink_connection" "trace_rca" {
@@ -90,6 +91,11 @@ resource "confluent_flink_statement" "trace_rca_model" {
         'task'                                    = 'text_generation',
         '${var.rca_model_provider}.model_version' = '${var.rca_model_version}',
         '${var.rca_model_provider}.connection'    = '${local.rca_connection_name}'
+        WITH (
+  'openai.connection' = '<openai_connection>',
+  'openai.model_version' = 'gpt-3.5-turbo',
+  'openai.system_prompt' = 'Translate to spanish'
+);
     );
   EOT
 
