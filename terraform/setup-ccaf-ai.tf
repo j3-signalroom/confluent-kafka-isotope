@@ -146,6 +146,8 @@ resource "confluent_flink_statement" "trace_rca_model" {
     );
   EOT
 
+  statement_name = "trace-rca-model"
+
   properties    = local.flink_statement_properties
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 

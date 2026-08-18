@@ -16,7 +16,7 @@ Control Center deserializes both sink formats natively.
 **Table of Contents**
 <!-- toc -->
 - [**1.0 What each report computes**](#10-what-each-report-computes)
-- [**2.0 Optional: AI root-cause analysis (CCAF-only, off by default)**](#20-optional-ai-root-cause-analysis-ccaf-only-off-by-default)
+- [**2.0 [OPTIONAL] AI Root-Cause Analysis (RCA)**](#20-optional-ai-root-cause-analysis-rca)
 - [**3.0 Format-by-runtime, not by domain**](#30-format-by-runtime-not-by-domain)
 - [**4.0 Layout**](#40-layout)
 - [**5.0 Wire-format detail (CP only)**](#50-wire-format-detail-cp-only)
@@ -43,7 +43,7 @@ Every report also carries a **`pipeline`** column (decoded from the `x-isotope-p
 | `stuck_trace`        | `isotope`                 | alerts (via `STUCK_TRACE_PTF`) for traces idle ≥60s of event time | CP, CCAF |
 | `latency_percentiles`| `isotope`                 | p50 / p95 / p99 (via `LATENCY_PERCENTILES` PTF, T-Digest) | CP, CCAF |
 
-## **2.0 Optional: AI root-cause analysis (CCAF-only, off by default)**
+## **2.0 [OPTIONAL] AI Root-Cause Analysis (RCA)**
 
 Beyond the seven deterministic reports, an **eighth, AI-generated report** turns each stuck-trace *alert* into a natural-language root-cause hypothesis plus a one-line remediation. It's a CCAF-only feature, wired by [terraform/setup-ccaf-ai.tf](../../terraform/setup-ccaf-ai.tf) and **gated on `var.enable_trace_rca` (default `false`)**, so a normal deploy is unaffected.
 
@@ -110,9 +110,18 @@ The 7 reports run as a single Flink 2.1 CMF **Application** (`isotope-reports`, 
 
 ### **7.2 CCAF (Confluent Cloud, Terraform-driven)**
 ```bash
-make cc-flink-reports-up   CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
-                           # terraform apply: env + cluster + topics + compute pool + artifact + 25 statements
-                           # also regenerates terraform/terraform.png via `terraform graph | dot`
+make cc-flink-reports-up  CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
+                          # terraform apply: env + cluster + topics + compute pool + artifact + 25 statements
+                          # also regenerates terraform/terraform.png via `terraform graph | dot`
+```
+or
+```bash
+make cc-flink-reports-up  CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=... ENABLE_TRACE_RCA=true RCA_MODEL_API_KEY=... RCA_MODEL_PROVIDER=... RCA_MODEL_VERSION=... RCA_MODEL_ENDPOINT=...
+                          # terraform apply: env + cluster + topics + compute pool + artifact + 28 statements (AI root-cause analysis setup)
+                          # also regenerates terraform/terraform.png via `terraform graph | dot`
+```
+
+```bash
 source scripts/cc-cli-env.sh          # exports BOOTSTRAP / SR_URL / KAFKA_KEY / KAFKA_SECRET / SR_KEY / SR_SECRET / JAAS
 scripts/cc-app-run.sh send orders.placed order-intake-service 'hello'   # drives traffic with the SASL config
 make cc-flink-reports-down CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
