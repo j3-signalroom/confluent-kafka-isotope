@@ -16,6 +16,24 @@ variable "enable_trace_rca" {
   default     = false
 }
 
+variable "aws_access_key" {
+  description = "AWS access key for the Bedrock provider. Required when enable_trace_rca = true and rca_model_provider = bedrock."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+variable "aws_secret_key" {
+  description = "AWS secret key for the Bedrock provider. Required when enable_trace_rca = true and rca_model_provider = bedrock."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+variable "aws_session_token" {
+  description = "AWS session token for the Bedrock provider. Required when enable_trace_rca = true and rca_model_provider = bedrock."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
 variable "rca_model_provider" {
   description = "CCAF AI Model Inference provider for the RCA model (openai, bedrock, vertexai, azureopenai, googleai, sagemaker, azureml)."
   type        = string
@@ -50,6 +68,12 @@ variable "rca_model_system_prompt" {
 locals {
   # The model references its credential by connection name, never inline.
   rca_connection_name = "trace-rca-connection"
+
+  # Bedrock authenticates the Connection with AWS credentials; every other
+  # provider uses a single API key. The two are mutually exclusive, so the
+  # unused side is set to null (not "") — an empty string is a value the
+  # provider would send, whereas null leaves the attribute unset.
+  rca_is_bedrock = lower(var.rca_model_provider) == "bedrock"
 
   # CREATE MODEL WITH keys are prefixed with the provider name, so they have to
   # be built from var.rca_model_provider rather than hard-coded to `openai.*`.
@@ -111,7 +135,16 @@ resource "confluent_flink_connection" "trace_rca" {
   display_name = local.rca_connection_name
   type         = upper(var.rca_model_provider)
   endpoint     = var.rca_model_endpoint
-  api_key      = var.rca_model_api_key
+  api_key      = local.rca_is_bedrock ? null : var.rca_model_api_key
+
+  # AWS SigV4 credentials, Bedrock only. The session token is set only for
+  # temporary credentials (STS / SSO / assume-role); long-lived IAM user keys
+  # leave it null. Note that temporary credentials expire — the Connection
+  # stores what it was given, so a session-token deploy stops authenticating
+  # when the token does, and has to be re-applied with a fresh one.
+  aws_access_key    = local.rca_is_bedrock ? var.aws_access_key : null
+  aws_secret_key    = local.rca_is_bedrock ? var.aws_secret_key : null
+  aws_session_token = local.rca_is_bedrock && var.aws_session_token != "" ? var.aws_session_token : null
 
   rest_endpoint = data.confluent_flink_region.isotope.rest_endpoint
 
@@ -124,6 +157,13 @@ resource "confluent_flink_connection" "trace_rca" {
   environment { id = confluent_environment.isotope.id }
   principal { id = confluent_service_account.flink_sql_runner.id }
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
+
+  lifecycle {
+    precondition {
+      condition     = !local.rca_is_bedrock || (var.aws_access_key != "" && var.aws_secret_key != "")
+      error_message = "rca_model_provider = \"bedrock\" requires aws_access_key, aws_secret_key and aws_session_token. deploy-cc-flink-reports.sh takes them as --aws-access-key / --aws-secret-key / --aws-session-token."
+    }
+  }
 
   depends_on = [confluent_flink_compute_pool.isotope]
 }

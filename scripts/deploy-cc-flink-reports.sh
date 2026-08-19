@@ -10,6 +10,9 @@
 #       --confluent-api-secret=<CONFLUENT_CLOUD_API_SECRET>
 #       [--day-count=<DAY_COUNT>]
 #       [--enable-trace-rca=<true|false>]
+#       [--aws-access-key=<AWS_ACCESS_KEY>]
+#       [--aws-secret-key=<AWS_SECRET_KEY>]
+#       [--aws-session-token=<AWS_SESSION_TOKEN>]
 #       [--rca-model-provider=<RCA_MODEL_PROVIDER>]
 #       [--rca-model-version=<RCA_MODEL_VERSION>]
 #       [--rca-model-endpoint=<RCA_MODEL_ENDPOINT>]
@@ -40,7 +43,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TERRAFORM_DIR="${REPO_ROOT}/terraform"
 JAR_PATH="${REPO_ROOT}/ptf/build/libs/isotope-flink-udf.jar"
 
-argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
+argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--aws-access-key=<KEY>] [--aws-secret-key=<SECRET>] [--aws-session-token=<TOKEN>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
 
 usage_and_exit() {
     echo
@@ -75,6 +78,9 @@ day_count=30
 confluent_api_key=""
 confluent_api_secret=""
 enable_trace_rca=false
+aws_access_key=""
+aws_secret_key=""
+aws_session_token=""
 rca_model_provider=""
 rca_model_version=""
 rca_model_endpoint=""
@@ -95,6 +101,15 @@ for arg in "$@"; do
             ;;
         --enable-trace-rca=*)
             enable_trace_rca="${arg#--enable-trace-rca=}"
+            ;;
+        --aws-access-key=*)
+            aws_access_key="${arg#--aws-access-key=}"
+            ;;
+        --aws-secret-key=*)
+            aws_secret_key="${arg#--aws-secret-key=}"
+            ;;
+        --aws-session-token=*)
+            aws_session_token="${arg#--aws-session-token=}"
             ;;
         --rca-model-provider=*)
             rca_model_provider="${arg#--rca-model-provider=}"
@@ -170,6 +185,25 @@ export TF_VAR_enable_trace_rca="${enable_trace_rca}"
 [ -n "${rca_model_api_key}" ]       && export TF_VAR_rca_model_api_key="${rca_model_api_key}"
 [ -n "${rca_model_system_prompt}" ] && export TF_VAR_rca_model_system_prompt="${rca_model_system_prompt}"
 true  # the last [ -n ] above can be false; don't trip `set -e`
+
+# Bedrock authenticates the Flink connection with AWS credentials instead of an
+# API key, so those three TF_VARs are only meaningful — and only exported — when
+# the provider is bedrock. Exported blank they would override the Terraform
+# defaults with "", exactly as with the RCA vars above. The session token is
+# optional: it is set only for temporary (STS / SSO / assume-role) credentials.
+if [ "${rca_model_provider}" = "bedrock" ]; then
+    if [ -z "${aws_access_key}" ] || [ -z "${aws_secret_key}" ] || [ -z "${aws_session_token}" ]; then
+        print_error "(Error 006) --rca-model-provider=bedrock requires --aws-access-key=<AWS_ACCESS_KEY>, --aws-secret-key=<AWS_SECRET_KEY>, and --aws-session-token=<AWS_SESSION_TOKEN>."
+        usage_and_exit
+    fi
+    export TF_VAR_aws_access_key="${aws_access_key}"
+    export TF_VAR_aws_secret_key="${aws_secret_key}"
+    export TF_VAR_aws_session_token="${aws_session_token}"
+    true  # see above — an unset session token must not trip `set -e`
+    print_info "Bedrock provider — exported AWS credentials to Terraform."
+elif [ -n "${aws_access_key}${aws_secret_key}${aws_session_token}" ]; then
+    print_warn "AWS credentials supplied but --rca-model-provider is '${rca_model_provider:-openai}', not bedrock — ignoring them."
+fi
 
 cd "${TERRAFORM_DIR}"
 

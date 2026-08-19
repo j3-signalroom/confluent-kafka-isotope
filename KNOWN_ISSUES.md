@@ -31,7 +31,7 @@ Exception in thread "main" com.google.inject.ProvisionException:
   Caused by: ConfigException: No resolvable bootstrap urls given in bootstrap.servers
 ```
 
-Non-daemon Kafka Streams threads keep the JVM alive after `main` exits, so the container never terminates, the kubelet never restarts it, and it never binds port 9021. The pod stays in this state indefinitely.
+Non-daemon Kafka Streams threads keep the JVM alive after `main` exits, so the container never terminates, the kubelet never restarts it, and it never binds port `9021`. The pod stays in this state indefinitely.
 
 Two details make this hard to spot:
 
