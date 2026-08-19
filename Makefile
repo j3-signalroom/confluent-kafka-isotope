@@ -706,9 +706,11 @@ cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topic
 		if [ -n "$(RCA_MODEL_VERSION)" ];    then set -- "$$@" --rca-model-version='$(RCA_MODEL_VERSION)'; fi; \
 		if [ -n "$(RCA_MODEL_ENDPOINT)" ];   then set -- "$$@" --rca-model-endpoint='$(RCA_MODEL_ENDPOINT)'; fi; \
 		if [ -n "$(RCA_MODEL_SYSTEM_PROMPT)" ]; then set -- "$$@" --rca-model-system-prompt='$(RCA_MODEL_SYSTEM_PROMPT)'; fi; \
+		if [ -n "$(AWS_ACCESS_KEY)" ];  then set -- "$$@" --aws-access-key='$(AWS_ACCESS_KEY)'; fi; \
+		if [ -n "$(AWS_SECRET_KEY)" ];  then set -- "$$@" --aws-secret-key='$(AWS_SECRET_KEY)'; fi; \
+		if [ -n "$(AWS_SESSION_TOKEN)" ];   then set -- "$$@" --aws-session-token='$(AWS_SESSION_TOKEN)'; fi; \
 	fi; \
 	$(mkfile_dir)scripts/deploy-cc-flink-reports.sh create "$$@"
-
 
 .PHONY: cc-flink-reports-down
 cc-flink-reports-down: ## Tear down CCAF reports + env via `terraform destroy` (deletes the environment and all resources in it)
