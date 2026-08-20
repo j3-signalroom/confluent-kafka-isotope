@@ -102,7 +102,7 @@ This project models a Kafka pipeline as a **bipartite graph**: *services occupy 
 
 A `ProducerInterceptor` stamps each record with an isotope and appends one hop for every `send()` operation, capturing the produce edges. Consumers call `IsotopeContext.recordConsume()` to emit a lightweight marker representing the corresponding consume edges, while services that consume and then produce invoke `IsotopeContext.adoptFromRecord()` so the trace identity persists across every hop. Apache Flink reconstructs the complete **service → topic → service** graph from the isotope headers alone, producing seven reports: end-to-end latency, latency percentiles, produce-side topology, the full bipartite topology, hop distribution, per-topic coverage (a trace-loss funnel signal), and stuck-trace detection. The same implementation runs unchanged on both Confluent Platform (self-managed) with Confluent Manager for Apache Flink (CMF) and Confluent Cloud for Apache Flink (CCAF).
 
-For more in-depth discussion of the **Isotope Tracing Design, see [docs/design.md](docs/design.md).
+For more in-depth discussion of the **Isotope Tracing Design**, see [docs/design.md](docs/design.md).
 
 ### **1.1 Anatomy of the Isotope Tracing Artifact**
 The isotope is a **JSON object** that travels in the `x-isotope` Kafka record header, accompanied by **seven scalar headers** that Flink SQL reads directly. The JSON carries the trace identity, origin metadata, and full ordered hop history, while the scalar headers provide a flattened view of the most-recent-hop data for easier SQL access.
@@ -122,6 +122,26 @@ The isotope is a **JSON object** that travels in the `x-isotope` Kafka record he
   * `x` — `true` if the hop list exceeded `MAX_HOPS = 32` and the oldest hop was evicted.
 
 * **Seven scalar headers** (UTF-8 strings) carry the most-recent-hop view, allowing Flink SQL to read them directly via `CAST(headers['x-isotope-…'] AS STRING)` without parsing the JSON hop array or requiring a UDF on either CCAF or CP Flink. See [scripts/flink/README.md](../scripts/flink/README.md) for the complete scalar-header table.
+
+<details>
+
+<summary>Sample Isotope Tracing Artifact</summary>
+
+> Formatted for readability; the actual header is in JSON bytes
+
+```json
+{
+	"x-isotope-hop-count": "1",
+	"x-isotope": "{\"t\":\"AZ69OS8OeG+9zufGfF2sbw==\",\"o\":1781291101966,\"s\":\"order-intake-service\",\"p\":\"order\",\"h\":[{\"s\":\"order-intake-service\",\"t\":\"orders.placed\",\"m\":1781291101966}],\"x\":false}",
+	"x-isotope-trace-id": "019ebd392f0e786fbdcee7c67c5dac6f",
+	"x-isotope-this-service": "order-intake-service",
+	"x-isotope-origin-service": "order-intake-service",
+	"x-isotope-this-topic": "orders.placed",
+	"x-isotope-origin-ts": "1781291101966",
+	"x-isotope-pipeline": "order"
+}
+```
+</details>
 
 ## **2.0 Architecture**
 A bird's-eye view of the moving parts. The demo CLI in [`app/`](app/) consumes the external tracing library ([`ai.signalroom:kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope)), which registers a Kafka `ProducerInterceptor` that stamps an isotope into record headers on every `send()`. Consume-then-produce services propagate the inbound trace by explicitly calling `IsotopeContext.adoptFromRecord(record)`. Business events then flow through a three-topic Kafka pipeline, where Flink SQL reads the isotope metadata and emits one-minute aggregate reports.
