@@ -1,5 +1,5 @@
-# Architectural Design of Isotope Tracing
-The conceptual foundation of `confluent-kafka-isotope`: what the isotope is, how it travels in Kafka headers, how produce- and consume-side edges are captured, and why the topology is modelled as a bipartite graph. For *running* the project, see the [README](../README.md) and either the [CCAF Runbook](../docs/runbook-ccaf.md) or the [Confluent Platform + Flink on Minikube Runbook](../docs/runbook-minikube.md) depending on which environment you are using.
+# Isotope Tracing Design
+The conceptual foundation of `confluent-kafka-isotope`: what the isotope is, how it travels in Kafka headers, how produce- and consume-side edges are captured, and why the topology is modelled as a bipartite graph. For *running* the project, see the [root README](../README.md) and either the [CCAF Runbook](../docs/runbook-ccaf.md) or the [Confluent Platform + Flink on Minikube Runbook](../docs/runbook-minikube.md) depending on which environment you are using.
 
 ---
 
@@ -32,7 +32,7 @@ A point worth affirming up front: **open-source Apache Flink and Confluent Cloud
 One asymmetry between the runtimes is **Flink-native Schema Registry (SR) Protobuf support**. CCAF supports Schema Registry-framed Protobuf as a Flink sink format through its topic catalog, while open-source Apache Flink—the runtime used by CP—provides `avro-confluent` but no equivalent Schema Registry Protobuf format. Consequently, Flink **report sinks** use **Avro+SR on CP** and can use **Protobuf+SR on CCAF**. This is a runtime constraint, not a project preference. The demo **event topics** described in the next section are unaffected because they are written by the Kafka producer client, not by Flink.
 
 ## **2.0 Header layout**
-Message **values** on the demo topics are **SR-framed Protobuf** (`ai.signalroom.kafka.isotope.proto.DemoEvent`) — the standard Confluent value format. The interceptors and reports are agnostic to value format because the isotope travels in headers; the Protobuf choice just gives the integration tests and the demo CLI a typed payload to work with. The **headers** are where the isotope lives, and they have two parts:
+Message **values** on the demo **event topics** are **SR-framed Protobuf** (`ai.signalroom.kafka.isotope.proto.DemoEvent`) — the standard Confluent value format. The interceptors and reports are agnostic to value format because the isotope travels in headers; the Protobuf choice just gives the integration tests and the demo CLI a typed payload to work with. The **headers** are where the isotope lives. On the demo event topics they have two parts:
 
 - **Header `x-isotope`** (JSON bytes) carries the full hop history, forwarded by every hop:
   - `t` — 16-byte **UUIDv7** trace ID ([RFC 9562](https://www.rfc-editor.org/rfc/rfc9562)): 48-bit ms timestamp in the high bits + 74 bits random. Stable for the life of the trace, and lexicographic byte order matches creation order — sort trace IDs and you get chronological order for free. The random bits come from `ThreadLocalRandom`, not `SecureRandom`: a trace ID is a public observability identifier carried in Kafka headers, so the requirement is collision avoidance, not unpredictability — and `ThreadLocalRandom` delivers that without `SecureRandom`'s per-call cost on every produced record.
@@ -56,6 +56,8 @@ Example of the isotope’s two parts (formatted for readability; the actual head
 	"x-isotope-pipeline": "order"
 }
 ```
+
+Records on `isotope_consume_edge_markers` carry a **different** layout: `IsotopeContext.recordConsume` forwards the seven scalars, adds an eighth — `x-isotope-consumer-service` — and drops the `x-isotope` JSON header entirely. Markers therefore have no hop history and a null value; see [§3.3](#33-consume-side-markers). The presence or absence of that eighth header is what partitions the single `isotope_raw` source into the `isotope` and `consume_events` views.
 
 ## **3.0 Overview**
 A producer with the isotope interceptor loaded appends one hop on every `send()`. A consume-then-produce service calls `IsotopeContext.adoptFromRecord(record)` between consume and produce so the trace ID and origin survive the hop.
