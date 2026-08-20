@@ -4,6 +4,7 @@
 <!-- toc -->
 - [**Purpose**](#purpose)
 - [**1.0 How an Isotope Traverses an Event Pipeline**](#10-how-an-isotope-traverses-an-event-pipeline)
+  + [**1.1 Anatomy of the Isotope Tracing Artifact**](#11-anatomy-of-the-isotope-tracing-artifact)
 - [**2.0 Architecture**](#20-architecture)
 - [**3.0 Getting Started**](#30-getting-started)
   + [**3.1 Integration Tests with Confluent Platform on Minikube**](#31-integration-tests-with-confluent-platform-on-minikube)
