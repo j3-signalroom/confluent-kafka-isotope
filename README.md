@@ -52,7 +52,7 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 <details>
 <summary>Easy to Medium — single per-minute aggregates</summary>
 
-- _End-to-end latency from order-intake-service through to shipping-notification-service over the last minute?_
+- _End-to-end latency from_ `order-intake-service` _through to_ `shipping-notification-service` _over the last minute?_
 - _What is the actual service graph?_
 - _How many distinct traces hit each topic per minute?_
 - _Is the hop-count distribution as expected, or are there long tails suggesting retry storms?_
@@ -64,7 +64,7 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 <summary>Medium — cross-window deltas, anomalies, multi-report joins</summary>
 
 - _Did latency get worse after the 2 pm deploy?_
-- _What percentage of traces that entered at orders.placed made it all the way through orders.fulfilled to the shipping consumer?_
+- _What percentage of traces that entered at_ `orders.placed` _made it all the way through_ `orders.fulfilled` _to the shipping consumer?_
 - _Where in the pipeline are records being dropped?_
 - _Are some traces being duplicated at the terminal sink?_
 - _Which traces went in but never came out within 60 seconds of event time?_
