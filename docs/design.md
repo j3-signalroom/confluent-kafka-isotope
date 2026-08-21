@@ -1,5 +1,11 @@
 # Isotope Tracing Design
-The conceptual foundation of `confluent-kafka-isotope`: what the isotope is, how it travels in Kafka headers, how produce- and consume-side edges are captured, and why the topology is modelled as a bipartite graph. For *running* the project, see the [root README](../README.md) and either the [CCAF Runbook](../docs/runbook-ccaf.md) or the [Confluent Platform + Flink on Minikube Runbook](../docs/runbook-minikube.md) depending on which environment you are using.
+The conceptual foundation for `confluent-kafka-isotope`:
+- what the isotope is,
+- how it travels in Kafka headers,
+- how produce- and consume-side edges are captured, and 
+- why the topology is modelled as a bipartite graph.
+
+For *running* the project, see the [root README](../README.md) and either the [CCAF Runbook](../docs/runbook-ccaf.md) or the [Confluent Platform + Flink on Minikube Runbook](../docs/runbook-minikube.md), depending on which runtime you choose.
 
 ---
 
