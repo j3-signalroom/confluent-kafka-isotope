@@ -296,6 +296,8 @@ k8s/monitoring/                         optional metrics showcase (§3.4) — `m
   kustomization.yaml                    `kubectl apply -k k8s/monitoring`
   README.md                             runbook + troubleshooting
 scripts/
+  tf-repair-flink-credentials.py        repairs the CCAF Flink service account credentials
+  tf-statement-updates.py               updates the 25 Flink SQL statements in Terraform
   port-forward-kafka.sh                 localhost:30092 → Kafka, localhost:8081 → SR
   port-forward-taskmanager.sh           Flink TaskManager web UI forward
   deploy-cmf-flink-reports.sh           builds shadow JAR + uploads it as a cmf://
