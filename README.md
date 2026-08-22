@@ -100,7 +100,19 @@ An **Isotope** is a **_lightweight tracing artifact attached to Kafka record hea
 
 This project models a Kafka pipeline as a **bipartite graph**: *services occupy one vertex set*, *topics the other*, and *every produce and consume operation forms an edge between them*. The resulting graph provides a unified view of the complete event topology, from producers to intermediate processing services to terminal consumers.
 
-A `ProducerInterceptor` stamps each record with an isotope and appends one hop for every `send()` operation, capturing the produce edges. Consumers call `IsotopeContext.recordConsume()` to emit a lightweight marker representing the corresponding consume edges, while services that consume and then produce invoke `IsotopeContext.adoptFromRecord()` so the trace identity persists across every hop. Apache Flink reconstructs the complete **service → topic → service** graph from the isotope headers alone, producing seven reports: end-to-end latency, latency percentiles, produce-side topology, the full bipartite topology, hop distribution, per-topic coverage (a trace-loss funnel signal), and stuck-trace detection. The same implementation runs unchanged on both Confluent Platform (self-managed) with Confluent Manager for Apache Flink (CMF) and Confluent Cloud for Apache Flink (CCAF).
+A `ProducerInterceptor` stamps the isotope onto each record and appends one hop for every `send()` operation, capturing the **produce edges**. Consumers call `IsotopeContext.recordConsume()` to emit a lightweight marker representing the corresponding **consume edges**, while services that consume and then produce invoke `IsotopeContext.adoptFromRecord()` so the trace identity persists across every hop.
+
+Apache Flink combines the isotope headers and consume-edge markers to reconstruct the complete **service → topic → service** graph and produce seven reports:
+
+* **End-to-end latency**
+* **Latency percentiles**
+* **Produce-side topology**
+* **Full bipartite topology**
+* **Hop distribution**
+* **Per-topic coverage** — a trace-loss funnel signal
+* **Stuck-trace detection**
+
+The same implementation runs on both **Confluent Platform (self-managed)** with **Confluent Manager for Apache Flink (CMF)** and **Confluent Cloud for Apache Flink (CCAF)**.
 
 For more in-depth discussion of the **Isotope Tracing Design**, see [docs/design.md](docs/design.md).
 
