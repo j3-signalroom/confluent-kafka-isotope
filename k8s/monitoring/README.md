@@ -23,7 +23,7 @@ The Isotope pipeline stages run on your **host** via `./gradlew :app:run`, not i
 host:  gradle enrich :9410   gradle fulfill :9411   gradle ship :9412
                   \                  |                    /
             host.minikube.internal  (scraped every 5s)
-                                   |
+                                     |
 Minikube:               Prometheus :9090  →  Grafana :3000
 ```
 

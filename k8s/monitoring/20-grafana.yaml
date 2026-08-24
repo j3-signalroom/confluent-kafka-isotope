@@ -246,6 +246,13 @@ spec:
                 sleep 2
               done
               echo "Prometheus is ready — starting Grafana."
+          # Tiny, but it still needs a request so the pod isn't BestEffort.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
       containers:
         - name: grafana
           image: grafana/grafana:11.2.0
@@ -269,6 +276,13 @@ spec:
               mountPath: /etc/grafana/provisioning/dashboards
             - name: dashboards
               mountPath: /var/lib/grafana/dashboards
+          # See the note in 10-prometheus.yaml — same BestEffort/eviction reasoning.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
           readinessProbe:
             httpGet:
               path: /api/health

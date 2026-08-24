@@ -76,6 +76,18 @@ spec:
               mountPath: /etc/prometheus
             - name: data
               mountPath: /prometheus
+          # Requests are what the scheduler and the eviction logic actually see.
+          # Without them the pod is BestEffort: OOM score 1000 and first in line
+          # when the single Minikube node hits memory pressure — which on a box
+          # also running Kafka/Flink/MinIO means the demo's metrics silently
+          # disappear mid-run. No CPU limit on purpose: CFS throttling a scrape
+          # loop is more confusing than the over-use it would prevent.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
           readinessProbe:
             httpGet:
               path: /-/ready
