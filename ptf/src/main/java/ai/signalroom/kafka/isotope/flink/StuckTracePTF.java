@@ -26,7 +26,7 @@ import java.time.Instant;
  *     {@code PARTITION BY} clause on the input table argument), remembers
  *     the most-recent hop's event-time and producer/topic for triage.
  *   - Registers a named event-time timer at
- *     {@code lastSeen + stalenessSeconds}. Re-registering the same timer
+ *     {@code lastSeen + STALENESS}. Re-registering the same timer
  *     name on every fresh hop replaces the previous one — Flink handles
  *     the dedup for us.
  *   - When the timer fires, emits one {@link Row} matching the
@@ -46,11 +46,14 @@ import java.time.Instant;
  * args:
  *
  *   SELECT * FROM STUCK_TRACE_PTF(
- *       input             => TABLE isotope PARTITION BY trace_id,
- *       staleness_seconds => CAST(60 AS BIGINT),
- *       on_time           => DESCRIPTOR(event_time),
- *       uid               => 'stuck-trace-v1'
+ *       input   => TABLE isotope PARTITION BY trace_id,
+ *       on_time => DESCRIPTOR(event_time),
+ *       uid     => 'stuck-trace-v1'
  *   );
+ *
+ * Note there is no {@code staleness_seconds} argument: the threshold is the
+ * compile-time constant {@link #STALENESS} below, which also documents why it
+ * cannot currently be a named scalar arg. Passing one here fails to plan.
  */
 @FunctionHint(output = @DataTypeHint("ROW<"
     + "trace_id STRING, origin_service STRING, pipeline STRING, last_service STRING, "
