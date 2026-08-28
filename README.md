@@ -183,6 +183,7 @@ flowchart TB
     subgraph Kafka["Kafka event topics — Protobuf+SR DemoEvent values + isotope_consume_edge_markers markers; isotope rides in record headers"]
         T1[("orders.placed")] --> T2[("orders.enriched")] --> T3[("orders.fulfilled")]
         TC[("isotope_consume_edge_markers<br/>value-less consume markers")]
+        T4[("orders.flink_enriched<br/>produced by Flink, not a service")]
     end
 
     IPI -- "produce (x-isotope JSON + 7 scalar headers)" --> Kafka
@@ -200,27 +201,30 @@ flowchart TB
     IPI -. "opt-in flag<br/>produce-side meters" .-> PIM
     Mark -. "consume-side meters" .-> PIM
 
-    subgraph PTF["ptf/ — isotope-flink-udf shadow JAR"]
+    subgraph PTF["ptf/ — isotope-flink-udf shadow JAR · 2 PTFs + 1 UDF"]
         Pcts["LatencyPercentilesPTF<br/>T-Digest p50/p95/p99"]
         Stuck["StuckTracePTF<br/>per-trace state + event-time timer"]
+        Hop["IsotopeAppendHop (ScalarFunction)<br/>collector, not interpreter —<br/>appends a Flink hop to the headers"]
     end
 
     subgraph Flink["Flink SQL reports — identical source/view DDL; sink format differs by runtime"]
         direction LR
         subgraph CP["Minikube · Flink 2.1 CMF Application"]
             SQLCP["scripts/flink/sql/cp/*.fql<br/>(bundled in the app JAR)"]
-            JCP["IsotopeReportsJob<br/>1 StatementSet · 7 × INSERT INTO TUMBLE(1 MIN)<br/>Avro+SR sinks"]
+            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>Avro+SR sinks"]
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/setup-confluent-flink.tf<br/>25 × confluent_flink_statement<br/>(+3 when trace_rca is enabled)"]
-            JCC["7 × INSERT INTO TUMBLE(1 MIN)<br/>Protobuf+SR sinks"]
+            TFSQL["terraform/setup-confluent-flink.tf<br/>24 × confluent_flink_statement<br/>(+3 when trace_rca is enabled)"]
+            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
     end
 
-    Kafka -- "read headers only" --> CP
-    Kafka -- "read headers only" --> CC
+    Kafka -- "read headers" --> CP
+    Kafka -- "read headers" --> CC
+    JCP -- "write headers — ISOTOPE_APPEND_HOP<br/>appends a Flink hop" --> T4
+    JCC -- "write headers — ISOTOPE_APPEND_HOP<br/>appends a Flink hop" --> T4
     PTF -- "bundled in app JAR<br/>registered programmatically" --> CP
     PTF -. "CREATE FUNCTION USING JAR" .-> CC
 
