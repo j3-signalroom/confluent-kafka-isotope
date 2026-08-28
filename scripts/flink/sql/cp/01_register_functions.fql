@@ -31,7 +31,7 @@ CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
     AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesPTF'
     USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';
 
--- ISOTOPE_APPEND_HOP — the collector-side scalar UDF (propagation model B).
+-- ISOTOPE_APPEND_HOP — the collector-side scalar UDF (in-band propagation).
 --
 -- The two PTFs above are interpreters: they read isotope headers that a
 -- service's IsotopeProducerInterceptor already wrote. This one is a collector

@@ -2,9 +2,10 @@
 -- orders.flink_enriched — the topic Flink itself produces to, as a
 -- traced pipeline stage rather than only a reader.
 --
--- This is propagation model B (see docs/flink-collector.md). Model A —
--- the ThreadLocal + IsotopeProducerInterceptor used by the services in
--- app/ — is untouched and still owns orders.{placed,enriched,fulfilled}.
+-- This is in-band propagation (see docs/flink-collector.md). Ambient
+-- propagation — the ThreadLocal + IsotopeProducerInterceptor used by the
+-- services in app/ — is untouched and still owns
+-- orders.{placed,enriched,fulfilled}.
 -- This table is a NEW parallel topic, so the three-stage service
 -- pipeline is unaffected; Flink simply becomes an additional producer
 -- that shows up in topology_1m and bipartite_topology_1m.

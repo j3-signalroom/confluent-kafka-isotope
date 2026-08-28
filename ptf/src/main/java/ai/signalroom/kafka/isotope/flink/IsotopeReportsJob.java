@@ -72,8 +72,9 @@ public final class IsotopeReportsJob {
         // LATENCY_PERCENTILES without a CREATE FUNCTION ... USING JAR step.
         tableEnv.createTemporarySystemFunction("STUCK_TRACE_PTF", StuckTracePTF.class);
         tableEnv.createTemporarySystemFunction("LATENCY_PERCENTILES", LatencyPercentilesPTF.class);
-        // Collector-side (model B): appends a Flink hop to the headers of every
-        // record 75_flink_collector.fql forwards. See docs/flink-collector.md.
+        // Collector-side (in-band propagation): appends a Flink hop to the
+        // headers of every record 75_flink_collector.fql forwards. See
+        // docs/flink-collector.md.
         tableEnv.createTemporarySystemFunction("ISOTOPE_APPEND_HOP", IsotopeAppendHop.class);
 
         // DDL: source tables, views, sinks (each statement applied individually).

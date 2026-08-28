@@ -22,7 +22,7 @@
 
 `confluent-kafka-isotope` is a reference implementation of an **_e-commerce order pipeline that uses Kafka Interceptors to capture end-to-end event-tracing data, with Prometheus and Apache Flink analyzing and reporting that data in batch and near real time_**, as visualized below.
 
-![visualize-kafka-interceptors-in-the-event-pipeline](docs/visualize-kafka-interceptors-in-the-event-pipeline.png)
+![visualize-ambient-propagation](docs/visualize-ambient-propagation.png)
 
 Much like isotopes used to trace molecules through a biochemical pathway, each event carries lightweight metadata that allows it to be followed as it travels through Kafka topics and distributed microservices.
 
@@ -31,6 +31,8 @@ Much like isotopes used to trace molecules through a biochemical pathway, each e
 This project demonstrates how **Kafka Interceptors become collectors** — inserting the isotope into record headers in place and, at terminal consumers, emitting consume-edge markers — while **Flink SQL serves as the interpreter**, reading those headers directly to produce seven 1-minute reports from a single JAR on both Confluent Platform and Confluent Cloud for Apache Flink (CCAF). Optionally, the producer interceptor can **emit Micrometer metrics to Prometheus as an always-on aggregate layer** alongside the per-trace Flink reports.  (As depicted in the diagram below.)
 
 **Flink is now a collector too.** A second propagation model lets a Flink statement stamp its own hop, so Flink appears in the topology graph as a producer rather than only as a reader. The interceptor propagates *ambiently* — the in-flight isotope lives in an `IsotopeContext` `ThreadLocal` that `onSend()` reads on the same thread — which is correct in the services, where one thread owns a whole consume→produce hop. That cannot work in Flink: a shuffle resumes a record on a different thread in a different JVM, and Flink SQL has no user-visible thread to attach to at all. So Flink propagates *in-band*, carrying the isotope in the record's own headers via a writable `headers` metadata column and the `ISOTOPE_APPEND_HOP` scalar UDF. Two models, one wire format — every header the UDF writes is byte-identical to the interceptor's, so the reports cannot tell the two collectors apart. See [docs/flink-collector.md](docs/flink-collector.md).
+
+![visualize-in-band-propagation](docs/visualize-in-band-propagation.png)
 
 ![isotope-diagram](docs/image_generators/isotope-diagram.png)
 
@@ -291,8 +293,8 @@ ptf/                                    Flink reports application + PTF shadow J
                                         (7 reports + collector) as one StatementSet
                                         (CMF Application)
     IsotopeAppendHop.java               collector-side scalar UDF — appends a Flink hop
-                                        to a record's isotope headers (propagation
-                                        model B; see docs/flink-collector.md)
+                                        to a record's isotope headers (in-band
+                                        propagation; see docs/flink-collector.md)
     LatencyPercentilesPTF.java          T-Digest p50/p95/p99 (PTF: per-window state + timers)
     StuckTracePTF.java                  per-trace state + event-time timer
     TDigests.java                       shared T-Digest (de)serialization
@@ -382,8 +384,11 @@ docs/                                   extracted long-form docs (linked from th
   runbook-ccaf.md                       full CCAF / Terraform run sequence (§3.3)
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
   terraform.png                         rendered resource graph (embedded in §3.3)
-  visualize-kafka-interceptors-in-the-event-pipeline.png     
-                                        visual representation of Kafka interceptors in the event pipeline
+  visualize-ambient-propagation.png     ambient propagation — the producer interceptor
+                                        stamps context on send; consume-side capture
+                                        records the edge (§intro)
+  visualize-in-band-propagation.png     in-band propagation — the isotope rides inside the
+                                        record so it survives a shuffle (docs/flink-collector.md)
 Makefile                                cp-up / flink-up / kafka-pf-up / flink-reports-up /
                                         cc-flink-reports-up / cc-flink-reports-down /
                                         metrics-up / metrics-down / metrics-delete / ...

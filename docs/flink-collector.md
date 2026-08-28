@@ -4,7 +4,7 @@ Two propagation models now coexist in this project. They emit the identical
 wire format, so [`05_isotope_view.fql`](../scripts/flink/sql/cp/05_isotope_view.fql)
 and every report is unchanged and cannot tell the collectors apart.
 
-| | Model A — ambient | Model B — in-band |
+| | Ambient propagation | In-band propagation |
 |---|---|---|
 | Where | Services in [`app/`](../app/) | Flink SQL (CP + CCAF) |
 | Carrier | `IsotopeContext` `ThreadLocal` | The record's own Kafka headers |
@@ -13,8 +13,9 @@ and every report is unchanged and cannot tell the collectors apart.
 
 ## Why a second model was needed
 
-Model A is correct where it runs: one thread owns a whole consume→produce hop,
-so a `ThreadLocal` set at consume time is still there at `send()` time.
+Ambient propagation is correct where it runs: one thread owns a whole
+consume→produce hop, so a `ThreadLocal` set at consume time is still there at
+`send()` time.
 
 It cannot work in Flink. A shuffle serializes a record and resumes it on a
 different thread, usually in a different TaskManager JVM, so anything set
@@ -22,7 +23,12 @@ different thread, usually in a different TaskManager JVM, so anything set
 user-visible thread to attach to and no way to carry an opaque value past the
 planner, which is free to reorder, fuse, and eliminate rows.
 
-So model B moves the isotope *into* the record — which does not make the
+![In-band propagation — the shuffle boundary](visualize-in-band-propagation.png)
+
+The shuffle boundary is the whole argument. Ambient context lives *beside* the
+record and dies there; the header lives *inside* it and crosses intact.
+
+So in-band propagation moves the isotope *into* the record — which does not make the
 planner gentler, it makes the isotope something the planner is **obligated to
 respect**. `ISOTOPE_APPEND_HOP(...)` is an ordinary scalar expression over
 column values, and the planner may still reorder, fuse, push down, or split
@@ -52,7 +58,7 @@ the isotope format and semantics port intact.
 Flink collects onto a **new parallel topic**, `orders.flink_enriched`. It reads
 `orders.placed` and re-emits each record with one extra hop. The three-stage
 service pipeline is untouched — `orders.{placed,enriched,fulfilled}` still
-belong entirely to model A — and Flink now appears as a producer in
+belong entirely to ambient propagation — and Flink now appears as a producer in
 `topology_1m` and `bipartite_topology_1m`, where it was previously invisible.
 
 | Piece | CP (Minikube) | CCAF |
@@ -118,8 +124,8 @@ why `IsotopeAppendHop` and `IsotopeProducerInterceptor` both work.
 
 A windowed aggregate breaks the coincidence. A SUM over 1,000 records has 1,000
 parents, and a truthful provenance record would name all of them; the isotope
-format has no vocabulary for more than one. So model B is restricted to 1:1
-statements, where a trace *is* a valid derivation record. Nothing emits a
+format has no vocabulary for more than one. So in-band propagation is
+restricted to 1:1 statements, where a trace *is* a valid derivation record. Nothing emits a
 "representative" trace ID through an aggregation, because that would not be
 incomplete provenance — it would be a fabrication that reads as provenance.
 
@@ -215,6 +221,7 @@ make all of this unnecessary.
 
 ## What this does not change
 
-Model A is untouched. `IsotopeContext`, `IsotopeProducerInterceptor`, and the
-`interceptor.classes` wiring in [`App.java`](../app/src/main/java/ai/signalroom/kafka/isotope/App.java)
-behave exactly as before, and remain the right model for the services.
+Ambient propagation is untouched. `IsotopeContext`,
+`IsotopeProducerInterceptor`, and the `interceptor.classes` wiring in
+[`App.java`](../app/src/main/java/ai/signalroom/kafka/isotope/App.java) behave
+exactly as before, and remain the right model for the services.
