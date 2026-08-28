@@ -30,6 +30,8 @@ Much like isotopes used to trace molecules through a biochemical pathway, each e
 
 This project demonstrates how **Kafka Interceptors become collectors** — inserting the isotope into record headers in place and, at terminal consumers, emitting consume-edge markers — while **Flink SQL serves as the interpreter**, reading those headers directly to produce seven 1-minute reports from a single JAR on both Confluent Platform and Confluent Cloud for Apache Flink (CCAF). Optionally, the producer interceptor can **emit Micrometer metrics to Prometheus as an always-on aggregate layer** alongside the per-trace Flink reports.  (As depicted in the diagram below.)
 
+**Flink is now a collector too.** A second propagation model lets a Flink statement stamp its own hop, so Flink appears in the topology graph as a producer rather than only as a reader. The interceptor propagates *ambiently* — the in-flight isotope lives in an `IsotopeContext` `ThreadLocal` that `onSend()` reads on the same thread — which is correct in the services, where one thread owns a whole consume→produce hop. That cannot work in Flink: a shuffle resumes a record on a different thread in a different JVM, and Flink SQL has no user-visible thread to attach to at all. So Flink propagates *in-band*, carrying the isotope in the record's own headers via a writable `headers` metadata column and the `ISOTOPE_APPEND_HOP` scalar UDF. Two models, one wire format — every header the UDF writes is byte-identical to the interceptor's, so the reports cannot tell the two collectors apart. See [docs/flink-collector.md](docs/flink-collector.md).
+
 ![isotope-diagram](docs/image_generators/isotope-diagram.png)
 
 With this approach, developers gain **end-to-end observability** into the flow of events through the Kafka-based microservices architecture, enabling both **real-time monitoring** and **post-hoc analysis** of event traces.
@@ -158,7 +160,9 @@ The isotope is a **JSON object** that travels in the `x-isotope` Kafka record he
 ## **2.0 Architecture**
 A bird's-eye view of the moving parts. The demo CLI in [`app/`](app/) consumes the external tracing library ([`ai.signalroom:kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope)), which registers a Kafka `ProducerInterceptor` that stamps an isotope into record headers on every `send()`. Consume-then-produce services propagate the inbound trace by explicitly calling `IsotopeContext.adoptFromRecord(record)`. Business events then flow through a three-topic Kafka pipeline, where Flink SQL reads the isotope metadata and emits one-minute aggregate reports.
 
-Both runtimes run the same seven logical reports off the same source and view definitions, though each runtime keeps its own copy of the SQL. **Confluent Platform (CP) + Flink** on Minikube executes the `.fql` files under [`scripts/flink/sql/cp/`](scripts/flink/sql/cp/) as a single Flink 2.1 Confluent Manager for Apache Flink (CMF) Application (`IsotopeReportsJob`), while **Confluent Cloud for Apache Flink (CCAF)** applies the same logical SQL as inline `confluent_flink_statement` Terraform resources under [`terraform/`](terraform/). The shadow JAR from [`ptf/`](ptf/)—which powers two of the seven reports—runs unchanged on both runtimes: bundled into the CP application JAR and uploaded as a Flink artifact on CCAF.
+Both runtimes run the same seven logical reports off the same source and view definitions, though each runtime keeps its own copy of the SQL. **Confluent Platform (CP) + Flink** on Minikube executes the `.fql` files under [`scripts/flink/sql/cp/`](scripts/flink/sql/cp/) as a single Flink 2.1 Confluent Manager for Apache Flink (CMF) Application (`IsotopeReportsJob`), while **Confluent Cloud for Apache Flink (CCAF)** applies the same logical SQL as inline `confluent_flink_statement` Terraform resources under [`terraform/`](terraform/). The shadow JAR from [`ptf/`](ptf/)—which powers two of the seven reports plus the collector UDF—runs unchanged on both runtimes: bundled into the CP application JAR and uploaded as a Flink artifact on CCAF.
+
+Alongside the seven reports, both runtimes run one **collector** INSERT that forwards `orders.placed` to `orders.flink_enriched`, appending a Flink hop on the way. Each side runs all eight as a **single job**: CP through `IsotopeReportsJob`'s `StatementSet`, CCAF through `EXECUTE STATEMENT SET BEGIN ... END`. That matters for cost as much as symmetry — every separate CCAF statement carries its own 1-CFU floor, so eight statements meant eight floors.
 
 Alongside that—**additive, opt-in, and disabled by default**—the interceptor can also emit **Micrometer** metrics for **Prometheus**, with **Grafana** providing visualization ([§3.4 Prometheus Metrics Reporting with Grafana Visualization](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)). This path produces the three **stateless** reports (`latency_1m`, `topology_1m`, and `hop_distribution_1m`) without requiring a stream processor. The remaining four reports continue to run in Flink because they depend on per-`trace_id` state or absence-of-event analysis, which falls outside Prometheus's query model.
 
@@ -239,7 +243,7 @@ flowchart TB
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator + CMF 2.4 + MinIO<br/>Makefile: cp-up · flink-up · flink-reports-up"]
-        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 25 statements (+3 optional AI)<br/>Makefile: cc-flink-reports-up"]
+        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 24 statements (+3 optional AI)<br/>Makefile: cc-flink-reports-up"]
         MON["k8s/monitoring/<br/>Prometheus + Grafana pods; scrape host<br/>stages via host.minikube.internal<br/>Makefile: metrics-up"]
     end
 
@@ -278,12 +282,17 @@ app/                                    demo CLI + tests (consumes the isotope l
 ptf/                                    Flink reports application + PTF shadow JAR
   src/main/java/ai/signalroom/kafka/isotope/flink/
     IsotopeReportsJob.java              CP entry point — reads the bundled sql/*.fql,
-                                        registers both PTFs programmatically, runs the
-                                        7 INSERT INTOs as one StatementSet (CMF Application)
+                                        registers both PTFs + the collector UDF
+                                        programmatically, runs the 8 INSERT INTOs
+                                        (7 reports + collector) as one StatementSet
+                                        (CMF Application)
+    IsotopeAppendHop.java               collector-side scalar UDF — appends a Flink hop
+                                        to a record's isotope headers (propagation
+                                        model B; see docs/flink-collector.md)
     LatencyPercentilesPTF.java          T-Digest p50/p95/p99 (PTF: per-window state + timers)
     StuckTracePTF.java                  per-trace state + event-time timer
     TDigests.java                       shared T-Digest (de)serialization
-  src/test/java/.../                    TDigestsTest
+  src/test/java/.../                    TDigestsTest, IsotopeAppendHopTest
 k8s/base/                               CFK / CMF manifests (applied by `make cp-up` / `flink-up`)
   confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
   minio.yaml                            in-cluster S3-compatible store backing CMF's
@@ -323,11 +332,15 @@ scripts/
   cc-app-run.sh                         thin wrapper around `./gradlew :app:run` that
                                         sources cc-cli-env.sh and injects the six -D flags
   flink/README.md                       Flink SQL reports — runtime split (CP=7 reports/Avro+SR,
-                                        CCAF=7 reports/Protobuf+SR), layout, operations
+                                        CCAF=7 reports/Protobuf+SR), plus the collector
+                                        INSERT on both; layout, operations
   flink/sql/cp/                         CP Flink SQL: 00_source_table, 01_register_functions,
                                         05_isotope_view, 06_consume_events_view,
                                         05_report_sinks (avro-confluent),
-                                        10/20/25/30/40/60/70 INSERT INTO reports, 99_teardown
+                                        07_flink_collector_sink (writable headers column),
+                                        10/20/25/30/40/60/70 INSERT INTO reports,
+                                        75_flink_collector (INSERT INTO: Flink stamps its
+                                        own hop), 99_teardown
                                         (CCAF SQL is inlined under terraform/setup-confluent-flink.tf.)
 terraform/                              CCAF infrastructure-as-code (`make cc-flink-reports-up`)
   providers.tf                          Confluent provider — cloud key/secret vars
@@ -456,7 +469,7 @@ To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with ap
 
 > These settings ensure stable performance across all components. You can tune them as needed, but lower resource levels may cause pod restarts or degraded performance.
 
-Seven reports — five pure Flink SQL plus two JAR-backed PTFs — run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, seven sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-Minikube one.
+Seven reports — five pure Flink SQL plus two JAR-backed PTFs — and the collector INSERT run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, eight sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. One StatementSet means one failure domain: a fault in any INSERT stops them all, so a missing sink topic takes the reports down with it (which is why `deploy-cmf-flink-reports.sh` pre-creates every sink — unlike CCAF, OSS Flink's Kafka connector declares a table over a topic that must already exist rather than creating it). No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-Minikube one.
 
 **The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make flink-up` then `make flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
 

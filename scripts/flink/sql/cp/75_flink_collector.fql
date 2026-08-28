@@ -1,0 +1,47 @@
+-- =====================================================================
+-- Flink as a COLLECTOR — appends one produce-edge hop to every record it
+-- forwards from orders.placed into orders.flink_enriched.
+--
+-- The other seven statements in this job are INTERPRETERS: they read
+-- isotope headers a service's interceptor already wrote. This one WRITES
+-- them, which is why it needs ISOTOPE_APPEND_HOP.
+--
+-- Depends on:
+--   - `orders.placed` (00_source_table.fql)
+--   - `orders.flink_enriched` sink (07_flink_collector_sink.fql)
+--   - ISOTOPE_APPEND_HOP (01_register_functions.fql on the SQL-Client
+--     path; registered from the classpath by IsotopeReportsJob)
+--
+-- Call form notes:
+--   - The CAST on `headers` is required. Source tables declare the
+--     column as MAP<STRING, BYTES> (the Kafka connector's native
+--     metadata type); the UDF takes MAP<STRING, STRING>, which is the
+--     type Confluent Cloud documents for reading *and* writing headers.
+--     Casting at the call site keeps one UDF signature across both
+--     runtimes instead of forking the Java.
+--   - The hop timestamp is passed IN rather than read inside eval().
+--     Flink assumes UDFs are deterministic and may re-evaluate or
+--     reorder them; a clock read inside would drift on replay.
+--   - 1:1 only, and deliberately so: this is tracing, not provenance.
+--     An isotope is a *path* (one identity, its ordered hops); provenance
+--     is a *DAG* (each output naming the inputs that produced it). They
+--     coincide only while every step is 1:1. A SUM over 1,000 records has
+--     1,000 parents and the format can name one, so an aggregate here
+--     would not be incomplete provenance — it would be a fabrication that
+--     reads as provenance. Keep this a plain projection.
+--     See docs/flink-collector.md.
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope_flink_collector';
+
+INSERT INTO `orders.flink_enriched`
+SELECT
+    `value`,
+    ISOTOPE_APPEND_HOP(
+        CAST(`headers` AS MAP<STRING, STRING>),
+        'flink-enrich',              -- this_service
+        'orders.flink_enriched',     -- this_topic
+        'orders',                    -- pipeline (used only to mint a new trace)
+        UNIX_TIMESTAMP() * 1000      -- hop ts, epoch ms
+    )
+FROM `orders.placed`;

@@ -42,7 +42,8 @@ public final class IsotopeReportsJob {
             "00_source_table.fql",        // 4 source tables + isotope_raw view
             "05_isotope_view.fql",        // isotope (produced-record) view
             "06_consume_events_view.fql", // consume_events view
-            "05_report_sinks.fql");       // 7 avro-confluent sink tables
+            "05_report_sinks.fql",        // 7 avro-confluent sink tables
+            "07_flink_collector_sink.fql"); // orders.flink_enriched (writable headers)
 
     /** Report files — each contributes exactly one INSERT to the StatementSet. */
     private static final List<String> REPORT_FILES = List.of(
@@ -52,7 +53,8 @@ public final class IsotopeReportsJob {
             "30_hop_distribution.fql",
             "40_coverage_report.fql",
             "60_stuck_trace_report.fql",         // STUCK_TRACE_PTF
-            "70_latency_percentiles_report.fql"); // LATENCY_PERCENTILES
+            "70_latency_percentiles_report.fql", // LATENCY_PERCENTILES
+            "75_flink_collector.fql");           // ISOTOPE_APPEND_HOP — collector, not a report
 
     private IsotopeReportsJob() {
     }
@@ -70,6 +72,9 @@ public final class IsotopeReportsJob {
         // LATENCY_PERCENTILES without a CREATE FUNCTION ... USING JAR step.
         tableEnv.createTemporarySystemFunction("STUCK_TRACE_PTF", StuckTracePTF.class);
         tableEnv.createTemporarySystemFunction("LATENCY_PERCENTILES", LatencyPercentilesPTF.class);
+        // Collector-side (model B): appends a Flink hop to the headers of every
+        // record 75_flink_collector.fql forwards. See docs/flink-collector.md.
+        tableEnv.createTemporarySystemFunction("ISOTOPE_APPEND_HOP", IsotopeAppendHop.class);
 
         // DDL: source tables, views, sinks (each statement applied individually).
         for (String file : DDL_FILES) {
@@ -78,7 +83,11 @@ public final class IsotopeReportsJob {
             }
         }
 
-        // The seven report INSERTs run together as a single job.
+        // Every INSERT runs together as a single job — the seven reports plus
+        // the collector (75_flink_collector.fql), which is not a report but
+        // shares the same source scan. CCAF's equivalent is EXECUTE STATEMENT
+        // SET; it currently submits these as separate statements instead, so
+        // each carries its own compute-pool floor.
         StatementSet reports = tableEnv.createStatementSet();
         for (String file : REPORT_FILES) {
             List<String> stmts = statements(readResource("sql/" + file));

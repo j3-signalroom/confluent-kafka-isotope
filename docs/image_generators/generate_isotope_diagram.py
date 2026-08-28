@@ -14,7 +14,7 @@ import argparse
 import os
 from xml.sax.saxutils import escape
 
-W, H = 2040, 1960
+W, H = 2040, 2190
 SANS = "Helvetica Neue, Helvetica, Arial, sans-serif"
 MONO = "SF Mono, Menlo, Consolas, monospace"
 
@@ -53,7 +53,11 @@ TOPICS = [
     ("orders.enriched", "+ x-isotope", "topic"),
     ("orders.fulfilled", "+ x-isotope", "topic"),
     ("consume_events", "edge markers", "marker"),
+    ("orders.flink_enriched", "+ x-isotope", "topic"),
 ]
+# Index into TOPICS of the topic Flink itself produces (propagation model B).
+# It gets an inbound edge FROM the Flink box instead of from a service.
+FLINK_TOPIC_INDEX = 4
 SINKS = [
     "latency_1m", "topology_1m", "bipartite_topology_1m", "hop_distribution_1m",
     "coverage_1m", "stuck_trace_1m (PTF)", "latency_percentiles_1m",
@@ -70,16 +74,17 @@ NOTE_LEFT = [
     "Four-stage order workflow; traces ride in headers.",
     "shipping-notify can't append a header (no re-produce),",
     "so it emits a consume-edge marker to its own topic.",
-    "The topology graph stays complete either way.",
     "",
-    "AI root-cause analysis is opt-in and CCAF-only: it",
-    "summarizes stuck and slow traces from the report",
-    "topics. Off by default; CP is unaffected either way.",
+    "Flink is a collector too: ISOTOPE_APPEND_HOP appends",
+    "its own hop onto orders.flink_enriched, so Flink appears",
+    "in the topology graph as a producer, not only a reader.",
+    "",
+    "AI root-cause analysis is opt-in and CCAF-only.",
 ]
 LEGEND = [
     [("swatch", "service", "Service"), ("swatch", "topic", "Event topic (x-isotope)"),
      ("swatch", "marker", "Marker topic")],
-    [("swatch", "flink", "Flink interpreter"), ("swatch", "sink", "Report sink (1-min)"),
+    [("swatch", "flink", "Flink interpreter + collector"), ("swatch", "sink", "Report sink (1-min)"),
      ("swatch", "jar", "Shadow JAR")],
     [("swatch", "metrics", "Metrics backend"), ("solid", None, "Produce"),
      ("dashed", None, "Edge marker emit")],
@@ -113,10 +118,11 @@ def row_mid(i, h=ROW_H, **kw):              return row_y(i, **kw) + h // 2
 def build():
     add(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
         f'viewBox="0 0 {W} {H}" role="img" font-family="{SANS}">')
-    add('<title>Confluent Kafka Isotope \u2014 collector and interpreter</title>')
-    add('<desc>Four-stage order workflow stamps isotope headers; Flink SQL emits '
-        'seven one-minute reports, plus an optional CCAF-only AI root-cause path '
-        'that is off by default.</desc>')
+    add('<title>Confluent Kafka Isotope \u2014 collectors and interpreter</title>')
+    add('<desc>Four-stage order workflow stamps isotope headers; Flink SQL reads them '
+        'to emit seven one-minute reports and also acts as a second collector, appending '
+        'its own hop onto orders.flink_enriched. An optional CCAF-only AI root-cause path '
+        'is off by default.</desc>')
     add(f'<rect x="0" y="0" width="{W}" height="{H}" fill="{PALETTE["bg"]}"/>')
 
     text(20, 75, "Collector", 44, PALETTE["ink"], "start")
@@ -139,7 +145,8 @@ def build():
         _, _, t, s = PALETTE[key]
         text(TOP_X + TOP_W // 2, y + 77, title, 34, t)
         text(TOP_X + TOP_W // 2, y + 130, sub, 34, s)
-        line(SVC_X + SVC_W, row_mid(i), TOP_X, row_mid(i), dashed=(key == "marker"))
+        if i != FLINK_TOPIC_INDEX:
+            line(SVC_X + SVC_W, row_mid(i), TOP_X, row_mid(i), dashed=(key == "marker"))
 
     # topics -> flink
     for i, ty in enumerate((558, 600, 662)):
@@ -147,26 +154,34 @@ def build():
     line(TOP_X + TOP_W, 905, MID_X, 700)
 
     # micrometer rail
-    add(f'<path d="M{SVC_X} {row_mid(0)} H25 V1163 H40" fill="none" '
+    add(f'<path d="M{SVC_X} {row_mid(0)} H25 V1393 H40" fill="none" '
         f'stroke="{PALETTE["line"]}" stroke-width="2"/>')
-    add(f'<polygon points="34,1153 56,1163 34,1173" fill="{PALETTE["line"]}"/>')
-    text(68, 1082, "Micrometer", 30, PALETTE["muted"], "start")
-    box(SVC_X, 1105, SVC_W, 125, "metrics", rx=20)
+    add(f'<polygon points="34,1383 56,1393 34,1403" fill="{PALETTE["line"]}"/>')
+    text(68, 1312, "Micrometer", 30, PALETTE["muted"], "start")
+    box(SVC_X, 1335, SVC_W, 125, "metrics", rx=20)
     _, _, t, s = PALETTE["metrics"]
-    text(SVC_X + SVC_W // 2, 1160, "Prometheus / Grafana", 36, t)
-    text(SVC_X + SVC_W // 2, 1205, "always-on metrics", 30, s)
+    text(SVC_X + SVC_W // 2, 1390, "Prometheus / Grafana", 36, t)
+    text(SVC_X + SVC_W // 2, 1435, "always-on metrics", 30, s)
 
     # interpreter core
     box(MID_X, 515, MID_W, 220, "flink")
     _, _, t, s = PALETTE["flink"]
-    text(MID_X + MID_W // 2, 588, "Flink SQL", 42, t)
-    text(MID_X + MID_W // 2, 648, "CAST(headers[\u2026])", 34, s, mono=True)
-    text(MID_X + MID_W // 2, 700, "TUMBLE(1 minute)", 34, s, mono=True)
+    text(MID_X + MID_W // 2, 578, "Flink SQL", 42, t)
+    text(MID_X + MID_W // 2, 620, "interpreter + collector", 30, PALETTE["muted"])
+    text(MID_X + MID_W // 2, 672, "CAST(headers[\u2026])", 32, s, mono=True)
+    text(MID_X + MID_W // 2, 716, "TUMBLE(1 minute)", 32, s, mono=True)
+
+    # Flink -> orders.flink_enriched (propagation model B: Flink stamps a hop).
+    # Leaves the box's bottom-left corner so it clears the shadow-JAR box below.
+    fy = row_mid(FLINK_TOPIC_INDEX)
+    line(MID_X, 735, TOP_X + TOP_W + 26, fy)
+    add(f'<polygon points="{TOP_X + TOP_W + 30},{fy - 13} {TOP_X + TOP_W},{fy} '
+        f'{TOP_X + TOP_W + 30},{fy + 13}" fill="{PALETTE["line"]}"/>')
     line(MID_X + MID_W // 2, 735, MID_X + MID_W // 2, 795)
     box(MID_X, 795, MID_W, 155, "jar", rx=20)
     _, _, t, s = PALETTE["jar"]
     text(MID_X + MID_W // 2, 858, "isotope-flink-udf.jar", 34, t, mono=True)
-    text(MID_X + MID_W // 2, 910, "two PTFs", 34, s)
+    text(MID_X + MID_W // 2, 910, "2 PTFs + 1 UDF", 34, s)
     text(MID_X + MID_W // 2, 1000, "One JAR \u00b7 same DDL \u00b7 CP or CCAF", 34, PALETTE["muted"])
 
     # report sinks
@@ -197,14 +212,14 @@ def build():
     # notes
     for i, ln in enumerate(NOTE_LEFT):
         if ln:
-            text(505, 1092 + i * 50, ln, 35, PALETTE["body"], "start")
+            text(505, 1322 + i * 50, ln, 35, PALETTE["body"], "start")
 
     # legend
-    add('<rect x="20" y="1520" width="2000" height="400" rx="24" '
+    add('<rect x="20" y="1750" width="2000" height="400" rx="24" '
         'fill="#F0F2EF" stroke="#C9CDC9" stroke-width="2"/>')
     cols = [45, 700, 1420]
     for r, row in enumerate(LEGEND):
-        y = 1585 + r * 80
+        y = 1815 + r * 80
         for c, item in enumerate(row):
             if not item:
                 continue

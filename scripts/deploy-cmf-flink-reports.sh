@@ -53,6 +53,12 @@ SINK_TOPICS=(
     isotope_report_latency_1m isotope_report_topology_1m isotope_report_bipartite_topology_1m
     isotope_report_hop_distribution_1m isotope_report_coverage_1m
     isotope_report_stuck_trace_1m isotope_report_latency_percentiles_1m
+    # Collector output (07_flink_collector_sink.fql / 75_flink_collector.fql).
+    # Unlike CCAF, where CREATE TABLE creates the topic, OSS Flink's kafka
+    # connector only declares a table over a topic that must already exist —
+    # so this must be pre-created here or the job crash-loops with
+    # "Topic orders.flink_enriched not present in metadata after 60000 ms".
+    orders.flink_enriched
 )
 
 KAFKA_POD=$(kubectl get pods -n "${NAMESPACE}" --no-headers -o custom-columns=":metadata.name" 2>/dev/null \
