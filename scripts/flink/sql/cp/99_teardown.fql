@@ -16,7 +16,7 @@ DROP TABLE    IF EXISTS bipartite_topology_report_1m;
 DROP TABLE    IF EXISTS topology_report_1m;
 DROP TABLE    IF EXISTS latency_report_1m;
 
--- Collector-side (model B) sink — the topic Flink itself produces to.
+-- Collector-side (in-band propagation) sink — the topic Flink produces to.
 -- See docs/flink-collector.md.
 DROP TABLE    IF EXISTS `orders.flink_enriched`;
 

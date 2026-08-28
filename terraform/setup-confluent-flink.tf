@@ -865,7 +865,7 @@ resource "confluent_flink_statement" "register_latency_percentiles" {
 }
 
 # ---------------------------------------------------------------------------
-# ISOTOPE_APPEND_HOP — the collector-side scalar UDF (propagation model B).
+# ISOTOPE_APPEND_HOP — the collector-side scalar UDF (in-band propagation).
 #
 # The two PTFs above are INTERPRETERS: they read isotope headers that a
 # service's IsotopeProducerInterceptor already wrote. This function is a
@@ -1247,7 +1247,7 @@ resource "confluent_flink_statement" "insert_isotope_reports" {
 
 
 # ---------------------------------------------------------------------------
-# Flink as an isotope COLLECTOR (propagation model B) — orders.flink_enriched.
+# Flink as an isotope COLLECTOR (in-band propagation) — orders.flink_enriched.
 #
 # The seven statements above are INTERPRETERS: they read isotope headers a
 # service's IsotopeProducerInterceptor already wrote. The three resources below
@@ -1255,7 +1255,8 @@ resource "confluent_flink_statement" "insert_isotope_reports" {
 # bipartite_topology_1m instead of being invisible in its own reports.
 #
 # Deliberately a NEW parallel topic. orders.{placed,enriched,fulfilled} stay
-# entirely model A's; nothing about the three-stage service pipeline changes.
+# entirely with ambient propagation; nothing about the three-stage service
+# pipeline changes.
 #
 # Column shape mirrors what CCAF's Topic Catalog inferred for orders.placed —
 # confirmed with DESCRIBE: (`key` BYTES BUCKET KEY, `val` BYTES) plus the
