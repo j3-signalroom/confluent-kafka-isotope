@@ -30,3 +30,17 @@ CREATE FUNCTION IF NOT EXISTS STUCK_TRACE_PTF
 CREATE FUNCTION IF NOT EXISTS LATENCY_PERCENTILES
     AS 'ai.signalroom.kafka.isotope.flink.LatencyPercentilesPTF'
     USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';
+
+-- ISOTOPE_APPEND_HOP — the collector-side scalar UDF (propagation model B).
+--
+-- The two PTFs above are interpreters: they read isotope headers that a
+-- service's IsotopeProducerInterceptor already wrote. This one is a collector
+-- — it appends a Flink hop and rewrites the headers on the way out, letting a
+-- Flink statement be a traced stage rather than only a reader.
+--
+-- Registering it is inert. Nothing invokes it until a table's `headers`
+-- metadata column is made writable and an INSERT calls it; see
+-- docs/flink-collector.md.
+CREATE FUNCTION IF NOT EXISTS ISOTOPE_APPEND_HOP
+    AS 'ai.signalroom.kafka.isotope.flink.IsotopeAppendHop'
+    USING JAR 'file:///opt/flink/lib/isotope-flink-udf.jar';

@@ -16,6 +16,10 @@ DROP TABLE    IF EXISTS bipartite_topology_report_1m;
 DROP TABLE    IF EXISTS topology_report_1m;
 DROP TABLE    IF EXISTS latency_report_1m;
 
+-- Collector-side (model B) sink — the topic Flink itself produces to.
+-- See docs/flink-collector.md.
+DROP TABLE    IF EXISTS `orders.flink_enriched`;
+
 -- Upstream typed views → source table.
 DROP VIEW     IF EXISTS consume_events;
 DROP VIEW     IF EXISTS isotope;
@@ -24,3 +28,4 @@ DROP TABLE    IF EXISTS isotope_raw;
 -- Functions (no dependents after the tables above are gone).
 DROP FUNCTION IF EXISTS STUCK_TRACE_PTF;
 DROP FUNCTION IF EXISTS LATENCY_PERCENTILES;
+DROP FUNCTION IF EXISTS ISOTOPE_APPEND_HOP;

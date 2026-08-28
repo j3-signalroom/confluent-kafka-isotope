@@ -1,0 +1,34 @@
+-- =====================================================================
+-- orders.flink_enriched — the topic Flink itself produces to, as a
+-- traced pipeline stage rather than only a reader.
+--
+-- This is propagation model B (see docs/flink-collector.md). Model A —
+-- the ThreadLocal + IsotopeProducerInterceptor used by the services in
+-- app/ — is untouched and still owns orders.{placed,enriched,fulfilled}.
+-- This table is a NEW parallel topic, so the three-stage service
+-- pipeline is unaffected; Flink simply becomes an additional producer
+-- that shows up in topology_1m and bipartite_topology_1m.
+--
+-- The `headers` column is declared WITHOUT `VIRTUAL`, which is what
+-- makes it writable — virtual metadata columns are read-only and are
+-- excluded from the INSERT INTO target schema. Note the consequence:
+-- once persisted, the column is MANDATORY in every INSERT into this
+-- table.
+--
+-- Typed MAP<STRING, STRING> rather than the MAP<STRING, BYTES> used by
+-- the read-only source tables, to match the signature of
+-- ISOTOPE_APPEND_HOP and Confluent Cloud's documented header type. The
+-- call site casts on the way in (75_flink_collector.fql).
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS `orders.flink_enriched` (
+    -- Payload passes through untouched — this stage stamps the trace, it
+    -- does not transform the business event.
+    `value`   BYTES,
+    `headers` MAP<STRING, STRING> METADATA FROM 'headers'
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'orders.flink_enriched',
+    'properties.bootstrap.servers' = 'kafka:9071',
+    'value.format'                 = 'raw'
+);

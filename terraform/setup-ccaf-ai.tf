@@ -296,6 +296,8 @@ resource "confluent_flink_statement" "insert_trace_rca" {
   depends_on = [
     confluent_flink_statement.trace_rca_model,
     confluent_flink_statement.isotope_report_trace_rca_1m,
-    confluent_flink_statement.insert_stuck_trace_alerts,
+    # The stuck-trace INSERT this reads from now runs inside the consolidated
+    # statement set (setup-confluent-flink.tf), not as its own resource.
+    confluent_flink_statement.insert_isotope_reports,
   ]
 }

@@ -22,6 +22,27 @@ dependencies {
     // T-Digest is what we actually need bundled — it's not part of Flink.
     implementation libs.t.digest
 
+    // The isotope wire format, shared with the services in app/ so the Flink
+    // collector (IsotopeAppendHop) and IsotopeProducerInterceptor cannot drift.
+    implementation('ai.signalroom:kafka-isotope-core:0.18.0') {
+        // Not bundled into the shaded artifact — see kafka-clients below.
+        exclude group: 'org.apache.kafka', module: 'kafka-clients'
+    }
+
+    // Isotope declares `fromHeaders(org.apache.kafka.common.header.Headers)`.
+    // The UDF never calls it, but the JVM resolves the descriptor when the
+    // class is linked, so Headers must be present at RUNTIME, not just at
+    // compile time. compileOnly was tried and fails on CCAF — its function
+    // classloader does not expose kafka-clients, and the statement dies with
+    //   "UDF invocation error: ... org.apache.kafka.common.header.Headers"
+    // at first invocation, long after CREATE FUNCTION reported success.
+    // So it is bundled, and relocated below so the copy inside this artifact
+    // can never be confused with the runtime's own kafka-clients.
+    // transitive = false: the compression codecs (zstd/lz4/snappy) and their
+    // native payloads are pure weight here — nothing in the isotope path
+    // touches them.
+    implementation(libs.kafka.clients) { transitive = false }
+
     testImplementation libs.flink.table.api.java
     testImplementation libs.flink.table.common
     testImplementation libs.junit.jupiter
@@ -74,4 +95,29 @@ shadowJar {
         attributes 'Main-Class': 'ai.signalroom.kafka.isotope.flink.IsotopeReportsJob'
     }
     mergeServiceFiles()
+    // kafka-isotope-core pulls in Jackson for the isotope JSON. Flink ships its
+    // own (shaded) Jackson; relocating ours keeps the two from meeting.
+    relocate 'com.fasterxml.jackson', 'ai.signalroom.shaded.jackson'
+    // Same reasoning for kafka-clients, which is bundled only to satisfy the
+    // Isotope.fromHeaders descriptor (see the dependency comment above). The
+    // relocation rewrites Isotope's own reference too, so the UDF links against
+    // the bundled copy and never touches the Flink connector's kafka-clients.
+    relocate 'org.apache.kafka', 'ai.signalroom.shaded.kafka'
+    // Ship only the two header interfaces the Isotope descriptor needs
+    // (Headers, and Header which it extends Iterable over) — 1 KB rather than
+    // the 4,000-class, 12 MB whole client. shadow's minimize() cannot do this
+    // job: a type named only in a method descriptor is invisible to bytecode
+    // reachability analysis, so minimize strips Headers and the artifact fails
+    // exactly as it did with compileOnly.
+    //
+    // Only Isotope is ever loaded by the UDF. IsotopeContext, whose descriptors
+    // do reach ConsumerRecord and Producer, is never touched — and class
+    // loading is lazy, so its missing types cost nothing.
+    ['clients', 'server', 'shaded'].each { exclude "org/apache/kafka/${it}/**" }
+    ['acl', 'annotation', 'cache', 'compress', 'config', 'errors', 'feature',
+     'internals', 'memory', 'message', 'metrics', 'network', 'protocol', 'quota',
+     'record', 'replica', 'requests', 'resource', 'security', 'serialization',
+     'telemetry', 'utils'].each { exclude "org/apache/kafka/common/${it}/**" }
+    exclude 'org/apache/kafka/common/header/internals/**'
+    exclude 'org/apache/kafka/common/*.class'
 }
