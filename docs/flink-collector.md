@@ -14,10 +14,10 @@ Two propagation models now coexist in this project. They emit the identical wire
 - [**2.0 What is wired, and where**](#20-what-is-wired-and-where)
     + [**2.1 The writable headers column**](#21-the-writable-headers-column)
     + [**2.2 CCAF table shape**](#22-ccaf-table-shape)
+    + [**2.3 Packaging the UDF**](#23-packaging-the-udf)
 - [**3.0 Constraints**](#30-constraints)
     + [**3.1 1:1 Statements Only**](#31-11-statements-only)
     + [**3.2 Header Keys Must Be Unique**](#32-header-keys-must-be-unique)
-    + [**3.3 `kafka-clients` Linkage (Mitigated by Shading)**](#33-kafka-clients-linkage-mitigated-by-shading)
 - [**4.0 What this does not change**](#40-what-this-does-not-change)
 <!-- tocstop -->
 
@@ -75,31 +75,9 @@ The hop timestamp is passed **in** as `UNIX_TIMESTAMP() * 1000` rather than read
 
 The Topic Catalog auto-imported it as the bytes-pair table rather than deriving columns from the Protobuf schema, so the CCAF sink mirrors `(key, val)` while the CP side declares a single `value` BYTES column locally. Each runtime keeps the shape its own catalog produces; only the header handling is shared.
 
-## **3.0 Constraints**
+### **2.3 Packaging the UDF**
+The UDF ships as the [`ptf/`](../ptf/) shadow JAR. One packaging detail is load-bearing, and getting it wrong fails on the first row rather than at registration.
 
-### **3.1 1:1 Statements Only**
-**1:1 statements only — tracing, not provenance.**. This is a deliberate boundary, not an unfinished feature, and the distinction is worth stating exactly.
-
-An isotope records an *itinerary*: one identity and the ordered sequence of hops it visited — **a path**.  Provenance records a *derivation*: for each output, the inputs that produced it — **a DAG**, and inherently many-to-one wherever data combines.  The two coincide as long as every step is 1:1 — a DAG in which every node has exactly one parent is still a path — which is why `IsotopeAppendHop` and `IsotopeProducerInterceptor` both work.
-
-A windowed aggregate breaks that 1:1 relationship. A `SUM` over 1,000 records has **1,000 parents**, and truthful provenance would need to identify all of them; the isotope format has no vocabulary for that. Therefore, **in-band propagation is restricted to 1:1 statements**, where a trace *is* a valid derivation record. Aggregations never emit a “representative” trace ID, because doing so would not merely produce incomplete provenance — **it would fabricate provenance by falsely implying that one input record produced the aggregate result.**
-
-Note this is a property of the model, not of Flink: Kafka Streams and Spark face it identically. And in this pipeline it costs nothing, because the fan-in statements are all reports, and reports are terminal *as traced records*.  `isotope_report_*_1m` is read by dashboards, never re-consumed as a business event that must carry a hop chain onward.
-
-The trace-RCA report is the one case that reads a report rather than the event stream — [`setup-ccaf-ai.tf`](../terraform/setup-ccaf-ai.tf) joins `isotope_report_stuck_trace_1m` to `ML_PREDICT` and emits an AI-written root cause. It is not a counterexample on either count: it is 1:1 (one alert in, one analysis out, via `LATERAL TABLE`), and it carries `trace_id` forward as a *column*, not as an isotope header, so it never re-enters the hop chain. Note it is CCAF-only and gated on `var.enable_trace_rca`; CP runs seven reports, CCAF seven or eight.
-
-The 1:1 boundary happens to land exactly where tracing needs to reach.
-
-Full provenance would require a **format change, not a constraint to work around**. The output would carry a **fresh trace**, while a side-channel *merge-edge* topic would record `(merge_trace_id, window, operator, contributing_traces)` — the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges.
-
-Carrying that provenance in-band is not practical. A windowed aggregation over 1,000 inputs would require 1,000 UUIDv7 trace IDs — **16 KB of raw IDs alone** against Kafka's typical 1 MB `max.message.bytes`, before encoding, hop history, headers, or the business payload. `Isotope` already acknowledges this boundedness through `MAX_HOPS` and the `truncated` flag: the format is intentionally not designed to carry unbounded provenance history along a path.
-
-That additional provenance model is only worth implementing if a **stateful Flink stage sits mid-pipeline** — for example, an enrichment join or windowed deduplication whose output remains a business event that downstream services continue to trace. Until then, **in-band propagation remains deliberately restricted to 1:1 transformations**, where a single isotope can truthfully represent the derivation.
-
-### **3.2 Header Keys Must Be Unique**
-Confluent's ALTER TABLE reference states [multi-key headers are unsupported](https://docs.confluent.io/cloud/current/flink/reference/statements/alter-table.html#read-and-write-ak-headers). Isotope uses distinct keys throughout, but this rules out ever expressing hops as repeated same-key headers.
-
-### **3.3 `kafka-clients` Linkage (Mitigated by Shading)**
 `Isotope` declares `fromHeaders(org.apache.kafka.common.header.Headers)`. `IsotopeAppendHop` never calls it, but the JVM resolves that descriptor when linking the class, so `Headers` must be present at **runtime**, not merely at compile time.
 
 `compileOnly` was tried first, on the assumption that the Flink Kafka connector would supply `kafka-clients`. It does not on CCAF. Probed against the live compute pool, `CREATE FUNCTION` succeeded and the statement planned and reached `RUNNING` — then died on the first row:
@@ -132,6 +110,30 @@ flink-enrich    2
 `hop_count = 2` is the load-bearing part: hop 1 was the origin service producing to `orders.placed`, hop 2 is Flink. The count incremented rather than resetting, so the UDF rehydrated the inbound isotope and appended to it rather than minting a fresh trace — the same assertion [`IsotopeAppendHopTest`](../ptf/src/test/java/ai/signalroom/kafka/isotope/flink/IsotopeAppendHopTest.java) makes, now observed end to end.
 
 The durable fix remains a Kafka-free `isotope-format` artifact split out of [`kafka-isotope`](https://github.com/j3-signalroom/kafka-isotope), which would make all of this unnecessary.
+
+## **3.0 Constraints**
+
+### **3.1 1:1 Statements Only**
+**1:1 statements only — tracing, not provenance.**. This is a deliberate boundary, not an unfinished feature, and the distinction is worth stating exactly.
+
+An isotope records an *itinerary*: one identity and the ordered sequence of hops it visited — **a path**.  Provenance records a *derivation*: for each output, the inputs that produced it — **a DAG**, and inherently many-to-one wherever data combines.  The two coincide as long as every step is 1:1 — a DAG in which every node has exactly one parent is still a path — which is why `IsotopeAppendHop` and `IsotopeProducerInterceptor` both work.
+
+A windowed aggregate breaks that 1:1 relationship. A `SUM` over 1,000 records has **1,000 parents**, and truthful provenance would need to identify all of them; the isotope format has no vocabulary for that. Therefore, **in-band propagation is restricted to 1:1 statements**, where a trace *is* a valid derivation record. Aggregations never emit a “representative” trace ID, because doing so would not merely produce incomplete provenance — **it would fabricate provenance by falsely implying that one input record produced the aggregate result.**
+
+Note this is a property of the model, not of Flink: Kafka Streams and Spark face it identically. And in this pipeline it costs nothing, because the fan-in statements are all reports, and reports are terminal *as traced records*.  `isotope_report_*_1m` is read by dashboards, never re-consumed as a business event that must carry a hop chain onward.
+
+The trace-RCA report is the one case that reads a report rather than the event stream — [`setup-ccaf-ai.tf`](../terraform/setup-ccaf-ai.tf) joins `isotope_report_stuck_trace_1m` to `ML_PREDICT` and emits an AI-written root cause. It is not a counterexample on either count: it is 1:1 (one alert in, one analysis out, via `LATERAL TABLE`), and it carries `trace_id` forward as a *column*, not as an isotope header, so it never re-enters the hop chain. Note it is CCAF-only and gated on `var.enable_trace_rca`; CP runs seven reports, CCAF seven or eight.
+
+The 1:1 boundary happens to land exactly where tracing needs to reach.
+
+Full provenance would require a **format change, not a constraint to work around**. The output would carry a **fresh trace**, while a side-channel *merge-edge* topic would record `(merge_trace_id, window, operator, contributing_traces)` — the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges.
+
+Carrying that provenance in-band is not practical. A windowed aggregation over 1,000 inputs would require 1,000 UUIDv7 trace IDs — **16 KB of raw IDs alone** against Kafka's typical 1 MB `max.message.bytes`, before encoding, hop history, headers, or the business payload. `Isotope` already acknowledges this boundedness through `MAX_HOPS` and the `truncated` flag: the format is intentionally not designed to carry unbounded provenance history along a path.
+
+That additional provenance model is only worth implementing if a **stateful Flink stage sits mid-pipeline** — for example, an enrichment join or windowed deduplication whose output remains a business event that downstream services continue to trace. Until then, **in-band propagation remains deliberately restricted to 1:1 transformations**, where a single isotope can truthfully represent the derivation.
+
+### **3.2 Header Keys Must Be Unique**
+Confluent's ALTER TABLE reference states [multi-key headers are unsupported](https://docs.confluent.io/cloud/current/flink/reference/statements/alter-table.html#read-and-write-ak-headers). Isotope uses distinct keys throughout, but this rules out ever expressing hops as repeated same-key headers.
 
 ## **4.0 What this does not change**
 Out-of-band propagation is untouched. `IsotopeContext`, `IsotopeProducerInterceptor`, and the `interceptor.classes` wiring in [`App.java`](../app/src/main/java/ai/signalroom/kafka/isotope/App.java) behave exactly as before, and remain the right model for the services.
