@@ -688,7 +688,7 @@ flink-reports-down: ## Tear down the reports CMF Application + artifact + sink t
 #   make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
 #
 .PHONY: cc-flink-reports-up
-cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 25 Flink statements; +3 more with enable_trace_rca)
+cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 24 Flink statements; +3 more with enable_trace_rca)
 	@if [ -z "$(CONFLUENT_API_KEY)" ] || [ -z "$(CONFLUENT_API_SECRET)" ]; then \
 		echo "✘ CONFLUENT_API_KEY and CONFLUENT_API_SECRET must be set."; \
 		echo "  e.g. make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=..."; \

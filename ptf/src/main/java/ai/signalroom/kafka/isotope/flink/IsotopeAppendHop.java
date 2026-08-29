@@ -20,7 +20,7 @@ import java.util.Map;
  * {@code IsotopeProducerInterceptor}.
  *
  * <h2>Why a second propagation model</h2>
- * The interceptor propagates <em>ambiently</em>: {@code IsotopeContext} holds
+ * The interceptor propagates <em>out-of-band</em>: {@code IsotopeContext} holds
  * the in-flight {@link Isotope} in a {@link ThreadLocal}, and
  * {@code onSend()} reads it on the same thread that called {@code send()}.
  * That model is correct for the services in {@code app/}, where one thread

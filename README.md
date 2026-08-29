@@ -22,7 +22,7 @@
 
 `confluent-kafka-isotope` is a reference implementation of an **_e-commerce order pipeline that uses Kafka Interceptors to capture end-to-end event-tracing data, with Prometheus and Apache Flink analyzing and reporting that data in batch and near real time_**, as visualized below.
 
-![visualize-ambient-propagation](docs/visualize-ambient-propagation.png)
+![visualize-out-of-band-propagation](docs/visualize-out-of-band-propagation.png)
 
 Much like isotopes used to trace molecules through a biochemical pathway, each event carries lightweight metadata that allows it to be followed as it travels through Kafka topics and distributed microservices.
 
@@ -30,7 +30,7 @@ Much like isotopes used to trace molecules through a biochemical pathway, each e
 
 This project demonstrates how **Kafka Interceptors become collectors** — inserting the isotope into record headers in place and, at terminal consumers, emitting consume-edge markers — while **Flink SQL serves as the interpreter**, reading those headers directly to produce seven 1-minute reports from a single JAR on both Confluent Platform and Confluent Cloud for Apache Flink (CCAF). Optionally, the producer interceptor can **emit Micrometer metrics to Prometheus as an always-on aggregate layer** alongside the per-trace Flink reports.  (As depicted in the diagram below.)
 
-**Flink is now a collector too.** A second propagation model lets a Flink statement stamp its own hop, so Flink appears in the topology graph as a producer rather than only as a reader. The interceptor propagates *ambiently* — the in-flight isotope lives in an `IsotopeContext` `ThreadLocal` that `onSend()` reads on the same thread — which is correct in the services, where one thread owns a whole consume→produce hop. That cannot work in Flink: a shuffle resumes a record on a different thread in a different JVM, and Flink SQL has no user-visible thread to attach to at all. So Flink propagates *in-band*, carrying the isotope in the record's own headers via a writable `headers` metadata column and the `ISOTOPE_APPEND_HOP` scalar UDF. Two models, one wire format — every header the UDF writes is byte-identical to the interceptor's, so the reports cannot tell the two collectors apart. See [docs/flink-collector.md](docs/flink-collector.md).
+**Flink is now a collector too.** A second propagation model lets a Flink statement stamp its own hop, so Flink appears in the topology graph as a producer rather than only as a reader. The interceptor propagates *out-of-band* — the in-flight isotope lives in an `IsotopeContext` `ThreadLocal` that `onSend()` reads on the same thread — which is correct in the services, where one thread owns a whole consume→produce hop. That cannot work in Flink: a shuffle resumes a record on a different thread in a different JVM, and Flink SQL has no user-visible thread to attach to at all. So Flink propagates *in-band*, carrying the isotope in the record's own headers via a writable `headers` metadata column and the `ISOTOPE_APPEND_HOP` scalar UDF. Two models, one wire format — every header the UDF writes is byte-identical to the interceptor's, so the reports cannot tell the two collectors apart. See [docs/flink-collector.md](docs/flink-collector.md).
 
 ![visualize-in-band-propagation](docs/visualize-in-band-propagation.png)
 
@@ -324,7 +324,7 @@ k8s/monitoring/                         optional metrics showcase (§3.4) — `m
   README.md                             runbook + troubleshooting
 scripts/
   tf-repair-flink-credentials.py        repairs the CCAF Flink service account credentials
-  tf-statement-updates.py               updates the 25 Flink SQL statements in Terraform
+  tf-statement-updates.py               updates the 24 Flink SQL statements in Terraform
   port-forward-kafka.sh                 localhost:30092 → Kafka, localhost:8081 → SR
   port-forward-taskmanager.sh           Flink TaskManager web UI forward
   deploy-cmf-flink-reports.sh           builds shadow JAR + uploads it as a cmf://
@@ -357,10 +357,11 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
   setup-confluent-kafka.tf              Kafka cluster + Kafka API key rotation module
                                         (iac-confluent-api_key_rotation-tf_module)
   setup-confluent-flink.tf              service account + 6 role bindings, compute pool,
-                                        artifact upload, SR API key rotation, and 25 inline
-                                        `confluent_flink_statement` resources: 4 ALTER TABLE
-                                        + 3 VIEW + 7 sink CREATE TABLE + 2 DROP FUNCTION +
-                                        2 CREATE FUNCTION (both PTFs) + 7 INSERT INTO
+                                        artifact upload, SR API key rotation, and 24 inline
+                                        `confluent_flink_statement` resources: 6 ALTER TABLE
+                                        + 3 VIEW + 8 sink CREATE TABLE + 3 DROP FUNCTION +
+                                        3 CREATE FUNCTION (2 PTFs + 1 UDF) + 1 EXECUTE
+                                        STATEMENT SET holding all 8 INSERT INTOs
   setup-ccaf-ai.tf                      OPTIONAL AI trace-RCA report — 3 extra
                                         statements (CREATE MODEL + Protobuf sink +
                                         INSERT … ML_PREDICT); gated on
@@ -384,7 +385,7 @@ docs/                                   extracted long-form docs (linked from th
   runbook-ccaf.md                       full CCAF / Terraform run sequence (§3.3)
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
   terraform.png                         rendered resource graph (embedded in §3.3)
-  visualize-ambient-propagation.png     ambient propagation — the producer interceptor
+  visualize-out-of-band-propagation.png     out-of-band propagation — the producer interceptor
                                         stamps context on send; consume-side capture
                                         records the edge (§intro)
   visualize-in-band-propagation.png     in-band propagation — the isotope rides inside the
@@ -494,7 +495,7 @@ The Confluent Cloud for Apache Flink (CCAF) parallel of [§3.2 CP + Apache Flink
 - Compute pool
 - Two rotating service-account API key pairs (Kafka + Schema Registry)
 - The uploaded PTF JAR
-- 25 `confluent_flink_statement` resources (4 `ALTER TABLE` + 3 `VIEW` + 7 sink `CREATE TABLE` + 2 `CREATE FUNCTION` + 7 `INSERT INTO`, plus 2 transient `DROP FUNCTION`)
+- 24 `confluent_flink_statement` resources (6 `ALTER TABLE` + 3 `VIEW` + 8 sink `CREATE TABLE` + 3 `CREATE FUNCTION`, plus 1 `EXECUTE STATEMENT SET` holding all 8 `INSERT INTO`s and 3 transient `DROP FUNCTION`)
 
 **The full provision → deploy → traffic → teardown sequence is consolidated in [docs/runbook-ccaf.md](docs/runbook-ccaf.md).** `make cc-flink-reports-up` (~6–8 min first run; idempotent re-applies), drive traffic with `scripts/cc-app-run.sh place|enrich|fulfill|ship` across **multiple** 1-minute windows (a single burst sits in one open window forever, and you wait ~90s after the last record), then `make cc-flink-reports-down` to `terraform destroy` the whole environment.
 
@@ -516,7 +517,7 @@ The deployment provisions the standard CCAF environment used by the seven determ
 - Compute pool
 - Two rotating service-account API key pairs (Kafka + Schema Registry)
 - The uploaded PTF JAR
-- 25 `confluent_flink_statement` resources (4 `ALTER TABLE` + 3 `VIEW` + 7 sink `CREATE TABLE` + 2 `CREATE FUNCTION` + 7 `INSERT INTO`, plus 2 transient `DROP FUNCTION`)
+- 24 `confluent_flink_statement` resources (6 `ALTER TABLE` + 3 `VIEW` + 8 sink `CREATE TABLE` + 3 `CREATE FUNCTION`, plus 1 `EXECUTE STATEMENT SET` holding all 8 `INSERT INTO`s and 3 transient `DROP FUNCTION`)
 
 When `ENABLE_TRACE_RCA=true`, the deployment **additionally provisions the AI RCA resources**:
   

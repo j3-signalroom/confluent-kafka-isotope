@@ -872,7 +872,7 @@ resource "confluent_flink_statement" "register_latency_percentiles" {
 # COLLECTOR: it appends a Flink hop and rewrites the headers on the way out,
 # so a Flink statement can be a traced stage rather than only a reader.
 #
-# It exists so Flink can participate in a trace without the ambient
+# It exists so Flink can participate in a trace without the out-of-band
 # ThreadLocal model, which cannot survive a shuffle or the SQL planner. Same
 # wire format as the interceptor, so the reports are unchanged.
 #
@@ -1255,7 +1255,7 @@ resource "confluent_flink_statement" "insert_isotope_reports" {
 # bipartite_topology_1m instead of being invisible in its own reports.
 #
 # Deliberately a NEW parallel topic. orders.{placed,enriched,fulfilled} stay
-# entirely with ambient propagation; nothing about the three-stage service
+# entirely with out-of-band propagation; nothing about the three-stage service
 # pipeline changes.
 #
 # Column shape mirrors what CCAF's Topic Catalog inferred for orders.placed —

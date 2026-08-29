@@ -119,7 +119,7 @@ The 7 reports run as a single Flink 2.1 CMF **Application** (`isotope-reports`, 
 ### **6.2 CCAF (Confluent Cloud, Terraform-driven)**
 ```bash
 make cc-flink-reports-up  CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
-                          # terraform apply: env + cluster + topics + compute pool + artifact + 25 statements
+                          # terraform apply: env + cluster + topics + compute pool + artifact + 24 statements
                           # also regenerates terraform/terraform.png via `terraform graph | dot`
 ```
 or
