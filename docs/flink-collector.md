@@ -12,12 +12,12 @@ Two propagation models now coexist in this project. They emit the identical wire
 <!-- toc -->
 - [**1.0 Why a second model was needed**](#10-why-a-second-model-was-needed)
 - [**2.0 What is wired, and where**](#20-what-is-wired-and-where)
-        + [**2.1 The writable headers column**](#21-the-writable-headers-column)
-        + [**2.2 CCAF table shape**](#22-ccaf-table-shape)
+    + [**2.1 The writable headers column**](#21-the-writable-headers-column)
+    + [**2.2 CCAF table shape**](#22-ccaf-table-shape)
 - [**3.0 Constraints**](#30-constraints)
-        + [**3.1 1:1 Statements Only**](#31-11-statements-only)
-        + [**3.2 Header Keys Must Be Unique**](#32-header-keys-must-be-unique)
-        + [**3.3 `kafka-clients` Linkage (mitigated by shading)**](#33-kafka-clients-linkage-mitigated-by-shading)
+    + [**3.1 1:1 Statements Only**](#31-11-statements-only)
+    + [**3.2 Header Keys Must Be Unique**](#32-header-keys-must-be-unique)
+    + [**3.3 `kafka-clients` Linkage (mitigated by shading)**](#33-kafka-clients-linkage-mitigated-by-shading)
 - [**4.0 What this does not change**](#40-what-this-does-not-change)
 <!-- tocstop -->
 
