@@ -17,7 +17,7 @@ Two propagation models now coexist in this project. They emit the identical wire
 - [**3.0 Constraints**](#30-constraints)
     + [**3.1 1:1 Statements Only**](#31-11-statements-only)
     + [**3.2 Header Keys Must Be Unique**](#32-header-keys-must-be-unique)
-    + [**3.3 `kafka-clients` Linkage (mitigated by shading)**](#33-kafka-clients-linkage-mitigated-by-shading)
+    + [**3.3 `kafka-clients` Linkage (Mitigated by Shading)**](#33-kafka-clients-linkage-mitigated-by-shading)
 - [**4.0 What this does not change**](#40-what-this-does-not-change)
 <!-- tocstop -->
 
@@ -99,7 +99,7 @@ That additional provenance model is only worth implementing if a **stateful Flin
 ### **3.2 Header Keys Must Be Unique**
 Confluent's ALTER TABLE reference states [multi-key headers are unsupported](https://docs.confluent.io/cloud/current/flink/reference/statements/alter-table.html#read-and-write-ak-headers). Isotope uses distinct keys throughout, but this rules out ever expressing hops as repeated same-key headers.
 
-### **3.3 `kafka-clients` Linkage (mitigated by shading)**
+### **3.3 `kafka-clients` Linkage (Mitigated by Shading)**
 `Isotope` declares `fromHeaders(org.apache.kafka.common.header.Headers)`. `IsotopeAppendHop` never calls it, but the JVM resolves that descriptor when linking the class, so `Headers` must be present at **runtime**, not merely at compile time.
 
 `compileOnly` was tried first, on the assumption that the Flink Kafka connector would supply `kafka-clients`. It does not on CCAF. Probed against the live compute pool, `CREATE FUNCTION` succeeded and the statement planned and reached `RUNNING` — then died on the first row:
