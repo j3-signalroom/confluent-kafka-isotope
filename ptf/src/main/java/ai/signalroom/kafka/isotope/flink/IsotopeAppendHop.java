@@ -14,6 +14,7 @@ import org.apache.flink.table.functions.ScalarFunction;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Map;
 
 /**
  * Collector-side propagation for Flink — the SQL-native counterpart to
