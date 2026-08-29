@@ -44,9 +44,9 @@ This runs [scripts/deploy-cc-flink-reports.sh](../scripts/deploy-cc-flink-report
 | `confluent_kafka_cluster` | `kafka-isotope` | Standard, single-zone, AWS us-east-1 by default |
 | `confluent_kafka_topic` × 4 | `orders.{placed,enriched,fulfilled}` + `isotope_consume_edge_markers` | Only the event + consume-marker topics are pre-created. The 7 `isotope_report_*_1m` sink topics are created on first deploy by their `CREATE TABLE` (pre-creating them would make CCAF's Topic Catalog auto-import them as `(key BYTES, val BYTES)` and silently no-op the typed DDL). |
 | `confluent_service_account` + 6 role bindings | `isotope-flink-sql-runner` | FlinkDeveloper (org) + ResourceOwner on topic/transactional-id/group/SR-subject `*` + Assigner |
-| `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for 7 INSERTs + ad-hoc SELECTs |
+| `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for the 8-INSERT statement set + ad-hoc SELECTs |
 | `confluent_flink_artifact` | `isotope-flink-udf` | Uploads `ptf/build/libs/isotope-flink-udf.jar` |
-| `confluent_flink_statement` × 25 | (see file) | 4 ALTER TABLE + 3 VIEW + 7 sink CREATE TABLE + 2 CREATE FUNCTION (both PTFs) + 7 INSERT INTO (23 long-lived) + 2 transient DROP FUNCTION |
+| `confluent_flink_statement` × 24 | (see file) | 6 ALTER TABLE + 3 VIEW + 8 sink CREATE TABLE + 3 CREATE FUNCTION (2 PTFs + 1 UDF) + 1 EXECUTE STATEMENT SET holding all 8 INSERT INTOs (21 long-lived) + 3 transient DROP FUNCTION |
 | `confluent_flink_statement` × 3 (optional) | (see [terraform/setup-ccaf-ai.tf](../terraform/setup-ccaf-ai.tf)) | Optional AI trace-RCA report — `CREATE MODEL trace_rca` + 1 Protobuf sink + 1 `INSERT … ML_PREDICT`. **Gated on `var.enable_trace_rca` (default `false`)**, so a normal apply skips them entirely. Set `rca_model_api_key` (and `rca_model_provider`/`_version`/`_endpoint` for a non-OpenAI provider) to enable. See root README §3.3. |
 
 Two rotating service-account API key pairs (one Kafka, one Schema Registry) are managed by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](../terraform/setup-confluent-kafka.tf).
