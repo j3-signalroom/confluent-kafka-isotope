@@ -1,0 +1,66 @@
+-- =====================================================================
+-- Flink as a MERGE collector — OPTIONAL (see docs/flink-collector.md 3.1).
+--
+-- The counterpart to 75_flink_collector.fql. That statement is a 1:1
+-- projection and continues the inbound trace; this one is a windowed
+-- aggregate, so it CANNOT. A SUM over 1,000 records has 1,000 parents,
+-- and forwarding one of their trace IDs would not be incomplete
+-- provenance — it would be a fabrication that reads as provenance.
+--
+-- So the merged record starts a FRESH trace (ISOTOPE_MERGE_TRACE), and
+-- the many-to-one edges go to isotope_merge_edge_markers in the
+-- companion statement, 81_merge_edge_markers.fql. Neither statement is
+-- useful without the other: together they are the DAG this format
+-- otherwise cannot express.
+--
+-- Depends on:
+--   - `isotope` view (05_isotope_view.fql)
+--   - `orders.flink_batched` sink (08_merge_provenance_sinks.fql)
+--   - ISOTOPE_MERGE_TRACE (registered from the classpath by
+--     IsotopeReportsJob; CREATE FUNCTION on the SQL-Client path)
+--
+-- Call form notes:
+--   - The first five arguments MUST match those passed to
+--     ISOTOPE_MERGE_TRACE_ID in 81_merge_edge_markers.fql. That
+--     agreement is the entire join between a merged record and its
+--     parents; MergeTraceTest pins it, but the two statements are
+--     edited separately, so check both when changing the grain.
+--   - No clock read anywhere, and no UNIX_TIMESTAMP() as in the 1:1
+--     collector: both the trace ID and the hop timestamp derive from
+--     the window. A merge that replays produces the identical isotope,
+--     which is what lets the edge rows be computed independently.
+--   - WHERE this_topic = 'orders.placed' fixes the merge input to the
+--     origin stream. Without it the same trace would contribute once
+--     per hop it has taken, inflating every edge count.
+--   - The grain is (window, pipeline). `pipeline` is passed twice on
+--     purpose: once as the isotope's pipeline field, once as the group
+--     key. They are the same column here, but they are different
+--     arguments — a finer GROUP BY changes only the second.
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope_flink_merge_collector';
+
+INSERT INTO `orders.flink_batched`
+SELECT
+    `pipeline`,
+    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    COUNT(*)                 AS `event_count`,
+    COUNT(DISTINCT trace_id) AS `distinct_traces`,
+    ISOTOPE_MERGE_TRACE(
+        `pipeline`,                                             -- pipeline
+        'orders-batch',                                         -- operator
+        UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000,  -- window start, ms
+        UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000,  -- window end, ms
+        `pipeline`,                                             -- group key
+        'flink-batch',                                          -- this_service
+        'orders.flink_batched'                                  -- this_topic
+    )
+FROM TABLE(
+    TUMBLE(TABLE `isotope`, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+WHERE `this_topic` = 'orders.placed'
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `pipeline`;

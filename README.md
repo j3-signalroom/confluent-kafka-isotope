@@ -203,7 +203,7 @@ flowchart TB
     IPI -. "opt-in flag<br/>produce-side meters" .-> PIM
     Mark -. "consume-side meters" .-> PIM
 
-    subgraph PTF["ptf/ — isotope-flink-udf shadow JAR · 2 PTFs + 1 UDF"]
+    subgraph PTF["ptf/ — isotope-flink-udf shadow JAR · 2 PTFs + 3 UDFs"]
         Pcts["LatencyPercentilesPTF<br/>T-Digest p50/p95/p99"]
         Stuck["StuckTracePTF<br/>per-trace state + event-time timer"]
         Hop["IsotopeAppendHop (ScalarFunction)<br/>collector, not interpreter —<br/>appends a Flink hop to the headers"]
@@ -249,7 +249,7 @@ flowchart TB
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator + CMF 2.4 + MinIO<br/>Makefile: cp-up · flink-up · flink-reports-up"]
-        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 24 statements (+3 optional AI)<br/>Makefile: cc-flink-reports-up"]
+        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 28 statements (+3 optional AI, +5 optional merge)<br/>Makefile: cc-flink-reports-up"]
         MON["k8s/monitoring/<br/>Prometheus + Grafana pods; scrape host<br/>stages via host.minikube.internal<br/>Makefile: metrics-up"]
     end
 
@@ -360,7 +360,7 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
                                         artifact upload, SR API key rotation, and 24 inline
                                         `confluent_flink_statement` resources: 6 ALTER TABLE
                                         + 3 VIEW + 8 sink CREATE TABLE + 3 DROP FUNCTION +
-                                        3 CREATE FUNCTION (2 PTFs + 1 UDF) + 1 EXECUTE
+                                        5 CREATE FUNCTION (2 PTFs + 3 UDFs) + 1 EXECUTE
                                         STATEMENT SET holding all 8 INSERT INTOs
   setup-ccaf-ai.tf                      OPTIONAL AI trace-RCA report — 3 extra
                                         statements (CREATE MODEL + Protobuf sink +

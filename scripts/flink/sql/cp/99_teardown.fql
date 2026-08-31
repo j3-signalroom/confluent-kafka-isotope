@@ -20,6 +20,12 @@ DROP TABLE    IF EXISTS latency_report_1m;
 -- See docs/flink-collector.md.
 DROP TABLE    IF EXISTS `orders.flink_enriched`;
 
+-- Optional fan-in provenance (docs/flink-collector.md 2.4). Dropped
+-- unconditionally: IF EXISTS makes this a no-op when the feature was never on,
+-- and a teardown must not strand tables an earlier enabled run created.
+DROP TABLE    IF EXISTS `orders.flink_batched`;
+DROP TABLE    IF EXISTS `isotope_merge_edge_markers`;
+
 -- Upstream typed views → source table.
 DROP VIEW     IF EXISTS consume_events;
 DROP VIEW     IF EXISTS isotope;
@@ -29,3 +35,5 @@ DROP TABLE    IF EXISTS isotope_raw;
 DROP FUNCTION IF EXISTS STUCK_TRACE_PTF;
 DROP FUNCTION IF EXISTS LATENCY_PERCENTILES;
 DROP FUNCTION IF EXISTS ISOTOPE_APPEND_HOP;
+DROP FUNCTION IF EXISTS ISOTOPE_MERGE_TRACE;
+DROP FUNCTION IF EXISTS ISOTOPE_MERGE_TRACE_ID;

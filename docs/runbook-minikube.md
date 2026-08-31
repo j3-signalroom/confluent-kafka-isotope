@@ -75,6 +75,14 @@ make flink-reports-up    # builds the app shadow JAR (:ptf:shadowJar) → pre-cr
 
 All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`): five pure Flink SQL plus two JAR-backed `ProcessTableFunction`s (`LatencyPercentilesPTF`, `StuckTracePTF`), executed together as a single `StatementSet` by `IsotopeReportsJob`. Sink topics use Apache Flink's `avro-confluent` format — SR-framed Avro, auto-registered on first write — so Control Center renders the rows natively. The application appears in CMF's applications API and Control Center's Flink tab. Drop everything (application + artifact + sink topics) with `make flink-reports-down`.
 
+**Optional — fan-in provenance.** Off by default. To also run the merge collector and its merge-edge sideband:
+
+```bash
+MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up
+```
+
+That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more INSERTs to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing record, so it roughly doubles the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-fan-in-provenance-optional). Teardown removes those topics either way.
+
 ## **6.0 Drive traffic (required to see report rows)**
 All report jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, which only emit when the watermark advances past `window_end`. Spread records across **multiple** windows:
 
