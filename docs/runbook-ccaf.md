@@ -33,6 +33,7 @@ This runs [scripts/deploy-cc-flink-reports.sh](../scripts/deploy-cc-flink-report
 
 - **First run takes ~6–8 minutes** (Kafka cluster provisioning dominates).
 - **Re-applies are idempotent** — `CREATE … IF NOT EXISTS` plus `lifecycle { ignore_changes = [compute_pool] }` on every statement.
+- Optional fan-in provenance: `make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true …` (script flag `--enable-merge-provenance=true`, default `false`). See [docs/flink-collector.md §2.4](./flink-collector.md#24-fan-in-provenance-optional).
 - Optional retention override: the script accepts `--day-count=<DAYS>` (default `30`); both `make` targets require `CONFLUENT_API_KEY` / `CONFLUENT_API_SECRET` or they fail fast with a clear message.
 
 ## **3.0 What gets created**

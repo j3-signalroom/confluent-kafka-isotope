@@ -78,7 +78,7 @@ All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`): 
 **Optional — fan-in provenance.** Off by default. To also run the merge collector and its merge-edge sideband:
 
 ```bash
-MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up
+make flink-reports-up ENABLE_MERGE_PROVENANCE=true
 ```
 
 That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more INSERTs to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing record, so it roughly doubles the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-fan-in-provenance-optional). Teardown removes those topics either way.

@@ -130,11 +130,14 @@ Turning it on:
 
 ```bash
 # CP — Minikube
-MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up
+make flink-reports-up ENABLE_MERGE_PROVENANCE=true
 
 # CCAF
-terraform apply -var enable_merge_provenance=true
+make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
+    CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET
 ```
+
+Same switch name on both runtimes, and the same shape as `ENABLE_TRACE_RCA`. It reaches CP as the `--merge-provenance` job argument and CCAF as `TF_VAR_enable_merge_provenance`, so the underlying `MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up` and `terraform apply -var enable_merge_provenance=true` forms still work if you drive either directly.
 
 Off, neither runtime creates a table, a topic, or a statement for it. The two UDFs are registered either way — registration is inert until a statement calls it, and always-registering them means flipping the feature on needs no artifact re-upload.
 
