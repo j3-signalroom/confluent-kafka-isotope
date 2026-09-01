@@ -101,11 +101,19 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 ---
 
 ## **1.0 How an Isotope Traverses an Event Pipeline**
-An **Isotope** is a **_lightweight tracing artifact attached to Kafka record headers_**. Like a biochemical isotope used to trace molecules through a metabolic pathway, it allows the journey of a record through an event-driven architecture to be observed and analyzed.
+An **Isotope** is a ***lightweight tracing artifact attached to Kafka record headers***. Like a biochemical isotope used to trace molecules through a metabolic pathway, it allows the journey of a record through an event-driven architecture to be observed and analyzed.
 
-This project models a Kafka pipeline as a **bipartite graph**: *services occupy one vertex set*, *topics the other*, and *every produce and consume operation forms an edge between them*. The resulting graph provides a unified view of the complete event topology, from producers to intermediate processing services to terminal consumers.
+This project models a Kafka pipeline as a **bipartite graph**: **services occupy one vertex set**, **topics the other**, and **every produce and consume operation forms an edge between them**. The resulting graph provides a unified view of the complete event topology, from producers to intermediate processing services to terminal consumers.
 
-A `ProducerInterceptor` stamps the isotope onto each record and appends one hop for every `send()` operation, capturing the **produce edges**. Consumers call `IsotopeContext.recordConsume()` to emit a lightweight marker representing the corresponding **consume edges**, while services that consume and then produce invoke `IsotopeContext.adoptFromRecord()` so the trace identity persists across every hop.
+A `ProducerInterceptor` stamps the isotope onto each record and appends one hop for every `send()` operation, capturing the **produce edges**. Consumers call `IsotopeContext.recordConsume()` to emit a lightweight marker representing the corresponding **consume edges**.
+
+For services that consume and then produce, Kafka Isotope supports **two complementary propagation models** for carrying the trace identity forward:
+
+* **Out-of-band propagation** — `IsotopeContext.adoptFromRecord()` places the inbound isotope into ambient thread-local context, where the subsequent `send()` retrieves it. This model is designed for conventional Kafka applications where the consume → produce hop remains within the same execution context.
+
+* **In-band propagation** — the isotope remains attached to the record as it moves through the processing graph. Because propagation does not depend on thread-local state, the trace identity can survive thread, task, shuffle, network, and JVM boundaries such as those introduced by Apache Flink.
+
+Both models produce the same Kafka isotope headers and preserve the same trace identity across hops; they differ only in **how that identity is propagated between consume and produce**: out-of-band through ambient application context, or in-band with the record itself.
 
 Apache Flink combines the isotope headers and consume-edge markers to reconstruct the complete **service → topic → service** graph and produce seven reports:
 
@@ -119,7 +127,7 @@ Apache Flink combines the isotope headers and consume-edge markers to reconstruc
 
 The same implementation runs on both **Confluent Platform (self-managed)** with **Confluent Manager for Apache Flink (CMF)** and **Confluent Cloud for Apache Flink (CCAF)**.
 
-For more in-depth discussion of the **Isotope Tracing Design**, see [docs/design.md](docs/design.md).
+For more in-depth discussion of the **Isotope Tracing Design**, including the two propagation models, see [docs/design.md](docs/design.md).
 
 ### **1.1 Anatomy of the Isotope Tracing Artifact**
 The isotope is a **JSON object** that travels in the `x-isotope` Kafka record header, accompanied by **seven scalar headers** that Flink SQL reads directly. The JSON carries the trace identity, origin metadata, and full ordered hop history, while the scalar headers provide a flattened view of the most-recent-hop data for easier SQL access.
