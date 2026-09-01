@@ -10,6 +10,7 @@ traffic → observe → teardown. Unlike the [Confluent Platform + Flink on Mini
 <!-- toc -->
 - [**1.0 Prerequisites**](#10-prerequisites)
 - [**2.0 Provision + deploy the reports**](#20-provision--deploy-the-reports)
+  + [**2.1 Verify in-band propagation**](#21-verify-in-band-propagation)
 - [**3.0 What gets created**](#30-what-gets-created)
 - [**4.0 Useful outputs**](#40-useful-outputs)
 - [**5.0 Drive traffic**](#50-drive-traffic-required-to-see-report-rows)
@@ -35,6 +36,16 @@ This runs [scripts/deploy-cc-flink-reports.sh](../scripts/deploy-cc-flink-report
 - **Re-applies are idempotent** — `CREATE … IF NOT EXISTS` plus `lifecycle { ignore_changes = [compute_pool] }` on every statement.
 - Optional fan-in provenance: `make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true …` (script flag `--enable-merge-provenance=true`, default `false`). See [docs/flink-collector.md §2.4](./flink-collector.md#24-fan-in-provenance-optional).
 - Optional retention override: the script accepts `--day-count=<DAYS>` (default `30`); both `make` targets require `CONFLUENT_API_KEY` / `CONFLUENT_API_SECRET` or they fail fast with a clear message.
+
+### **2.1 Verify in-band propagation**
+```bash
+scripts/cc-app-run.sh place hello        # one traced record → orders.placed
+scripts/cc-app-run.sh verify-inband      # asserts the Flink collector appended a hop
+```
+
+`verify-inband` reads a bounded snapshot of `orders.placed` and `orders.flink_enriched` and asserts that every trace on both topics kept its identity and gained **exactly one** hop, written by `flink-enrich`. Same trace ID with an incremented hop count is the proof that `ISOTOPE_APPEND_HOP` rehydrated the inbound isotope from the record's own headers rather than minting a fresh trace — the one propagation model that survives a Flink shuffle. It exits non-zero on failure, so it is usable as a CI gate. Pass a larger sample (`verify-inband 200`) if the two topics have drifted far apart.
+
+The collector is a 1:1 projection with no window, so its output appears within seconds — the ~90s watermark wait applies only to the `TUMBLE` reports.
 
 ## **3.0 What gets created**
 ![terraform](./terraform.png "Terraform resource graph")

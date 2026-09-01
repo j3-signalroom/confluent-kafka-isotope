@@ -13,6 +13,7 @@
     - [**3.3.1 Why `latency_percentiles` is a `ProcessTableFunction` (PTF)**](#331-why-latency_percentiles-is-a-processtablefunction-ptf)
     - [**3.3.2 [OPTIONAL] Eighth Report — AI Root-Cause Analysis (RCA)**](#332-optional-eighth-report--ai-root-cause-analysis-rca)
   - [**3.4 [OPTIONAL] Prometheus Metrics Reporting with Grafana Visualization**](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)
+  - [**3.5 [OPTIONAL] Fan-in (Merge) Provenance**](#35-optional-fan-in-merge-provenance)
 - [**Resources**](#resources)
 <!-- tocstop -->
 
@@ -186,6 +187,8 @@ flowchart TB
         T1[("orders.placed")] --> T2[("orders.enriched")] --> T3[("orders.fulfilled")]
         TC[("isotope_consume_edge_markers<br/>value-less consume markers")]
         T4[("orders.flink_enriched<br/>produced by Flink, not a service")]
+        T5[("orders.flink_batched<br/>merged event — FRESH trace, 1 hop")]
+        TM[("isotope_merge_edge_markers<br/>one edge row per contributing record")]
     end
 
     IPI -- "produce (x-isotope JSON + 7 scalar headers)" --> Kafka
@@ -207,18 +210,19 @@ flowchart TB
         Pcts["LatencyPercentilesPTF<br/>T-Digest p50/p95/p99"]
         Stuck["StuckTracePTF<br/>per-trace state + event-time timer"]
         Hop["IsotopeAppendHop (ScalarFunction)<br/>collector, not interpreter —<br/>appends a Flink hop to the headers"]
+        MergeFn["IsotopeMergeTrace + IsotopeMergeTraceId<br/>(ScalarFunctions) fan-in collector —<br/>mints a fresh trace, ID derived from<br/>the window so both statements agree"]
     end
 
     subgraph Flink["Flink SQL reports — identical source/view DDL; sink format differs by runtime"]
         direction LR
         subgraph CP["Minikube · Flink 2.1 CMF Application"]
             SQLCP["scripts/flink/sql/cp/*.fql<br/>(bundled in the app JAR)"]
-            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>Avro+SR sinks"]
+            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>+2 with --merge-provenance<br/>Avro+SR sinks"]
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/setup-confluent-flink.tf<br/>24 × confluent_flink_statement<br/>(+3 when trace_rca is enabled)"]
-            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>Protobuf+SR sinks"]
+            TFSQL["terraform/setup-confluent-flink.tf<br/>28 × confluent_flink_statement<br/>(+3 with trace_rca, +5 with merge_provenance)"]
+            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
     end
@@ -227,8 +231,14 @@ flowchart TB
     Kafka -- "read headers" --> CC
     JCP -- "write headers — ISOTOPE_APPEND_HOP<br/>appends a Flink hop" --> T4
     JCC -- "write headers — ISOTOPE_APPEND_HOP<br/>appends a Flink hop" --> T4
+    JCP -. "optional (§3.5) — ISOTOPE_MERGE_TRACE<br/>windowed merge, fresh trace" .-> T5
+    JCC -. "optional (§3.5) — ISOTOPE_MERGE_TRACE<br/>windowed merge, fresh trace" .-> T5
+    JCP -. "ISOTOPE_MERGE_TRACE_ID<br/>one row per parent" .-> TM
+    JCC -. "ISOTOPE_MERGE_TRACE_ID<br/>one row per parent" .-> TM
     PTF -- "bundled in app JAR<br/>registered programmatically" --> CP
     PTF -. "CREATE FUNCTION USING JAR" .-> CC
+
+    T5 -. "JOIN ON merge_trace_id<br/>recovers a merged record's full parent set" .- TM
 
     R["report sink topics<br/>latency · topology · bipartite_topology ·<br/>hop_distribution · coverage · stuck_trace ·<br/>latency_percentiles"]
     JCP --> R
@@ -260,9 +270,11 @@ flowchart TB
     MON -. provisions .-> PROM
     MON -. provisions .-> GRAF
     TF -. "var.enable_trace_rca = true<br/>terraform/setup-ccaf-ai.tf" .-> AI
+    TF -. "var.enable_merge_provenance = true<br/>terraform/setup-ccaf-merge-provenance.tf" .-> TM
 
     classDef optional stroke-dasharray: 5
     class AI,MODEL,RCAJ,RCA optional
+    class T5,TM,MergeFn optional
 ```
 
 <details>
@@ -533,6 +545,24 @@ Three of the seven reports — `latency_1m`, `topology_1m`, and `hop_distributio
 The other four reports — `latency_percentiles`, `coverage`, `bipartite_topology`, and `stuck_trace` — require per-`trace_id` state or absence-of-event detection that Prometheus cannot express, so they **remain in Flink**. This path is **additive and opt-in**: a **3-Micrometer / 4-Flink split**.
 
 > **Full details** — including the meter/PromQL reference, the produce- and consume-side signals, the two deliberate gaps (`distinct_traces`, windowed `min`), and why latency percentiles remain implemented as a PTF — are in **[docs/metrics.md](docs/metrics.md)**. The one-command Prometheus + Grafana showcase has its own runbook: **[k8s/monitoring/README.md](k8s/monitoring/README.md)** (`make metrics-up`).
+
+### **3.5 [OPTIONAL] Fan-in (Merge) Provenance**
+The Flink collector is **1:1 by design** — it appends a hop to records it forwards one-for-one. That is tracing, and a trace is only a truthful derivation record while every step has exactly one parent. A windowed aggregate breaks that: a `SUM` over 1,000 records has 1,000 parents, and forwarding one of their trace IDs would not be incomplete provenance — it would **fabricate** provenance.
+
+This optional path records the fan-in case honestly, without changing the isotope wire format. The merged record on `orders.flink_batched` carries a **fresh** trace with one hop, and the many-to-one edges go to `isotope_merge_edge_markers` — one row per contributing record — the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges. Join the two on `merge_trace_id` to recover any merged record's full parent set.
+
+Both runtimes use the same switch, off by default:
+
+```bash
+make flink-reports-up ENABLE_MERGE_PROVENANCE=true                    # CP · Minikube
+
+make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
+    CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET
+```
+
+Disabled, neither runtime creates a table, a topic, or a statement for it, and `isotope_raw`, the typed views, and all seven reports are untouched either way.
+
+> **Full details** — why the merge trace ID must be *derived* from the window rather than minted (two statements have to agree on it independently), why it is two INSERTs rather than one PTF, and the two costs worth knowing about — are in **[docs/flink-collector.md §2.4](docs/flink-collector.md#24-fan-in-provenance-optional)**.
 
 ## **Resources**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)
