@@ -95,6 +95,15 @@ APP_JAR             ?= ptf/build/libs/isotope-flink-udf.jar
 POOL_IMAGE          ?= isotope-cp-flink-sql:local
 FLINK_SQL_DOCKERFILE ?= k8s/base/flink-sql-isotope.Dockerfile
 
+# Optional fan-in (merge) provenance — see docs/flink-collector.md 2.4. Off by
+# default on both runtimes; on, it adds a merge collector plus a merge-edge
+# sideband that writes one record per record entering the merge.
+#   make flink-reports-up    ENABLE_MERGE_PROVENANCE=true      (CP)
+#   make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true ...  (CCAF)
+# Falls back to MERGE_PROVENANCE, which is the env var the CP deploy script
+# reads directly, so either spelling works through make.
+ENABLE_MERGE_PROVENANCE ?= $(MERGE_PROVENANCE)
+
 # Optional metrics showcase (Prometheus + Grafana) — see k8s/monitoring/README.md
 MONITORING_MANIFEST ?= k8s/monitoring
 
@@ -667,6 +676,7 @@ flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Applica
 		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' APP_MANIFEST='$(APP_MANIFEST)' APP_JAR='$(APP_JAR)' \
 		POOL_IMAGE='$(POOL_IMAGE)' APP_FLINK_VERSION='$(APP_FLINK_VERSION)' \
 		MINIO_S3_ENDPOINT='$(MINIO_S3_ENDPOINT)' MINIO_ACCESS_KEY='$(MINIO_ACCESS_KEY)' MINIO_SECRET_KEY='$(MINIO_SECRET_KEY)' \
+		MERGE_PROVENANCE='$(ENABLE_MERGE_PROVENANCE)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh up
 
 .PHONY: flink-reports-down
@@ -688,7 +698,7 @@ flink-reports-down: ## Tear down the reports CMF Application + artifact + sink t
 #   make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
 #
 .PHONY: cc-flink-reports-up
-cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 24 Flink statements; +3 more with enable_trace_rca)
+cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 28 Flink statements; +3 with ENABLE_TRACE_RCA, +5 with ENABLE_MERGE_PROVENANCE)
 	@if [ -z "$(CONFLUENT_API_KEY)" ] || [ -z "$(CONFLUENT_API_SECRET)" ]; then \
 		echo "✘ CONFLUENT_API_KEY and CONFLUENT_API_SECRET must be set."; \
 		echo "  e.g. make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=..."; \
@@ -709,6 +719,9 @@ cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topic
 		if [ -n "$(AWS_ACCESS_KEY)" ];  then set -- "$$@" --aws-access-key='$(AWS_ACCESS_KEY)'; fi; \
 		if [ -n "$(AWS_SECRET_KEY)" ];  then set -- "$$@" --aws-secret-key='$(AWS_SECRET_KEY)'; fi; \
 		if [ -n "$(AWS_SESSION_TOKEN)" ];   then set -- "$$@" --aws-session-token='$(AWS_SESSION_TOKEN)'; fi; \
+	fi; \
+	if [ "$(ENABLE_MERGE_PROVENANCE)" = "true" ]; then \
+		set -- "$$@" --enable-merge-provenance=true; \
 	fi; \
 	$(mkfile_dir)scripts/deploy-cc-flink-reports.sh create "$$@"
 

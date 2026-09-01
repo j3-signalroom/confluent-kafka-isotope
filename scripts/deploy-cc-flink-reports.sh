@@ -10,6 +10,7 @@
 #       --confluent-api-secret=<CONFLUENT_CLOUD_API_SECRET>
 #       [--day-count=<DAY_COUNT>]
 #       [--enable-trace-rca=<true|false>]
+#       [--enable-merge-provenance=<true|false>]
 #       [--aws-access-key=<AWS_ACCESS_KEY>]
 #       [--aws-secret-key=<AWS_SECRET_KEY>]
 #       [--aws-session-token=<AWS_SESSION_TOKEN>]
@@ -43,7 +44,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TERRAFORM_DIR="${REPO_ROOT}/terraform"
 JAR_PATH="${REPO_ROOT}/ptf/build/libs/isotope-flink-udf.jar"
 
-argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--aws-access-key=<KEY>] [--aws-secret-key=<SECRET>] [--aws-session-token=<TOKEN>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
+argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--enable-merge-provenance=<true|false>] [--aws-access-key=<KEY>] [--aws-secret-key=<SECRET>] [--aws-session-token=<TOKEN>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
 
 usage_and_exit() {
     echo
@@ -78,6 +79,7 @@ day_count=30
 confluent_api_key=""
 confluent_api_secret=""
 enable_trace_rca=false
+enable_merge_provenance=false
 aws_access_key=""
 aws_secret_key=""
 aws_session_token=""
@@ -101,6 +103,9 @@ for arg in "$@"; do
             ;;
         --enable-trace-rca=*)
             enable_trace_rca="${arg#--enable-trace-rca=}"
+            ;;
+        --enable-merge-provenance=*)
+            enable_merge_provenance="${arg#--enable-merge-provenance=}"
             ;;
         --aws-access-key=*)
             aws_access_key="${arg#--aws-access-key=}"
@@ -175,6 +180,10 @@ export TF_VAR_confluent_api_key="${confluent_api_key}"
 export TF_VAR_confluent_api_secret="${confluent_api_secret}"
 export TF_VAR_day_count="${day_count}"
 export TF_VAR_enable_trace_rca="${enable_trace_rca}"
+# Optional fan-in (merge) provenance — docs/flink-collector.md 2.4. Unlike the
+# RCA vars below, this is a plain bool with a Terraform default of false, so
+# exporting it unconditionally is safe.
+export TF_VAR_enable_merge_provenance="${enable_merge_provenance}"
 
 # Only export the RCA model vars that were actually supplied. An exported but
 # empty TF_VAR_ does NOT fall through to the variable's Terraform default — it

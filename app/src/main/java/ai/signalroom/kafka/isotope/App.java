@@ -54,9 +54,12 @@ import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
  *      order-enrichment-service → order-fulfillment-service →
  *      shipping-notification-service).
  *
- *   sink <topic>
+ *   sink <topic> [max-records]
  *      Passive peek tool — pretty-prints the isotope trail but does NOT
- *      emit a consume-edge marker. Use for ad-hoc inspection.
+ *      emit a consume-edge marker. Use for ad-hoc inspection. With
+ *      max-records it reads a bounded snapshot and exits (also exiting
+ *      once the topic goes quiet), which is what makes it scriptable —
+ *      see scripts/cc-app-run.sh verify-inband.
  *
  * Reads kafka.bootstrap / schema.registry.url system properties; defaults
  * are wired for the local Minikube setup once `make kafka-pf-up` is up.
@@ -194,7 +197,7 @@ public final class App {
               app send    <topic>     <service>   <payload>
               app hop     <in-topic>  <out-topic> <service>
               app consume <topic>     <service>
-              app sink    <topic>
+              app sink    <topic> [max-records]   bounded read exits on its own; unbounded runs until Ctrl-C
 
             4-terminal demo (after `make kafka-pf-up`), in pipeline order:
               ./gradlew :app:run --args="place 'hello'"    # terminal A — kick the chain off
@@ -468,6 +471,17 @@ public final class App {
         if (args.length < 2) { usage(); System.exit(2); }
         String topic = args[1];
 
+        // Optional record bound. Without it `sink` runs until Ctrl-C, which is
+        // right for a human watching a stream but useless to a script that has
+        // to terminate on its own — scripts/cc-app-run.sh verify-inband reads a
+        // bounded snapshot of two topics and compares them. When a bound is
+        // given, an idle run also stops: IDLE_POLLS empty polls in a row means
+        // the topic is drained (or empty), so the caller gets whatever exists
+        // rather than hanging forever on a quiet topic.
+        final long maxRecords = args.length > 2 ? Long.parseLong(args[2]) : Long.MAX_VALUE;
+        final boolean bounded = maxRecords != Long.MAX_VALUE;
+        final int IDLE_POLLS = 8;   // × 2s poll ≈ 16s of quiet before giving up
+
         Properties p = new Properties();
         p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP);
         p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,   ByteArrayDeserializer.class.getName());
@@ -481,13 +495,27 @@ public final class App {
         applyKafkaSecurity(p);
         applySchemaRegistryAuth(p);
 
-        System.out.printf("→ sinking %s (Ctrl-C to stop)%n", topic);
+        System.out.printf("→ sinking %s (%s)%n", topic,
+            bounded ? "up to " + maxRecords + " record(s), then exit" : "Ctrl-C to stop");
+        long seen = 0;
+        int idle = 0;
         try (KafkaConsumer<byte[], DemoEvent> consumer = new KafkaConsumer<>(p)) {
             consumer.subscribe(List.of(topic));
-            while (true) {
+            while (seen < maxRecords) {
                 ConsumerRecords<byte[], DemoEvent> batch = consumer.poll(Duration.ofSeconds(2));
+                if (batch.isEmpty()) {
+                    if (bounded && ++idle >= IDLE_POLLS) {
+                        System.out.printf("→ %s drained after %d record(s)%n", topic, seen);
+                        return;
+                    }
+                    continue;
+                }
+                idle = 0;
                 for (ConsumerRecord<byte[], DemoEvent> rec : batch) {
                     print(rec);
+                    if (++seen >= maxRecords) {
+                        break;
+                    }
                 }
             }
         }

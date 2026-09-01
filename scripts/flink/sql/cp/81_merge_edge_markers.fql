@@ -1,0 +1,64 @@
+-- =====================================================================
+-- Merge-edge markers — OPTIONAL (see docs/flink-collector.md 3.1).
+--
+-- The other half of 80_merge_collector.fql. That statement emits one
+-- merged record per window; this one emits one edge per record that
+-- contributed to it, so the many-to-one derivation the isotope format
+-- cannot carry in-band is recorded out-of-band instead.
+--
+--   merge_trace_id         the trace the merged record carries
+--   contributing_trace_id  a parent trace that fed it
+--
+-- Join the two on merge_trace_id to recover the full parent set of any
+-- merged record. This is the same architectural pattern
+-- isotope_consume_edge_markers uses for consume edges — a side channel
+-- that records edges the record itself has no room for.
+--
+-- Depends on:
+--   - `isotope` view (05_isotope_view.fql)
+--   - `isotope_merge_edge_markers` sink (08_merge_provenance_sinks.fql)
+--   - ISOTOPE_MERGE_TRACE_ID (registered from the classpath by
+--     IsotopeReportsJob; CREATE FUNCTION on the SQL-Client path)
+--
+-- Call form notes:
+--   - No GROUP BY. The window TVF already stamps every row with its
+--     window bounds, so this is a plain projection over the same window
+--     80_merge_collector.fql aggregates — which is exactly the fan-out
+--     an edge list wants.
+--   - The five ISOTOPE_MERGE_TRACE_ID arguments MUST match the first
+--     five passed to ISOTOPE_MERGE_TRACE in 80_merge_collector.fql,
+--     including the WHERE clause that selects the input rows. If the
+--     two drift, every edge points at a merge_trace_id no record
+--     carries and the join silently returns nothing.
+--   - Why two statements rather than one PTF emitting both row kinds:
+--     splitting a PTF's output by a tag column needs CREATE VIEW over
+--     the PTF, which the cp-flink 2.1.2 Expander round-trip rejects.
+--     See 60_stuck_trace_report.fql for that failure in detail.
+--   - Cost, stated plainly: one record written per record entering the
+--     merge stage. This roughly doubles that stage's write volume, and
+--     that is inherent to an edge list rather than a property of this
+--     implementation.
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope_merge_edge_markers';
+
+INSERT INTO `isotope_merge_edge_markers`
+SELECT
+    ISOTOPE_MERGE_TRACE_ID(
+        `pipeline`,                                             -- pipeline
+        'orders-batch',                                         -- operator
+        UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000,  -- window start, ms
+        UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000,  -- window end, ms
+        `pipeline`                                              -- group key
+    )                                                     AS `merge_trace_id`,
+    UNIX_TIMESTAMP(CAST(`window_start` AS STRING)) * 1000 AS `window_start`,
+    UNIX_TIMESTAMP(CAST(`window_end`   AS STRING)) * 1000 AS `window_end`,
+    'orders-batch'                                        AS `operator`,
+    `pipeline`,
+    `trace_id`                                            AS `contributing_trace_id`,
+    `this_service`                                        AS `contributing_service`,
+    `this_topic`                                          AS `contributing_topic`
+FROM TABLE(
+    TUMBLE(TABLE `isotope`, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
+)
+WHERE `this_topic` = 'orders.placed';

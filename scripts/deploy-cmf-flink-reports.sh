@@ -42,6 +42,20 @@ MINIO_S3_ENDPOINT="${MINIO_S3_ENDPOINT:-http://minio.confluent.svc:9000}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin123}"
 
+# Optional fan-in provenance (docs/flink-collector.md 3.1). Off by default: it
+# adds a merge collector, a merged-event topic and a merge-edge topic that
+# writes one record per record ENTERING the merge, roughly doubling that
+# stage's write volume. On, IsotopeReportsJob applies the extra DDL and adds
+# two more INSERTs to the same StatementSet.
+#   MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up
+# CCAF's equivalent switch is the Terraform variable var.enable_merge_provenance.
+MERGE_PROVENANCE="${MERGE_PROVENANCE:-false}"
+if [ "${MERGE_PROVENANCE}" = "true" ]; then
+    APP_JOB_ARGS='["--merge-provenance"]'
+else
+    APP_JOB_ARGS='[]'
+fi
+
 CMF_API="http://localhost:18080/cmf/api/v1"
 ENV_API="${CMF_API}/environments/${CMF_ENV}"
 
@@ -60,6 +74,17 @@ SINK_TOPICS=(
     # "Topic orders.flink_enriched not present in metadata after 60000 ms".
     orders.flink_enriched
 )
+
+# Merge-provenance topics (docs/flink-collector.md 3.1). Created only when the
+# feature is on, for the same reason the collector sink is pre-created above:
+# OSS Flink's kafka connector declares a table over a topic that must already
+# exist, so a missing one crash-loops the job with "not present in metadata
+# after 60000 ms". Teardown deletes them unconditionally — a `down` run without
+# MERGE_PROVENANCE=true must not strand topics an earlier `up` created.
+MERGE_TOPICS=(orders.flink_batched isotope_merge_edge_markers)
+if [ "${MERGE_PROVENANCE}" = "true" ]; then
+    SINK_TOPICS+=("${MERGE_TOPICS[@]}")
+fi
 
 KAFKA_POD=$(kubectl get pods -n "${NAMESPACE}" --no-headers -o custom-columns=":metadata.name" 2>/dev/null \
     | grep -E '^kafka-[0-9]+$' | head -1)
@@ -145,10 +170,11 @@ if [ "${ACTION}" = "up" ]; then
     VERSION=$(printf '%s' "${UP}" | sed '$d' | python3 -c "import sys,json;print(json.load(sys.stdin).get('status',{}).get('version',1))" 2>/dev/null || echo 1)
     echo "  ✔ artifact '${ARTIFACT_NAME}' version ${VERSION} → cmf://${CMF_ENV}/${ARTIFACT_NAME}?version=${VERSION}"
 
-    echo "→ Deploying FlinkApplication '${APP_NAME}' (image=${POOL_IMAGE}, ${APP_FLINK_VERSION})..."
+    echo "→ Deploying FlinkApplication '${APP_NAME}' (image=${POOL_IMAGE}, ${APP_FLINK_VERSION}, merge-provenance=${MERGE_PROVENANCE})..."
     APP_NAME="${APP_NAME}" POOL_IMAGE="${POOL_IMAGE}" APP_FLINK_VERSION="${APP_FLINK_VERSION}" \
         CMF_ENV_NAME="${CMF_ENV}" APP_ARTIFACT_NAME="${ARTIFACT_NAME}" APP_ARTIFACT_VERSION="${VERSION}" \
         MINIO_S3_ENDPOINT="${MINIO_S3_ENDPOINT}" MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY}" MINIO_SECRET_KEY="${MINIO_SECRET_KEY}" \
+        APP_JOB_ARGS="${APP_JOB_ARGS}" \
         envsubst < "${APP_MANIFEST}" > /tmp/cmf-app.json
     # Recreate for idempotency (spec/jar version may change between runs).
     curl -s -o /dev/null -X DELETE "${ENV_API}/applications/${APP_NAME}"; sleep 3
@@ -175,7 +201,9 @@ else
     curl -s -o /dev/null -w "  delete artifact: HTTP %{http_code}\n" -X DELETE "${ENV_API}/artifacts/${ARTIFACT_NAME}"
     echo "→ Purging leftover CMF statements / compute pools (retired statement-based path)..."
     purge_statements
-    echo "→ Deleting ${#SINK_TOPICS[@]} sink topics..."
-    for t in "${SINK_TOPICS[@]}"; do echo "  ↳ ${t}"; delete_topic "${t}"; done
+    DOWN_TOPICS=("${SINK_TOPICS[@]}")
+    [ "${MERGE_PROVENANCE}" = "true" ] || DOWN_TOPICS+=("${MERGE_TOPICS[@]}")
+    echo "→ Deleting ${#DOWN_TOPICS[@]} sink topics..."
+    for t in "${DOWN_TOPICS[@]}"; do echo "  ↳ ${t}"; delete_topic "${t}"; done
     echo "✔ Reports application torn down."
 fi

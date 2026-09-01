@@ -1,0 +1,100 @@
+-- ==========================================================================
+-- Merge-provenance sinks — OPTIONAL (see docs/flink-collector.md 3.1).
+--
+-- These two tables exist only when the reports application is started with
+-- --merge-provenance (IsotopeReportsJob). Off, nothing here is created and
+-- the deployment is byte-identical to a build without this feature.
+--
+-- The pair implements fan-in provenance without touching the isotope wire
+-- format:
+--
+--   orders.flink_batched        the MERGED business event. Carries a FRESH
+--                               isotope trace, because a windowed aggregate
+--                               has many parents and forwarding one of their
+--                               trace IDs would fabricate provenance rather
+--                               than record it.
+--
+--   isotope_merge_edge_markers  the many-to-one edges, one row per
+--                               contributing record, joining each parent
+--                               trace to the merge trace its record fed.
+--                               Same architectural pattern as
+--                               isotope_consume_edge_markers.
+--
+-- Why the edge topic is typed Avro+SR rather than headers-only like
+-- isotope_consume_edge_markers: those markers are written by a Kafka client
+-- (IsotopeContext.recordConsume), which only has headers to work with. These
+-- are written by Flink, which has a schema — and 3.2 rules out expressing a
+-- contributing-trace list as repeated same-key headers anyway. One row per
+-- edge is also the shape a DAG edge list wants.
+--
+-- Deliberately NOT added to the isotope_raw union in 00_source_table.fql.
+-- orders.flink_enriched is left out for the same reason: the union is typed
+-- MAP<STRING, BYTES> and these collector sinks are MAP<STRING, STRING>, and
+-- keeping them out is what lets this whole feature be optional without the
+-- seven reports changing shape.
+-- ==========================================================================
+
+-- --------------------------------------------------------------------------
+-- orders.flink_batched — the merged business event.
+--
+-- `headers` is declared WITHOUT VIRTUAL, which is what makes it writable, and
+-- typed MAP<STRING, STRING> to match ISOTOPE_MERGE_TRACE's return type. Same
+-- discipline as 07_flink_collector_sink.fql, including the consequence: once
+-- persisted, the column is MANDATORY in every INSERT into this table.
+--
+-- The value is Avro+SR rather than the `raw` BYTES pass-through the 1:1
+-- collector uses, because a merged record has no inbound payload to forward —
+-- the batch summary IS the new payload. Schema auto-registers on first write
+-- under subject `orders.flink_batched-value`.
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `orders.flink_batched` (
+    `pipeline`        STRING,
+    `window_start`    BIGINT,
+    `window_end`      BIGINT,
+    `event_count`     BIGINT,
+    `distinct_traces` BIGINT,
+    `headers`         MAP<STRING, STRING> METADATA FROM 'headers'
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'orders.flink_batched',
+    'properties.bootstrap.servers' = 'kafka:9071',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'             = 'fixed',
+    'scan.startup.mode'            = 'earliest-offset',
+    'properties.group.id'          = 'isotope-report-reader'
+);
+
+-- --------------------------------------------------------------------------
+-- isotope_merge_edge_markers — the merge-edge sideband.
+--
+-- One row per record entering the merge stage. `merge_trace_id` is the trace
+-- the merged record carries; `contributing_trace_id` is the parent that fed
+-- it. Joining this topic to orders.flink_batched on merge_trace_id yields the
+-- full parent set of any merged record.
+--
+-- The volume cost is honest and worth stating: this writes one record per
+-- record ENTERING the merge, so it roughly doubles that stage's write volume.
+-- That is inherent to a DAG edge list, not to this implementation.
+--
+-- `operator` is backticked throughout — it is a reserved word in Flink SQL.
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `isotope_merge_edge_markers` (
+    `merge_trace_id`         STRING,
+    `window_start`           BIGINT,
+    `window_end`             BIGINT,
+    `operator`               STRING,
+    `pipeline`               STRING,
+    `contributing_trace_id`  STRING,
+    `contributing_service`   STRING,
+    `contributing_topic`     STRING
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'isotope_merge_edge_markers',
+    'properties.bootstrap.servers' = 'kafka:9071',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'             = 'fixed',
+    'scan.startup.mode'            = 'earliest-offset',
+    'properties.group.id'          = 'isotope-report-reader'
+);

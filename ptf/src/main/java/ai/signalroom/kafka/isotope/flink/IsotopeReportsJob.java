@@ -31,6 +31,12 @@ import java.util.stream.Collectors;
  * former sql-client path). DDL is applied first, then the seven {@code INSERT INTO}
  * statements execute together as one {@link StatementSet} (one JobGraph, seven sinks).
  *
+ * <p>Optional fan-in provenance: passing {@value #MERGE_PROVENANCE_FLAG} adds a
+ * merge collector and its merge-edge sideband (see {@code docs/flink-collector.md}
+ * section 3.1). Off — the default — no extra DDL is applied and no extra INSERT
+ * joins the StatementSet, so the deployed job is identical to one built without
+ * the feature.
+ *
  * <p>The two PTFs are registered programmatically from their on-classpath classes,
  * so {@code 01_register_functions.fql} (which does {@code CREATE FUNCTION ... USING JAR})
  * is intentionally skipped.
@@ -56,10 +62,36 @@ public final class IsotopeReportsJob {
             "70_latency_percentiles_report.fql", // LATENCY_PERCENTILES
             "75_flink_collector.fql");           // ISOTOPE_APPEND_HOP — collector, not a report
 
+    /** Enables the optional merge-provenance stage. */
+    private static final String MERGE_PROVENANCE_FLAG = "--merge-provenance";
+
+    /**
+     * Merge-provenance DDL, applied only when {@value #MERGE_PROVENANCE_FLAG} is
+     * passed. Kept out of {@link #DDL_FILES} so that off, this job creates
+     * nothing extra — no tables, no topics, no schemas.
+     */
+    private static final List<String> MERGE_PROVENANCE_DDL_FILES = List.of(
+            "08_merge_provenance_sinks.fql");
+
+    /**
+     * The merge-provenance INSERT pair. Both or neither: the edge rows in
+     * {@code 81} are meaningless without the merged records in {@code 80}, and
+     * the merged records are unattributable without the edges.
+     */
+    private static final List<String> MERGE_PROVENANCE_FILES = List.of(
+            "80_merge_collector.fql",
+            "81_merge_edge_markers.fql");
+
     private IsotopeReportsJob() {
     }
 
     public static void main(String[] args) throws Exception {
+        // Opt-in fan-in provenance (docs/flink-collector.md 3.1). Off by default:
+        // it adds a second collector stage and an edge topic that writes one
+        // record per record entering the merge, which is not something every
+        // deployment should pay for. CCAF's equivalent switch is the Terraform
+        // variable var.enable_merge_provenance.
+        final boolean mergeProvenance = List.of(args).contains(MERGE_PROVENANCE_FLAG);
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         // Streaming report jobs aggregate over event-time tumbling windows and
         // write to Kafka sinks — checkpointing must be on.
@@ -76,9 +108,21 @@ public final class IsotopeReportsJob {
         // headers of every record 75_flink_collector.fql forwards. See
         // docs/flink-collector.md.
         tableEnv.createTemporarySystemFunction("ISOTOPE_APPEND_HOP", IsotopeAppendHop.class);
+        // Merge-collector side (fan-in provenance). Registered unconditionally —
+        // registration is inert until a statement calls it, and the CCAF side
+        // registers its functions the same way regardless of the feature flag.
+        tableEnv.createTemporarySystemFunction("ISOTOPE_MERGE_TRACE", IsotopeMergeTrace.class);
+        tableEnv.createTemporarySystemFunction("ISOTOPE_MERGE_TRACE_ID", IsotopeMergeTraceId.class);
+
+        List<String> ddlFiles = new ArrayList<>(DDL_FILES);
+        List<String> insertFiles = new ArrayList<>(REPORT_FILES);
+        if (mergeProvenance) {
+            ddlFiles.addAll(MERGE_PROVENANCE_DDL_FILES);
+            insertFiles.addAll(MERGE_PROVENANCE_FILES);
+        }
 
         // DDL: source tables, views, sinks (each statement applied individually).
-        for (String file : DDL_FILES) {
+        for (String file : ddlFiles) {
             for (String stmt : statements(readResource("sql/" + file))) {
                 tableEnv.executeSql(stmt);
             }
@@ -86,11 +130,12 @@ public final class IsotopeReportsJob {
 
         // Every INSERT runs together as a single job — the seven reports plus
         // the collector (75_flink_collector.fql), which is not a report but
-        // shares the same source scan. CCAF's equivalent is EXECUTE STATEMENT
+        // shares the same source scan, plus the two merge-provenance INSERTs
+        // when that feature is on. CCAF's equivalent is EXECUTE STATEMENT
         // SET; it currently submits these as separate statements instead, so
         // each carries its own compute-pool floor.
         StatementSet reports = tableEnv.createStatementSet();
-        for (String file : REPORT_FILES) {
+        for (String file : insertFiles) {
             List<String> stmts = statements(readResource("sql/" + file));
             // Each report file is a single INSERT after SET/comment stripping.
             reports.addInsertSql(stmts.get(stmts.size() - 1));

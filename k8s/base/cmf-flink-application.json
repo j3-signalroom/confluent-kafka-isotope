@@ -21,6 +21,7 @@
     "taskManager": { "resource": { "memory": "2048m", "cpu": 0.5 } },
     "job": {
       "jarURI": "cmf://${CMF_ENV_NAME}/${APP_ARTIFACT_NAME}?version=${APP_ARTIFACT_VERSION}",
+      "args": ${APP_JOB_ARGS},
       "state": "running",
       "parallelism": 1,
       "upgradeMode": "stateless"

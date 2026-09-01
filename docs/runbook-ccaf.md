@@ -10,6 +10,7 @@ traffic → observe → teardown. Unlike the [Confluent Platform + Flink on Mini
 <!-- toc -->
 - [**1.0 Prerequisites**](#10-prerequisites)
 - [**2.0 Provision + deploy the reports**](#20-provision--deploy-the-reports)
+  + [**2.1 Verify in-band propagation**](#21-verify-in-band-propagation)
 - [**3.0 What gets created**](#30-what-gets-created)
 - [**4.0 Useful outputs**](#40-useful-outputs)
 - [**5.0 Drive traffic**](#50-drive-traffic-required-to-see-report-rows)
@@ -33,7 +34,18 @@ This runs [scripts/deploy-cc-flink-reports.sh](../scripts/deploy-cc-flink-report
 
 - **First run takes ~6–8 minutes** (Kafka cluster provisioning dominates).
 - **Re-applies are idempotent** — `CREATE … IF NOT EXISTS` plus `lifecycle { ignore_changes = [compute_pool] }` on every statement.
+- Optional fan-in provenance: `make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true …` (script flag `--enable-merge-provenance=true`, default `false`). See [docs/flink-collector.md §2.4](./flink-collector.md#24-fan-in-provenance-optional).
 - Optional retention override: the script accepts `--day-count=<DAYS>` (default `30`); both `make` targets require `CONFLUENT_API_KEY` / `CONFLUENT_API_SECRET` or they fail fast with a clear message.
+
+### **2.1 Verify in-band propagation**
+```bash
+scripts/cc-app-run.sh place hello        # one traced record → orders.placed
+scripts/cc-app-run.sh verify-inband      # asserts the Flink collector appended a hop
+```
+
+`verify-inband` reads a bounded snapshot of `orders.placed` and `orders.flink_enriched` and asserts that every trace on both topics kept its identity and gained **exactly one** hop, written by `flink-enrich`. Same trace ID with an incremented hop count is the proof that `ISOTOPE_APPEND_HOP` rehydrated the inbound isotope from the record's own headers rather than minting a fresh trace — the one propagation model that survives a Flink shuffle. It exits non-zero on failure, so it is usable as a CI gate. Pass a larger sample (`verify-inband 200`) if the two topics have drifted far apart.
+
+The collector is a 1:1 projection with no window, so its output appears within seconds — the ~90s watermark wait applies only to the `TUMBLE` reports.
 
 ## **3.0 What gets created**
 ![terraform](./terraform.png "Terraform resource graph")
@@ -46,8 +58,9 @@ This runs [scripts/deploy-cc-flink-reports.sh](../scripts/deploy-cc-flink-report
 | `confluent_service_account` + 6 role bindings | `isotope-flink-sql-runner` | FlinkDeveloper (org) + ResourceOwner on topic/transactional-id/group/SR-subject `*` + Assigner |
 | `confluent_flink_compute_pool` | `isotope-flink-statement-runner` | 10 CFU; headroom for the 8-INSERT statement set + ad-hoc SELECTs |
 | `confluent_flink_artifact` | `isotope-flink-udf` | Uploads `ptf/build/libs/isotope-flink-udf.jar` |
-| `confluent_flink_statement` × 24 | (see file) | 6 ALTER TABLE + 3 VIEW + 8 sink CREATE TABLE + 3 CREATE FUNCTION (2 PTFs + 1 UDF) + 1 EXECUTE STATEMENT SET holding all 8 INSERT INTOs (21 long-lived) + 3 transient DROP FUNCTION |
+| `confluent_flink_statement` × 28 | (see file) | 6 ALTER TABLE + 3 VIEW + 8 sink CREATE TABLE + 5 CREATE FUNCTION (2 PTFs + 3 UDFs) + 1 EXECUTE STATEMENT SET holding all 8 INSERT INTOs (23 long-lived) + 5 transient DROP FUNCTION. The 2 merge UDFs are registered even when `var.enable_merge_provenance` is `false` — registration is inert until a statement calls it. |
 | `confluent_flink_statement` × 3 (optional) | (see [terraform/setup-ccaf-ai.tf](../terraform/setup-ccaf-ai.tf)) | Optional AI trace-RCA report — `CREATE MODEL trace_rca` + 1 Protobuf sink + 1 `INSERT … ML_PREDICT`. **Gated on `var.enable_trace_rca` (default `false`)**, so a normal apply skips them entirely. Set `rca_model_api_key` (and `rca_model_provider`/`_version`/`_endpoint` for a non-OpenAI provider) to enable. See root README §3.3. |
+| `confluent_flink_statement` × 5 (optional) | (see [terraform/setup-ccaf-merge-provenance.tf](../terraform/setup-ccaf-merge-provenance.tf)) | Optional fan-in (merge) provenance — 2 sink `CREATE TABLE` + 2 header `ALTER TABLE` + 1 statement set holding the merge INSERT and its merge-edge INSERT. **Gated on `var.enable_merge_provenance` (default `false`)**. The 4 `CREATE`/`DROP FUNCTION` statements registering `ISOTOPE_MERGE_TRACE` / `ISOTOPE_MERGE_TRACE_ID` are *not* gated — registration is inert until a statement calls it. See [docs/flink-collector.md §2.4](./flink-collector.md#24-fan-in-provenance-optional). |
 
 Two rotating service-account API key pairs (one Kafka, one Schema Registry) are managed by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](../terraform/setup-confluent-kafka.tf).
 

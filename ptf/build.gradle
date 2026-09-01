@@ -22,6 +22,13 @@ dependencies {
     // T-Digest is what we actually need bundled — it's not part of Flink.
     implementation libs.t.digest
 
+    // Jackson, declared explicitly rather than leaned on transitively: MergeTrace
+    // parses and re-emits the isotope JSON to substitute a derived merge trace ID
+    // (see its class javadoc). kafka-isotope-core already pulls the same version
+    // in for its own serialization, so this adds no weight to the shaded jar —
+    // it just stops the compile from depending on another module's private graph.
+    implementation libs.jackson.databind
+
     // The isotope wire format, shared with the services in app/ so the Flink
     // collector (IsotopeAppendHop) and IsotopeProducerInterceptor cannot drift.
     implementation('ai.signalroom:kafka-isotope-core:0.18.0') {

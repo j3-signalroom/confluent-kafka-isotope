@@ -82,10 +82,23 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
                                         WITHOUT VIRTUAL, which is what makes it writable
   75_flink_collector.fql                INSERT INTO: Flink stamps its own hop via ISOTOPE_APPEND_HOP
                                         (collector, not a report — 1:1, no window)
+  08_merge_provenance_sinks.fql         OPTIONAL — CREATE TABLE orders.flink_batched (writable headers)
+                                        + isotope_merge_edge_markers (typed edge list)
+  80_merge_collector.fql                OPTIONAL — INSERT INTO: windowed merge, fresh trace via
+                                        ISOTOPE_MERGE_TRACE (fan-in, so it cannot continue a trace)
+  81_merge_edge_markers.fql             OPTIONAL — INSERT INTO: one merge edge per contributing record,
+                                        labelled with the same derived ID via ISOTOPE_MERGE_TRACE_ID
   99_teardown.fql                       DROP TABLE/VIEW/FUNCTION (companion to flink-reports-down)
 ```
 
-CCAF runs the same seven reports plus the collector, but the SQL lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — 24 statements: ALTER (×4) + raw view + typed produce view + typed consume view + 7 sinks + `STUCK_TRACE_PTF`, `LATENCY_PERCENTILES` and `ISOTOPE_APPEND_HOP` drop+register (×2 each = 6) + the collector sink and its two header ALTERs + **1 statement set holding all 8 INSERTs**. The JAR is uploaded as a `confluent_flink_artifact` and referenced via `USING JAR 'confluent-artifact://<id>'`.
+The three `OPTIONAL` files are applied only when the reports application is started with `--merge-provenance`
+(`MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up`); CCAF's equivalent is
+`terraform apply -var enable_merge_provenance=true`. Off, none of them is parsed and no extra topic is created.
+See [docs/flink-collector.md §2.4](../../docs/flink-collector.md#24-fan-in-provenance-optional).
+```
+```
+
+CCAF runs the same seven reports plus the collector, but the SQL lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — 28 statements: ALTER (×4) + raw view + typed produce view + typed consume view + 7 sinks + `STUCK_TRACE_PTF`, `LATENCY_PERCENTILES`, `ISOTOPE_APPEND_HOP`, `ISOTOPE_MERGE_TRACE` and `ISOTOPE_MERGE_TRACE_ID` drop+register (×2 each = 10) + the collector sink and its two header ALTERs + **1 statement set holding all 8 INSERTs**. The two merge functions register regardless of `var.enable_merge_provenance`; the statements that *call* them live in [terraform/setup-ccaf-merge-provenance.tf](../../terraform/setup-ccaf-merge-provenance.tf) and are gated. The JAR is uploaded as a `confluent_flink_artifact` and referenced via `USING JAR 'confluent-artifact://<id>'`.
 
 **Why one statement rather than eight.** CCAF's `EXECUTE STATEMENT SET BEGIN … END` runs multiple INSERTs as a single optimized statement, and Confluent documents it for exactly this case — INSERTs that read the same table or share intermediate results, which all eight do. It mirrors what CP already does through `IsotopeReportsJob`'s `StatementSet`, and it matters for cost: every separate CCAF statement carries its own 1-CFU compute-pool floor, so eight statements meant eight floors and a saturated pool. The tradeoff is one failure domain — a fault in any INSERT stops them all — which is the same property CP's single job has.
 
@@ -93,13 +106,14 @@ CCAF runs the same seven reports plus the collector, but the SQL lives inline as
 Window columns ride as `BIGINT` epoch millis on the wire, not `TIMESTAMP_LTZ`. Flink 2.1.2's `avro-confluent` schema-derivation path raises `UnsupportedOperationException: Unsupported to derive Schema for type: TIMESTAMP_LTZ(3)` for that type. We cast in the INSERT (`UNIX_TIMESTAMP(CAST(window_start AS STRING)) * 1000`) so the on-wire schema is plain Avro `long`. Consumers rehydrate via `TO_TIMESTAMP_LTZ(window_start, 3)`. The CCAF Protobuf sinks don't hit this — `proto-registry` handles `TIMESTAMP_LTZ` directly.
 
 ## **5.0 PTF JAR**
-The single shadow JAR `ptf/build/libs/isotope-flink-udf.jar` (produced by `./gradlew :ptf:shadowJar`) carries all three JAR-backed functions under the `ai.signalroom.kafka.isotope.flink` package:
+The single shadow JAR `ptf/build/libs/isotope-flink-udf.jar` (produced by `./gradlew :ptf:shadowJar`) carries all five JAR-backed functions under the `ai.signalroom.kafka.isotope.flink` package:
 
 - `LatencyPercentilesPTF` (registered as `LATENCY_PERCENTILES`) — T-Digest p50/p95/p99 via per-window state + event-time timers.
 - `StuckTracePTF` — per-trace state + event-time timer that emits alerts for traces idle ≥60s.
 - `IsotopeAppendHop` (registered as `ISOTOPE_APPEND_HOP`) — a `ScalarFunction`, not a PTF. The two above are *interpreters*, reading headers an interceptor already wrote; this one is a *collector*, appending a Flink hop and rewriting the headers on the way out.
+- `IsotopeMergeTrace` / `IsotopeMergeTraceId` (registered as `ISOTOPE_MERGE_TRACE` / `ISOTOPE_MERGE_TRACE_ID`) — the optional fan-in collector. `ISOTOPE_APPEND_HOP` continues an inbound trace, which is only truthful 1:1; these mint a **fresh** trace for a merged record and label its merge edges with the same deterministically derived ID. Registered on both runtimes regardless of the feature flag — registration is inert until a statement calls it.
 
-All three register on both runtimes; only the `CREATE FUNCTION … USING JAR …` clause differs (`file://` path on CP, `confluent-artifact://` reference on CCAF).
+All five register on both runtimes; only the `CREATE FUNCTION … USING JAR …` clause differs (`file://` path on CP, `confluent-artifact://` reference on CCAF).
 
 **One packaging trap.** `Isotope` declares `fromHeaders(org.apache.kafka.common.header.Headers)`. `IsotopeAppendHop` never calls it, but the JVM resolves that descriptor when linking the class, so `Headers` must be present at *runtime*. `compileOnly` is not enough: CCAF's function classloader does not expose `kafka-clients`, and the statement fails on its first row — long after `CREATE FUNCTION` reported success — with `UDF invocation error: … org.apache.kafka.common.header.Headers`. The JAR therefore bundles `kafka-clients` (`transitive = false`), relocates `org.apache.kafka`, and ships only `common/header`: 2 classes rather than 4,152. `minimize()` cannot substitute — a type named only in a method descriptor is invisible to reachability analysis and gets stripped.
 
@@ -119,7 +133,7 @@ The 7 reports run as a single Flink 2.1 CMF **Application** (`isotope-reports`, 
 ### **6.2 CCAF (Confluent Cloud, Terraform-driven)**
 ```bash
 make cc-flink-reports-up  CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
-                          # terraform apply: env + cluster + topics + compute pool + artifact + 24 statements
+                          # terraform apply: env + cluster + topics + compute pool + artifact + 28 statements
                           # also regenerates terraform/terraform.png via `terraform graph | dot`
 ```
 or
