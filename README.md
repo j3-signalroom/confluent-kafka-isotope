@@ -570,7 +570,7 @@ make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
 
 Disabled, neither runtime creates a table, a topic, or a statement for it, and `isotope_raw`, the typed views, and all seven reports are untouched either way.
 
-> **Full details** — why the merge trace ID must be *derived* from the window rather than minted (two statements have to agree on it independently), why it is two INSERTs rather than one PTF, and the two costs worth knowing about — are in **[docs/flink-collector.md §2.4](docs/flink-collector.md#24-fan-in-provenance-optional)**.
+> **Full details** — why the merge trace ID must be *derived* from the window rather than minted (two statements have to agree on it independently), why it is two INSERTs rather than one PTF, and the two costs worth knowing about — are in **[docs/flink-collector.md §2.4](docs/flink-collector.md#24-optional-fan-in-provenance)**.
 
 ## **Resources**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)
