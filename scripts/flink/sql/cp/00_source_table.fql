@@ -2,7 +2,7 @@
 -- Source tables — Confluent Platform Flink (CMF on Minikube)
 --
 -- Apply via the Flink SQL Client against the CP Flink session cluster:
---   make flink-up                              # bring up the cluster
+--   make cp-flink-up                              # bring up the cluster
 --   kubectl exec -n confluent -it <jobmanager-pod> -- \
 --       sql-client.sh -f /path/to/00_source_table.sql
 --

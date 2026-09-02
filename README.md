@@ -266,7 +266,7 @@ flowchart TB
 
     subgraph Infra["Infrastructure"]
         direction LR
-        K8S["k8s/base/ + CFK Operator + CMF 2.4 + MinIO<br/>Makefile: cp-up · flink-up · flink-reports-up"]
+        K8S["k8s/base/ + CFK Operator + CMF 2.4 + MinIO<br/>Makefile: cp-up · cp-flink-up · cp-flink-reports-up"]
         TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 28 statements (+3 optional AI, +5 optional merge)<br/>Makefile: cc-flink-reports-up"]
         MON["k8s/monitoring/<br/>Prometheus + Grafana pods; scrape host<br/>stages via host.minikube.internal<br/>Makefile: metrics-up"]
     end
@@ -319,7 +319,7 @@ ptf/                                    Flink reports application + PTF shadow J
     StuckTracePTF.java                  per-trace state + event-time timer
     TDigests.java                       shared T-Digest (de)serialization
   src/test/java/.../                    TDigestsTest, IsotopeAppendHopTest
-k8s/base/                               CFK / CMF manifests (applied by `make cp-up` / `flink-up`)
+k8s/base/                               CFK / CMF manifests (applied by `make cp-up` / `cp-flink-up`)
   confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
   minio.yaml                            in-cluster S3-compatible store backing CMF's
                                         cmf:// artifact (JAR) storage
@@ -410,7 +410,7 @@ docs/                                   extracted long-form docs (linked from th
                                         records the edge (§intro)
   visualize-in-band-propagation.png     in-band propagation — the isotope rides inside the
                                         record so it survives a shuffle (docs/flink-collector.md)
-Makefile                                cp-up / flink-up / kafka-pf-up / flink-reports-up /
+Makefile                                cp-up / cp-flink-up / kafka-pf-up / flink-reports-up /
                                         cc-flink-reports-up / cc-flink-reports-down /
                                         metrics-up / metrics-down / metrics-delete / ...
 ```
@@ -501,7 +501,7 @@ To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with ap
 
 Seven reports — five pure Flink SQL plus two JAR-backed PTFs — and the collector INSERT run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, eight sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. One StatementSet means one failure domain: a fault in any INSERT stops them all, so a missing sink topic takes the reports down with it (which is why `deploy-cmf-flink-reports.sh` pre-creates every sink — unlike CCAF, OSS Flink's Kafka connector declares a table over a topic that must already exist rather than creating it). No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-Minikube one.
 
-**The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make flink-up` then `make flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
+**The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make cp-flink-up` then `make cp-flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
 
 Report sink topics ride **Avro+SR** (`avro-confluent`, auto-registered on first write) so Control Center renders them natively — a deliberate *format-by-domain* split: app events are **Protobuf+SR** (`DemoEvent`), Flink aggregates are **Avro+SR** (cp-flink ships no SR-integrated Protobuf format), and the consume-edge marker topic `isotope_consume_edge_markers` is **null-value / headers-only**. Not a defect — a clean split by domain.
 
@@ -562,7 +562,7 @@ This optional path records the fan-in case honestly, without changing the isotop
 Both runtimes use the same switch, off by default:
 
 ```bash
-make flink-reports-up ENABLE_MERGE_PROVENANCE=true                    # CP · Minikube
+make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true
 
 make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
     CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET

@@ -130,7 +130,7 @@ Turning it on:
 
 ```bash
 # CP — Minikube
-make flink-reports-up ENABLE_MERGE_PROVENANCE=true
+make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true
 
 # CCAF
 make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \

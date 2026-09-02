@@ -90,7 +90,7 @@ sourceSets.main.resources.srcDir(generatedSqlDir)
 tasks.named('processResources') { dependsOn 'copyReportSql' }
 
 // The shadow jar is what gets uploaded to the Flink session cluster
-// (via init container or `make flink-reports-up`). It bundles t-digest
+// (via init container or `make cp-flink-reports-up`). It bundles t-digest
 // and the LatencyPercentilesPTF + StuckTracePTF + TDigests classes;
 // it excludes the (provided-by-Flink) flink-table-* dependencies.
 shadowJar {
