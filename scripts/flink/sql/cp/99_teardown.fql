@@ -3,7 +3,7 @@
 -- functions. Safe to run repeatedly; uses IF EXISTS.
 --
 -- Reference teardown DDL (mirrors the CCAF drop set). The CP reports now run as a
--- Flink 2.1 CMF Application, so `make flink-reports-down` tears them down by
+-- Flink 2.1 CMF Application, so `make cp-flink-reports-down` tears them down by
 -- deleting the CMF Application + cmf:// artifact + Kafka sink topics — not by
 -- applying this file. Kept as the portable drop-SQL companion to sql/cp/.
 -- ================================================================================

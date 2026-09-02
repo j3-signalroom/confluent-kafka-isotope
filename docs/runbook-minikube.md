@@ -41,7 +41,7 @@ make cp-watch            # watch pods come up (Ctrl+C to exit); or: make cp-stat
 
 ## **3.0 Flink**
 ```bash
-make flink-up            # cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → app image
+make cp-flink-up            # cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → app image
 make cmf-status          # (~5 min the first time)
 ```
 
@@ -49,15 +49,15 @@ This installs cert-manager, the Confluent Flink Kubernetes Operator, **MinIO** (
 
 > **The reports run as a CMF _Application_, not SQL statements.** CMF's SQL-statement runtime (`io.confluent.flink.FlinkCompiledPlanExecutor`) ships only in the `cp-flink-sql` image, which exists only at **Flink 1.19** — and two reports are `ProcessTableFunction`s, a **Flink 2.x** feature. So all seven reports deploy as a single Flink 2.1 CMF **Application** (entry point `IsotopeReportsJob`), which runs the same `.fql` and surfaces in CMF / Control Center as a managed application. No raw session cluster is created — if you want one for ad-hoc SQL, deploy it separately with `make flink-deploy` (see [§7.0 Observe](#70-observe)).
 
-> **CMF license.** The `cp-cmf` image ships with a date-locked trial license. Once it expires, the CMF pod `CrashLoopBackOff`s on startup (`LicenseInitiator` throws) and `make flink-up` fails at the CMF readiness wait. To run past expiry, supply a Confluent license via a secret and point `CMF_LICENSE_SECRET` at it:
+> **CMF license.** The `cp-cmf` image ships with a date-locked trial license. Once it expires, the CMF pod `CrashLoopBackOff`s on startup (`LicenseInitiator` throws) and `make cp-flink-up` fails at the CMF readiness wait. To run past expiry, supply a Confluent license via a secret and point `CMF_LICENSE_SECRET` at it:
 >
 > ```bash
 > kubectl create secret generic confluent-license-for-cmf -n confluent \
 >   --from-file=license.txt=/path/to/license.txt   # key MUST be license.txt
-> make flink-up CMF_LICENSE_SECRET=confluent-license-for-cmf
+> make cp-flink-up CMF_LICENSE_SECRET=confluent-license-for-cmf
 > ```
 >
-> Export `CMF_LICENSE_SECRET` in your shell to make plain `make flink-up` pick it up.
+> Export `CMF_LICENSE_SECRET` in your shell to make plain `make cp-flink-up` pick it up.
 
 ## **4.0 Port-forward Kafka**
 ```bash
@@ -68,17 +68,17 @@ Prereq for everything the host-run gradle app does — `App.java`'s defaults alr
 
 ## **5.0 Deploy the 7 Flink reports (as a CMF Application)**
 ```bash
-make flink-reports-up    # builds the app shadow JAR (:ptf:shadowJar) → pre-creates
-                         # 4 source + 7 sink topics → uploads the JAR as a cmf://
-                         # artifact (MinIO) → deploys the FlinkApplication → waits RUNNING
+make cp-flink-reports-up    # builds the app shadow JAR (:ptf:shadowJar) → pre-creates
+                            # 4 source + 7 sink topics → uploads the JAR as a cmf://
+                            # artifact (MinIO) → deploys the FlinkApplication → waits RUNNING
 ```
 
-All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`): five pure Flink SQL plus two JAR-backed `ProcessTableFunction`s (`LatencyPercentilesPTF`, `StuckTracePTF`), executed together as a single `StatementSet` by `IsotopeReportsJob`. Sink topics use Apache Flink's `avro-confluent` format — SR-framed Avro, auto-registered on first write — so Control Center renders the rows natively. The application appears in CMF's applications API and Control Center's Flink tab. Drop everything (application + artifact + sink topics) with `make flink-reports-down`.
+All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`): five pure Flink SQL plus two JAR-backed `ProcessTableFunction`s (`LatencyPercentilesPTF`, `StuckTracePTF`), executed together as a single `StatementSet` by `IsotopeReportsJob`. Sink topics use Apache Flink's `avro-confluent` format — SR-framed Avro, auto-registered on first write — so Control Center renders the rows natively. The application appears in CMF's applications API and Control Center's Flink tab. Drop everything (application + artifact + sink topics) with `make cp-flink-reports-down`.
 
 **Optional — fan-in provenance.** Off by default. To also run the merge collector and its merge-edge sideband:
 
 ```bash
-make flink-reports-up ENABLE_MERGE_PROVENANCE=true
+make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true
 ```
 
 That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more INSERTs to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing record, so it roughly doubles the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-fan-in-provenance-optional). Teardown removes those topics either way.
@@ -112,7 +112,7 @@ make metrics-up          # optional: Prometheus + Grafana for the stateless mete
 The metrics showcase has its own runbook — [k8s/monitoring/README.md](../k8s/monitoring/README.md) (and the meter/PromQL reference in [docs/metrics.md](metrics.md)).
 Stop the background port-forwards with `make c3-stop` / `make flink-ui-stop` / `make metrics-down`.
 
-**Ad-hoc Flink SQL — needs a session cluster (optional).** The reports run as a CMF _Application_ ([§5.0](#50-deploy-the-7-flink-reports-as-a-cmf-application)): one compiled job under `execution.target=kubernetes-application`, which **cannot accept ad-hoc SQL**. Interactive querying needs a separate **session cluster**, and neither `flink-up` nor `flink-reports-up` creates one. Deploy it first:
+**Ad-hoc Flink SQL — needs a session cluster (optional).** The reports run as a CMF _Application_ ([§5.0](#50-deploy-the-7-flink-reports-as-a-cmf-application)): one compiled job under `execution.target=kubernetes-application`, which **cannot accept ad-hoc SQL**. Interactive querying needs a separate **session cluster**, and neither `cp-flink-up` nor `cp-flink-reports-up` creates one. Deploy it first:
 
 ```bash
 make flink-deploy        # one-time: deploy the 'flink-basic' session cluster (~40s)
@@ -134,13 +134,13 @@ Skip `flink-deploy` and `make flink-sql` stops with a message telling you to run
 Pick the depth:
 
 ```bash
-make flink-reports-down  # drop reports / views / functions only
-make flink-delete        # drop just the 'flink-basic' ad-hoc SQL session cluster
-make metrics-delete      # remove the Prometheus/Grafana showcase (pods + namespace)
-make flink-down          # Flink cluster + CMF + operator + cert-manager (includes flink-delete)
-make cp-down             # CP + operator (keeps Minikube running)
-make confluent-teardown  # everything + stop Minikube
-make nuke                # confluent-teardown + minikube-delete + uninstall-prereqs (factory reset)
+make cp-flink-reports-down  # drop reports / views / functions only
+make flink-delete           # drop just the 'flink-basic' ad-hoc SQL session cluster
+make metrics-delete         # remove the Prometheus/Grafana showcase (pods + namespace)
+make cp-flink-down          # Flink cluster + CMF + operator + cert-manager (includes flink-delete)
+make cp-down                # CP + operator (keeps Minikube running)
+make confluent-teardown     # everything + stop Minikube
+make nuke                   # confluent-teardown + minikube-delete + uninstall-prereqs (factory reset)
 ```
 
 ## **9.0 Minimal path (no Flink)**
@@ -162,4 +162,4 @@ Flink ([§3.0 Flink](#30-flink)) and the reports ([§5.0 Deploy the 7 Flink repo
 - **App can't reach Kafka.** `make kafka-pf-up` isn't running, or the forward died — re-run it and confirm `localhost:30092` / `localhost:8081` are live.
 - **`make flink-sql` says no session cluster / `SHOW TABLES;` returns an empty set.** Ad-hoc SQL needs the `flink-basic` session cluster — run `make flink-deploy` first, see [§7.0 Observe](#70-observe). Confirm with `kubectl get flinkdeployment -n confluent`: `isotope-reports` alone means only the reports Application is up. Note that the report tables of the running Application are never visible to the SQL Client regardless — the catalogs are separate.
 - **Control Center's Flink tab is blank.** CMF proxy connectivity — `make cmf-proxy-inject` (and `make cmf-proxy-logs` to debug).
-- **`make flink-up` times out waiting for the CMF pod / CMF `CrashLoopBackOff`.** Check `kubectl logs -n confluent -l app.kubernetes.io/name=confluent-manager-for-apache-flink`. If you see `Trial license ... expired` / `LicenseInitiator ... Constructor threw exception`, the image's embedded trial license has expired — supply your own via `CMF_LICENSE_SECRET` — see the CMF license note in [§3.0 Flink](#30-flink). Wiping the CMF `PersistentVolumeClaim` does **not** reset it; the expiry is baked into the image.
+- **`make cp-flink-up` times out waiting for the CMF pod / CMF `CrashLoopBackOff`.** Check `kubectl logs -n confluent -l app.kubernetes.io/name=confluent-manager-for-apache-flink`. If you see `Trial license ... expired` / `LicenseInitiator ... Constructor threw exception`, the image's embedded trial license has expired — supply your own via `CMF_LICENSE_SECRET` — see the CMF license note in [§3.0 Flink](#30-flink). Wiping the CMF `PersistentVolumeClaim` does **not** reset it; the expiry is baked into the image.

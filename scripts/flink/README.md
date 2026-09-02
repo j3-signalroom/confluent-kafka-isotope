@@ -88,7 +88,7 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
                                         ISOTOPE_MERGE_TRACE (fan-in, so it cannot continue a trace)
   81_merge_edge_markers.fql             OPTIONAL — INSERT INTO: one merge edge per contributing record,
                                         labelled with the same derived ID via ISOTOPE_MERGE_TRACE_ID
-  99_teardown.fql                       DROP TABLE/VIEW/FUNCTION (companion to flink-reports-down)
+  99_teardown.fql                       DROP TABLE/VIEW/FUNCTION (companion to cp-flink-reports-down)
 ```
 
 The three `OPTIONAL` files are applied only when the reports application is started with `--merge-provenance`
@@ -121,11 +121,11 @@ All five register on both runtimes; only the `CREATE FUNCTION … USING JAR …`
 
 ### **6.1 CP Flink (Minikube)**
 ```bash
-make flink-up           # cert-manager → CFK Flink Operator → MinIO → CMF 2.4 → env → app image
-make kafka-pf-up        # localhost:30092 → Kafka, localhost:8081 → SR
-make flink-reports-up   # build app JAR → upload as cmf:// artifact → deploy the CMF Application
-make flink-reports-down # delete the CMF Application + artifact + sink topics
-make flink-down         # tear down the application, CMF, MinIO, operator, cert-manager
+make cp-flink-up               # cert-manager → CFK Flink Operator → MinIO → CMF 2.4 → env → app image
+make kafka-pf-up            # localhost:30092 → Kafka, localhost:8081 → SR
+make cp-flink-reports-up    # build app JAR → upload as cmf:// artifact → deploy the CMF Application
+make cp-flink-reports-down  # delete the CMF Application + artifact + sink topics
+make cp-flink-down             # tear down the application, CMF, MinIO, operator, cert-manager
 ```
 
 The 7 reports run as a single Flink 2.1 CMF **Application** (`isotope-reports`, entry point `IsotopeReportsJob`) — visible in CMF and Control Center's Flink tab.

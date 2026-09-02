@@ -98,7 +98,7 @@ FLINK_SQL_DOCKERFILE ?= k8s/base/flink-sql-isotope.Dockerfile
 # Optional fan-in (merge) provenance — see docs/flink-collector.md 2.4. Off by
 # default on both runtimes; on, it adds a merge collector plus a merge-edge
 # sideband that writes one record per record entering the merge.
-#   make flink-reports-up    ENABLE_MERGE_PROVENANCE=true      (CP)
+#   make cp-flink-reports-up    ENABLE_MERGE_PROVENANCE=true      (CP)
 #   make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true ...  (CCAF)
 # Falls back to MERGE_PROVENANCE, which is the env var the CP deploy script
 # reads directly, so either spelling works through make.
@@ -670,8 +670,8 @@ reports-jar: ## Build the reports application shadow JAR (IsotopeReportsJob + 2 
 	@echo "→ Building reports application JAR ($(APP_JAR))..."
 	./gradlew :ptf:shadowJar -q
 
-.PHONY: flink-reports-up
-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication)
+.PHONY: cp-flink-reports-up
+cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication)
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
 		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' APP_MANIFEST='$(APP_MANIFEST)' APP_JAR='$(APP_JAR)' \
 		POOL_IMAGE='$(POOL_IMAGE)' APP_FLINK_VERSION='$(APP_FLINK_VERSION)' \
@@ -679,8 +679,8 @@ flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Applica
 		MERGE_PROVENANCE='$(ENABLE_MERGE_PROVENANCE)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh up
 
-.PHONY: flink-reports-down
-flink-reports-down: ## Tear down the reports CMF Application + artifact + sink topics (safe to run repeatedly)
+.PHONY: cp-flink-reports-down
+cp-flink-reports-down: ## Tear down the reports CMF Application + artifact + sink topics (safe to run repeatedly)
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
 		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh down
@@ -747,7 +747,7 @@ flink-sql: ## Open an interactive Flink SQL Client on the '$(FLINK_CLUSTER_NAME)
 	if [ -z "$$JM_POD" ]; then \
 		echo "✘ No '$(FLINK_CLUSTER_NAME)' session cluster JobManager found in namespace '$(NAMESPACE)'."; \
 		echo "  Ad-hoc SQL runs on the session cluster — run 'make flink-deploy' first."; \
-		echo "  ('make flink-reports-up' deploys the reports as an Application cluster,"; \
+		echo "  ('make cp-flink-reports-up' deploys the reports as an Application cluster,"; \
 		echo "   which runs one compiled job and cannot accept ad-hoc SQL.)"; \
 		exit 1; \
 	fi; \
@@ -934,11 +934,11 @@ cmf-proxy-remove: ## Remove the cmf-proxy sidecar + liveness patch, and resume C
 # Composite workflows
 # ------------------------------------------------------------------------------
 .PHONY: cp-up
-cp-up: check-prereqs minikube-start cp-core-up ## Full stack: Minikube → cp-core-up (run 'make flink-up' separately for Flink)
+cp-up: check-prereqs minikube-start cp-core-up ## Full stack: Minikube → cp-core-up (run 'make cp-flink-up' separately for Flink)
 	@echo ""
 	@echo "✔ Confluent Platform is deploying."
 	@echo "  Run 'make cp-watch' to monitor pod startup."
-	@echo "  Run 'make flink-up' to also deploy Apache Flink + CMF."
+	@echo "  Run 'make cp-flink-up' to also deploy Apache Flink + CMF."
 
 .PHONY: cp-core-up
 cp-core-up: operator-install cp-deploy ## Phases 3-5: install CFK Operator → deploy CP → access Control Center
@@ -947,12 +947,12 @@ cp-core-up: operator-install cp-deploy ## Phases 3-5: install CFK Operator → d
 	@echo "  Run 'make cp-watch' to monitor pod startup."
 	@echo "  Once all pods are Running, run 'make c3-open' to access Control Center."
 
-.PHONY: flink-up
-flink-up: flink-cert-manager flink-operator-install minio-up cmf-install cmf-env-create flink-rbac flink-image-build ## cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → build app image (reports deploy via 'make flink-reports-up')
+.PHONY: cp-flink-up
+cp-flink-up: flink-cert-manager flink-operator-install minio-up cmf-install cmf-env-create flink-rbac flink-image-build ## cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → build app image (reports deploy via 'make cp-flink-reports-up')
 	@echo ""
 	@echo "✔ Flink + CMF 2.4 are deploying (reports run as a CMF Application)."
 	@echo "  The reports themselves deploy separately:"
-	@echo "    make kafka-pf-up && make flink-reports-up"
+	@echo "    make kafka-pf-up && make cp-flink-reports-up"
 	@echo "  Run 'make cmf-status' to verify CMF and the Flink environment."
 	@echo "  Run 'make cmf-status' to verify CMF and Flink environments."
 	@echo "  Once running, open the Flink UI with 'make flink-ui'."
@@ -961,10 +961,10 @@ flink-up: flink-cert-manager flink-operator-install minio-up cmf-install cmf-env
 cp-down: cp-delete operator-uninstall ## Tear down CP and Operator (keeps Minikube running)
 	@echo "✔ Confluent Platform and Operator removed."
 
-.PHONY: flink-down
-flink-down: ## Tear down the reports application, CMF, MinIO, operator, and cert-manager
-	-@$(MAKE) flink-reports-down    # delete the CMF Application + artifact while CMF is still up
-	-@$(MAKE) flink-delete          # remove any leftover raw FlinkDeployment (legacy)
+.PHONY: cp-flink-down
+cp-flink-down: ## Tear down the reports application, CMF, MinIO, operator, and cert-manager
+	-@$(MAKE) cp-flink-reports-down    	# delete the CMF Application + artifact while CMF is still up
+	-@$(MAKE) flink-delete         		# remove any leftover raw FlinkDeployment (legacy)
 	$(MAKE) cmf-uninstall
 	$(MAKE) minio-down
 	$(MAKE) flink-operator-uninstall
@@ -988,7 +988,7 @@ confluent-teardown: ## Full teardown: remove Flink, CP, Operator, namespace, and
 
 .PHONY: confluent-teardown-run
 confluent-teardown-run:
-	$(MAKE) flink-down
+	$(MAKE) cp-flink-down
 	$(MAKE) cp-down
 	@echo "→ Deleting namespace '$(NAMESPACE)' and all remaining resources..."
 	@kubectl delete namespace $(NAMESPACE) --ignore-not-found=true --wait=true 2>/dev/null \
