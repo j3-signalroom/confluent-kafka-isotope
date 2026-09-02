@@ -15,11 +15,11 @@ Two propagation models now coexist in this project. They emit the identical wire
     + [**2.1 The writable headers column**](#21-the-writable-headers-column)
     + [**2.2 CCAF table shape**](#22-ccaf-table-shape)
     + [**2.3 Packaging the UDF**](#23-packaging-the-udf)
-    + [**2.4 Fan-in provenance (optional)**](#24-fan-in-provenance-optional)
+    + [**2.4 [OPTIONAL] Fan-in provenance**](#24-optional-fan-in-provenance)
 - [**3.0 Constraints**](#30-constraints)
     + [**3.1 1:1 Statements Only**](#31-11-statements-only)
     + [**3.2 Header Keys Must Be Unique**](#32-header-keys-must-be-unique)
-- [**4.0 What this does not change**](#40-what-this-does-not-change)
+- [**4.0 What neither addition changes**](#40-what-neither-addition-changes)
 <!-- tocstop -->
 
 ---
@@ -112,8 +112,8 @@ flink-enrich    2
 
 The durable fix remains a Kafka-free `isotope-format` artifact split out of [`kafka-isotope`](https://github.com/j3-signalroom/kafka-isotope), which would make all of this unnecessary.
 
-### **2.4 Fan-in provenance (optional)**
-Everything above is the 1:1 collector, which is always on. A second, **opt-in** collector handles the case §3.1 rules out for in-band propagation: a windowed aggregate whose output is a business event rather than a terminal report.
+### **2.4 [OPTIONAL] Fan-in provenance**
+Everything above is the 1:1 collector, which is always on. A second, **opt-in** collector handles the case [§3.1](#31-11-statements-only) rules out for in-band propagation: a windowed aggregate whose output is a business event rather than a terminal report.
 
 It writes two topics:
 
@@ -170,14 +170,58 @@ That derivation needs a way to supply the trace ID, and `Isotope` does not offer
 
 Three implementation decisions follow from constraints already documented here. First, the edge topic is typed — **Avro+Schema Registry** on CP, **proto-registry** on CCAF, matching each runtime's report sinks — rather than the headers-only representation used by `isotope_consume_edge_markers`. Those markers are written by a Kafka client that has only headers to work with; Flink writes these, so a schema is available, and [§3.2](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#32-header-keys-must-be-unique) rules out representing multiple contributing traces as repeated same-key headers anyway. Second, the merged record and its edges come from **two INSERT statements** rather than one PTF emitting both row types, because splitting tagged PTF output requires a `CREATE VIEW` over the PTF — a shape the CP Flink 2.1.2 Expander round-trip rejects, as documented in [`60_stuck_trace_report.fql`](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/scripts/flink/sql/cp/60_stuck_trace_report.fql). Third, the capability is **opt-in on both runtimes**, using gating each already had: `count = var.enable_merge_provenance ? 1 : 0` on CCAF, mirroring `var.enable_trace_rca`, and the formerly unused `args` in `IsotopeReportsJob.main` on CP. Disabled — the default — no extra DDL is applied, no extra INSERT joins the statement set, and no extra topic is created.
 
-Two costs should be explicit. The edge stream emits one record per record *entering* the merge, so it roughly doubles that stage's write volume — an inherent cost of materializing a DAG edge list rather than a peculiarity of this design. And a trace walk still **terminates at the merge boundary**. The merge edges make ancestry queryable, not recursively traversable in Flink SQL, which lacks [recursive CTEs](https://nightlies.apache.org/flink/flink-docs-stable/docs/sql/hive-compatibility/hive-dialect/queries/cte/). Closing over multiple generations of merges therefore belongs in a consumer or dashboard that walks the edge graph. In this design, **“full provenance” means that every derivation edge is recorded, not that a single Flink SQL query returns the complete ancestor set.**
+Two costs should be explicit. The edge stream emits one record per record *entering* the merge, so it roughly doubles that stage's write volume — an inherent cost of materializing a DAG edge list rather than a peculiarity of this design. And a trace walk still **terminates at the merge boundary**. The merge edges make ancestry queryable, not recursively traversable in Flink SQL, which lacks [recursive CTEs](https://nightlies.apache.org/flink/flink-docs-stable/docs/sql/hive-compatibility/hive-dialect/queries/cte/). Closing over multiple generations of merges therefore belongs outside Flink, in a relational store — see below. In this design, **“full provenance” means that every derivation edge is recorded, not that a single Flink SQL query returns the complete ancestor set.**
 
 > A recursive CTE (Common Table Expression) is a SQL subquery that repeatedly references its own results, allowing hierarchical or graph-like relationships to be traversed until the complete result set is reached.
 
-This is now implemented, and **off by default** — see [§2.4](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#24-fan-in-provenance-optional) for what it deploys and how to enable it. What has not changed is the boundary itself: **in-band propagation remains deliberately restricted to 1:1 transformations**, where a single isotope can truthfully represent the derivation. Fan-in provenance does not relax that rule — it records, out-of-band, exactly the edges the rule forbids an isotope from claiming.
+**That blocker is not reachable in this deployment.** [`80_merge_collector.fql`](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/scripts/flink/sql/cp/80_merge_collector.fql) fixes its input to the origin stream with `WHERE this_topic = 'orders.placed'`, and `orders.flink_batched` is deliberately excluded from the `isotope_raw` union in [`00_source_table.fql`](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/scripts/flink/sql/cp/00_source_table.fql). A merge output therefore cannot re-enter a merge: **ancestry depth is exactly 1**, and the single join described in [§2.4](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#24-optional-fan-in-provenance) already returns the complete parent set. Recursion becomes necessary only if a second merge stage is added that consumes a merge output.
+
+**When it does, the exit is Postgres.** `isotope_merge_edge_markers` is already an adjacency list — `(merge_trace_id, contributing_trace_id)` is `(child, parent)` — which is precisely the shape `WITH RECURSIVE` wants, so the edge rows sink unchanged:
+
+```sql
+CREATE TABLE isotope_merge_edge (
+    merge_trace_id        text   NOT NULL,
+    contributing_trace_id text   NOT NULL,
+    window_start          bigint NOT NULL,
+    window_end            bigint NOT NULL,
+    operator              text   NOT NULL,
+    pipeline              text   NOT NULL,
+    contributing_service  text,
+    contributing_topic    text,
+    PRIMARY KEY (merge_trace_id, contributing_trace_id)
+);
+CREATE INDEX ON isotope_merge_edge (contributing_trace_id);
+
+WITH RECURSIVE ancestry AS (
+    SELECT merge_trace_id AS root, contributing_trace_id AS ancestor, 1 AS depth,
+           ARRAY[merge_trace_id, contributing_trace_id] AS path
+    FROM isotope_merge_edge
+    WHERE merge_trace_id = $1
+  UNION ALL
+    SELECT a.root, e.contributing_trace_id, a.depth + 1,
+           a.path || e.contributing_trace_id
+    FROM ancestry a
+    JOIN isotope_merge_edge e ON e.merge_trace_id = a.ancestor
+    WHERE a.depth < 16                                  -- depth cap
+      AND NOT e.contributing_trace_id = ANY(a.path)     -- cycle guard
+)
+SELECT * FROM ancestry;
+```
+
+Three things in that schema are load-bearing. The **composite primary key** makes the sink idempotent under Kafka's at-least-once delivery, and it works only because the merge ID is a pure function of `(pipeline, operator, window_start, window_end, group_key)`: a replayed window regenerates byte-identical edge rows, which collide on the key rather than duplicating. The **depth cap and cycle guard** are not decoration — a recursive CTE over a mis-grained edge set does not terminate, and the database has no way to know Flink cannot currently produce a cycle. And the **sink mechanism breaks the runtime symmetry** the rest of this feature maintains: CP can write Postgres from a Flink JDBC sink or Kafka Connect, while CCAF Flink SQL writes only to Confluent-managed Kafka tables, so it would need a fully-managed Postgres Sink connector instead. One topic, two delivery paths, and `ENABLE_MERGE_PROVENANCE` would no longer describe the whole feature. That asymmetry, against a limitation nothing in this pipeline can currently reach, is why this is documented rather than built.
+
+This is now implemented, and **off by default** — see [§2.4](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#24-optional-fan-in-provenance) for what it deploys and how to enable it. What has not changed is the boundary itself: **in-band propagation remains deliberately restricted to 1:1 transformations**, where a single isotope can truthfully represent the derivation. Fan-in provenance does not relax that rule — it records, out-of-band, exactly the edges the rule forbids an isotope from claiming.
 
 ### **3.2 Header Keys Must Be Unique**
 Confluent's ALTER TABLE reference states [multi-key headers are unsupported](https://docs.confluent.io/cloud/current/flink/reference/statements/alter-table.html#read-and-write-ak-headers). Isotope uses distinct keys throughout, but this rules out ever expressing hops as repeated same-key headers.
 
-## **4.0 What this does not change**
-Out-of-band propagation is untouched. `IsotopeContext`, `IsotopeProducerInterceptor`, and the `interceptor.classes` wiring in [`App.java`](../app/src/main/java/ai/signalroom/kafka/isotope/App.java) behave exactly as before, and remain the right model for the services.
+## **4.0 What neither addition changes**
+Neither addition — the always-on 1:1 collector, nor the opt-in fan-in provenance of [§2.4](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#24-optional-fan-in-provenance) — changes anything below. Each point is argued where it belongs, in §2.4 and [§3.1](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#31-11-statements-only); this is the consolidated blast radius, for deciding what adopting either one costs.
+
+**The services.** Out-of-band propagation is untouched. `IsotopeContext`, `IsotopeProducerInterceptor`, and the `interceptor.classes` wiring in [`App.java`](../app/src/main/java/ai/signalroom/kafka/isotope/App.java) behave exactly as before, and remain the right model for the services: one thread owns a whole consume→produce hop, so the `ThreadLocal` is valid everywhere it runs.
+
+**The wire format.** No new field, no new header key, no change to `MAX_HOPS` or `truncated`. A merged record carries an ordinary isotope — a fresh trace with a single hop — and the many-to-one edges it cannot express live out-of-band on their own topic, the same way `isotope_consume_edge_markers` already carries consume edges. All three producers — the interceptor, `ISOTOPE_APPEND_HOP`, and `ISOTOPE_MERGE_TRACE` — emit the identical header shape, so [`05_isotope_view.fql`](../scripts/flink/sql/cp/05_isotope_view.fql) cannot tell them apart.
+
+**The reports.** `isotope_raw` and the typed views are unchanged, and all seven reports — eight on CCAF with `enable_trace_rca` — read exactly what they read before. `orders.flink_enriched` and `orders.flink_batched` are both deliberately kept out of the `isotope_raw` union: the union is typed `MAP<STRING, BYTES>` and the collector sinks are `MAP<STRING, STRING>`. That exclusion is what makes both collectors additive rather than a schema change.
+
+**The default deployment.** Fan-in provenance is off unless `ENABLE_MERGE_PROVENANCE=true`. Off, neither runtime creates a table, a topic, or a statement for it, and the deployment is byte-identical to a build without the feature. The two UDFs are registered either way — registration is inert until a statement calls one, which is what lets the switch be flipped without re-uploading an artifact.
