@@ -8,6 +8,9 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 ### Added
 - Issues[`#328`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/328)
 
+### Fixed
+- Issues[`#330`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/330)
+
 ## [0.27.00.000] - 2026-09-02
 ### Added
 - Issues[`#320`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/320)
@@ -15,6 +18,8 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 ### Changed
 - Issues[`#322`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/322)
 - Issues[`#324`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/324)
+
+### Fixed
 - Issues[`#326`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/326)
 
 ## [0.26.00.000] - 2026-08-29
