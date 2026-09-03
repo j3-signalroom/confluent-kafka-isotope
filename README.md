@@ -183,7 +183,7 @@ Alongside that—**additive, opt-in, and disabled by default**—the interceptor
 ```mermaid
 flowchart TB
     subgraph App["app/ demo CLI + kafka-isotope-core (external tracing library)"]
-        Svc["app/App.java<br/>send · hop · consume · sink modes<br/>(or your real services)"]
+        Svc["app/App.java<br/>place · enrich · fulfill · ship verbs<br/>+ generic send · hop · consume · sink modes<br/>(or your real services)"]
         IPI["IsotopeProducerInterceptor<br/>(kafka-isotope-core)<br/>stamps UUIDv7 trace ID<br/>+ appends hop on every send()"]
         Adopt["IsotopeContext.adoptFromRecord()<br/>(kafka-isotope-core)<br/>explicit per-record adoption<br/>between consume and produce"]
         Mark["IsotopeContext.recordConsume()<br/>(kafka-isotope-core)<br/>emits consume-edge marker<br/>to isotope_consume_edge_markers"]
@@ -226,12 +226,12 @@ flowchart TB
         direction LR
         subgraph CP["Minikube · Flink 2.1 CMF Application"]
             SQLCP["scripts/flink/sql/cp/*.fql<br/>(bundled in the app JAR)"]
-            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>+2 with --merge-provenance<br/>Avro+SR sinks"]
+            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+2 with --merge-provenance<br/>Avro+SR sinks"]
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
             TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-confluent-flink.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf<br/>(+3 with trace_rca, +5 with merge_provenance)"]
-            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>Protobuf+SR sinks"]
+            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
     end
@@ -253,9 +253,9 @@ flowchart TB
     JCP --> R
     JCC --> R
 
-    subgraph AI["Optional AI trace-RCA (§3.3) — CCAF only, off by default"]
+    subgraph AI["Optional AI trace-RCA (§3.3.2) — CCAF only, off by default"]
         direction LR
-        MODEL["CREATE MODEL trace_rca<br/>remote text-generation model<br/>(openai · anthropic · bedrock)"]
+        MODEL["CREATE MODEL trace_rca<br/>remote text-generation model<br/>(openai default · bedrock · vertexai ·<br/>azureopenai · googleai · sagemaker · azureml)"]
         RCAJ["INSERT … LATERAL TABLE(ML_PREDICT('trace_rca', …))<br/>one call per stuck-trace alert, never per record"]
         MODEL --> RCAJ
     end
