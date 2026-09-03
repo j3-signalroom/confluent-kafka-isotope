@@ -32,13 +32,13 @@ RULE, MUTED = "#888780", "#5F5E5A"
 
 # Top rung first. (title, count, blurb, example, ramp)
 TIERS = [
-    ("Harder", 5, "forensic replay \u00b7 compliance \u00b7 cross-system",
+    ("Harder", 6, "forensic replay \u00b7 compliance \u00b7 cross-system",
      "\u201cReconstruct a full per-trace journey for an audit?\u201d", "pink"),
     ("Hard", 6, "tail latency \u00b7 drift \u00b7 correlation",
      "\u201cWhat are p50 / p95 / p99 across the pipeline?\u201d", "amber"),
     ("Medium", 7, "cross-window deltas \u00b7 anomalies",
      "\u201cWhich traces went in but never came out in 60s?\u201d", "purple"),
-    ("Easy \u2192 Medium", 6, "single per-minute aggregates",
+    ("Easy to Medium", 6, "single per-minute aggregates",
      "\u201cEnd-to-end latency over the last minute?\u201d", "blue"),
     ("Easy", 6, "single-record \u00b7 single-trace",
      "\u201cDid my record get tagged, and how many hops?\u201d", "green"),
@@ -47,8 +47,9 @@ TIERS = [
 # Dashed capability line: drawn *below* the rung at this index (0-based).
 DIVIDER = {
     "after_rung": 2,
-    "above": "\u2191 needs the collector + interpreter",
-    "below": "\u2193 logs \u00b7 metrics \u00b7 APM reach about here",
+    "above": "needs the collector + interpreter",
+    "below": "logs \u00b7 metrics \u00b7 APM aggregates reach about here"
+             " \u2014 identity needs the header",
 }
 
 # ---------------------------------------------------------------- LAYOUT ----
@@ -67,6 +68,14 @@ def text(x, y, s, size, fill, anchor="start", italic=False, weight=None):
     add(f'<text x="{x}" y="{y}" text-anchor="{anchor}" font-size="{size}" '
         f'fill="{fill}"{style}{w}>{escape(s)}</text>')
 
+def tri(x, y, up=True, w=7.0, h=6.0, fill=MUTED):
+    """Small solid triangle. Stands in for an arrow glyph, which the PNG
+    rasterizer's font does not carry (neither do U+25B2/25BC)."""
+    pts = (f"{x},{y - h} {x - w / 2},{y} {x + w / 2},{y}" if up
+           else f"{x},{y} {x - w / 2},{y - h} {x + w / 2},{y - h}")
+    add(f'<polygon points="{pts}" fill="{fill}"/>')
+
+
 def build():
     add(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {VB_W} {VB_H}" '
         f'width="{VB_W}" height="{VB_H}" role="img" font-family="{SANS}">')
@@ -74,8 +83,11 @@ def build():
     add('<title>Five-tier observability question ladder</title>')
     add(f'<desc>{total} observability questions the project can answer, sorted into '
         f'{len(TIERS)} tiers of increasing difficulty, each with one example question. '
-        'A dashed line marks where logs, metrics, and APM run out and the '
-        'collector-plus-interpreter pattern becomes necessary.</desc>')
+        'A dashed line, with a triangle pointing to each side, marks where the '
+        'aggregates logs, metrics, and APM can '
+        'produce run out and the collector-plus-interpreter pattern becomes '
+        'necessary; per-trace identity, on the bottom rung, needs the isotope '
+        'header at every tier.</desc>')
     add('<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" '
         'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
         '<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" '
@@ -94,10 +106,12 @@ def build():
         y += RUNG_H + GAP
 
         if i == DIVIDER["after_rung"]:
-            text(X + 2, y + 12, DIVIDER["above"], 11.5, MUTED)
+            tri(X + 6, y + 12, up=True)
+            text(X + 15, y + 12, DIVIDER["above"], 11.5, MUTED)
             add(f'<line x1="{X}" y1="{y + 24}" x2="{X + RUNG_W}" y2="{y + 24}" '
                 f'stroke="{RULE}" stroke-width="1" stroke-dasharray="6 5"/>')
-            text(X + 2, y + 42, DIVIDER["below"], 11.5, MUTED)
+            tri(X + 6, y + 42, up=False)
+            text(X + 15, y + 42, DIVIDER["below"], 11.5, MUTED)
             y += BAND
 
     bottom = y - GAP
@@ -110,7 +124,7 @@ def build():
         add(f'<rect x="{X + j * 20}" y="{ly - 11}" width="14" height="14" rx="4" '
             f'fill="{fill}" stroke="{stroke}" stroke-width="0.8"/>')
     text(X + len(TIERS) * 20 + 14, ly,
-         f"tier difficulty (easier \u2192 harder) \u00b7 {total} questions, "
+         f"tier difficulty (easier to harder) \u00b7 {total} questions, "
          f"{len(TIERS)} tiers", 11.5, MUTED)
 
     add("</svg>")

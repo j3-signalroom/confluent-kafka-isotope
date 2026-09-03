@@ -31,15 +31,15 @@ Much like isotopes used to trace molecules through a biochemical pathway, each e
 
 This project demonstrates how **Kafka Interceptors become collectors** — inserting the isotope into record headers in place and, at terminal consumers, emitting consume-edge markers — while **Flink SQL serves as the interpreter**, reading those headers directly to produce seven 1-minute reports from a single JAR on both Confluent Platform and Confluent Cloud for Apache Flink (CCAF). Optionally, the producer interceptor can **emit Micrometer metrics to Prometheus as an always-on aggregate layer** alongside the per-trace Flink reports.  (As depicted in the diagram below.)
 
+![isotope-diagram](docs/image_generators/isotope-diagram.png)
+
 **Flink is now a collector too.** A second propagation model lets a Flink statement stamp its own hop, so Flink appears in the topology graph as a producer rather than only as a reader. The interceptor propagates *out-of-band* — the in-flight isotope lives in an `IsotopeContext` `ThreadLocal` that `onSend()` reads on the same thread — which is correct in the services, where one thread owns a whole consume→produce hop. That cannot work in Flink: a shuffle resumes a record on a different thread in a different JVM, and Flink SQL has no user-visible thread to attach to at all. So Flink propagates *in-band*, carrying the isotope in the record's own headers via a writable `headers` metadata column and the `ISOTOPE_APPEND_HOP` scalar UDF. Two models, one wire format — every header the UDF writes is byte-identical to the interceptor's, so the reports cannot tell the two collectors apart. See [docs/flink-collector.md](docs/flink-collector.md).
 
 ![visualize-in-band-propagation](docs/visualize-in-band-propagation.png)
 
-![isotope-diagram](docs/image_generators/isotope-diagram.png)
-
 With this approach, developers gain **end-to-end observability** into the flow of events through the Kafka-based microservices architecture, enabling both **real-time monitoring** and **post-hoc analysis** of event traces.
 
-This end-to-end observability of the isotope tracing pipeline creates a **ladder of insights**, allowing developers to trace each event’s journey, identify bottlenecks, and improve the performance and reliability of the entire system. The ladder is organized into **five tiers that answer 30 questions**, as visualized below.
+This end-to-end observability of the isotope tracing pipeline creates a **ladder of insights**, allowing developers to trace each event’s journey, identify bottlenecks, and improve the performance and reliability of the entire system. The ladder is organized into **five tiers that answer 31 questions**, as visualized below. All 31 are enumerated, tier by tier, in [docs/metrics.md §6](docs/metrics.md#60-mapping-questions-to-promql).
 
 ![tier-ladder-diagram](docs/image_generators/tier-ladder-diagram.png)
 
@@ -96,6 +96,7 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 - _Can we reconstruct the full per-trace journey for an audit?_
 - _For Sarbanes-OXley Act (SOX): prove that every transaction was either completed or logged as stuck._
 - _Correlate isotope trace IDs with Application Performance Monitoring (APM) spans, OpenTelemetry (OTel) traces, or business transaction IDs._
+- _Which input records produced this merged output?_
 </details>
 
 ---
@@ -229,7 +230,7 @@ flowchart TB
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/setup-confluent-flink.tf<br/>28 × confluent_flink_statement<br/>(+3 with trace_rca, +5 with merge_provenance)"]
+            TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-confluent-flink.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf<br/>(+3 with trace_rca, +5 with merge_provenance)"]
             JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>7 reports TUMBLE(1 MIN) + 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
@@ -292,6 +293,8 @@ The isotope tracing library lives in its own repo — [j3-signalroom/kafka-isoto
 
 ```
 app/                                    demo CLI + tests (consumes the isotope library)
+  build.gradle                          app module build — Protobuf codegen, shadow JAR,
+                                        integrationTest source set
   src/main/proto/ai/signalroom/kafka/isotope/proto/
     demo_event.proto                    DemoEvent message (Protobuf value schema)
   src/main/java/ai/signalroom/kafka/isotope/
@@ -306,19 +309,32 @@ app/                                    demo CLI + tests (consumes the isotope l
                                         DemoEvent via SR-framed Protobuf
                                         (need Minikube CP + SR port-forwarded)
 ptf/                                    Flink reports application + PTF shadow JAR
+  build.gradle                          ptf module build — Flink deps + the shadow JAR both
+                                        deploy paths upload (`make reports-jar`)
   src/main/java/ai/signalroom/kafka/isotope/flink/
     IsotopeReportsJob.java              CP entry point — reads the bundled sql/*.fql,
-                                        registers both PTFs + the collector UDF
+                                        registers both PTFs + the three collector UDFs
                                         programmatically, runs the 8 INSERT INTOs
                                         (7 reports + collector) as one StatementSet
-                                        (CMF Application)
+                                        (CMF Application); --merge-provenance adds the
+                                        merge DDL + the 2 merge INSERTs (§3.5)
     IsotopeAppendHop.java               collector-side scalar UDF — appends a Flink hop
                                         to a record's isotope headers (in-band
-                                        propagation; see docs/flink-collector.md)
+                                        propagation, 1:1 statements only; see
+                                        docs/flink-collector.md)
+    IsotopeMergeTrace.java              merge-collector scalar UDF — stamps a fan-in record
+                                        with a FRESH derived trace, because a windowed
+                                        aggregate has many parents and forwarding one of
+                                        their trace IDs would fabricate provenance (§3.5)
+    IsotopeMergeTraceId.java            same window's merge trace ID as hex, so the
+                                        edge-marker statement can label each contributing
+                                        record with the merged record it fed (§3.5)
+    MergeTrace.java                     shared deterministic merge-trace derivation — the
+                                        agreement that joins the two merge statements
     LatencyPercentilesPTF.java          T-Digest p50/p95/p99 (PTF: per-window state + timers)
     StuckTracePTF.java                  per-trace state + event-time timer
     TDigests.java                       shared T-Digest (de)serialization
-  src/test/java/.../                    TDigestsTest, IsotopeAppendHopTest
+  src/test/java/.../                    TDigestsTest, IsotopeAppendHopTest, MergeTraceTest
 k8s/base/                               CFK / CMF manifests (applied by `make cp-up` / `cp-flink-up`)
   confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
   minio.yaml                            in-cluster S3-compatible store backing CMF's
@@ -344,12 +360,13 @@ k8s/monitoring/                         optional metrics showcase (§3.4) — `m
   README.md                             runbook + troubleshooting
 scripts/
   tf-repair-flink-credentials.py        repairs the CCAF Flink service account credentials
-  tf-statement-updates.py               updates the 24 Flink SQL statements in Terraform
+  tf-statement-updates.py               updates the inline Flink SQL statements in Terraform
   port-forward-kafka.sh                 localhost:30092 → Kafka, localhost:8081 → SR
   port-forward-taskmanager.sh           Flink TaskManager web UI forward
   deploy-cmf-flink-reports.sh           builds shadow JAR + uploads it as a cmf://
                                         artifact + deploys the reports as a Flink 2.1
-                                        CMF Application (runs sql/cp/*.fql)
+                                        CMF Application (runs sql/cp/*.fql);
+                                        MERGE_PROVENANCE=true adds the merge stage (§3.5)
   deploy-cc-flink-reports.sh            builds shadow JAR + wraps `terraform apply`
                                         for the CCAF path
   cc-cli-env.sh                         pulls Kafka + SR creds from `terraform output`,
@@ -360,18 +377,25 @@ scripts/
   flink/README.md                       Flink SQL reports — runtime split (CP=7 reports/Avro+SR,
                                         CCAF=7 reports/Protobuf+SR), plus the collector
                                         INSERT on both; layout, operations
-  flink/sql/cp/                         CP Flink SQL: 00_source_table, 01_register_functions,
+  flink/sql/cp/                         CP Flink SQL (bundled into the reports JAR):
+                                        00_source_table, 01_register_functions,
                                         05_isotope_view, 06_consume_events_view,
                                         05_report_sinks (avro-confluent),
                                         07_flink_collector_sink (writable headers column),
                                         10/20/25/30/40/60/70 INSERT INTO reports,
                                         75_flink_collector (INSERT INTO: Flink stamps its
-                                        own hop), 99_teardown
+                                        own hop), 99_teardown; plus the optional merge
+                                        trio (§3.5) — 08_merge_provenance_sinks
+                                        (orders.flink_batched + isotope_merge_edge_markers),
+                                        80_merge_collector (fresh trace on the merged
+                                        record), 81_merge_edge_markers (one row per
+                                        contributing record)
                                         (CCAF SQL is inlined under terraform/setup-confluent-flink.tf.)
 terraform/                              CCAF infrastructure-as-code (`make cc-flink-reports-up`)
   providers.tf                          Confluent provider — cloud key/secret vars
   versions.tf                           required Terraform (>= 1.13) + provider versions
-  variables.tf                          confluent_api_key/secret, cloud, region, day_count
+  variables.tf                          confluent_api_key/secret, cloud, region, day_count,
+                                        enable_trace_rca, enable_merge_provenance
   data.tf                               organization lookup + other data sources
   setup-confluent-environment.tf        environment (ESSENTIALS stream-governance package)
   setup-confluent-kafka.tf              Kafka cluster + Kafka API key rotation module
@@ -380,12 +404,21 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
                                         artifact upload, SR API key rotation, and 24 inline
                                         `confluent_flink_statement` resources: 6 ALTER TABLE
                                         + 3 VIEW + 8 sink CREATE TABLE + 3 DROP FUNCTION +
-                                        5 CREATE FUNCTION (2 PTFs + 3 UDFs) + 1 EXECUTE
+                                        3 CREATE FUNCTION (2 PTFs + 1 UDF) + 1 EXECUTE
                                         STATEMENT SET holding all 8 INSERT INTOs
   setup-ccaf-ai.tf                      OPTIONAL AI trace-RCA report — 3 extra
                                         statements (CREATE MODEL + Protobuf sink +
                                         INSERT … ML_PREDICT); gated on
                                         var.enable_trace_rca (default false)
+  setup-ccaf-merge-provenance.tf        OPTIONAL fan-in (merge) provenance (§3.5) — 9 extra
+                                        statements. 4 always apply: 2 DROP + 2 CREATE
+                                        FUNCTION registering ISOTOPE_MERGE_TRACE /
+                                        _TRACE_ID (inert until something calls them).
+                                        The other 5 are gated on
+                                        var.enable_merge_provenance (default false):
+                                        2 sink CREATE TABLE + 2 ALTER TABLE (writable
+                                        headers) + its own EXECUTE STATEMENT SET with
+                                        the 2 merge INSERTs
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
 docs/                                   extracted long-form docs (linked from the README) and images
@@ -400,19 +433,31 @@ docs/                                   extracted long-form docs (linked from th
     tier-ladder-diagram.png             visual representation (PNG) of the tier ladder of the questions isotope answers
     tier-ladder-diagram.svg             visual representation (SVG) of the tier ladder of the questions isotope answers
     uv.lock                             an automatically generated file by uv, a fast Python package manager
-  design.md                             isotope tracing deep-dive 
+  design.md                             isotope tracing deep-dive
+  flink-collector.md                    Flink as a collector — in-band propagation, the
+                                        1:1 rule, and §2.4 optional fan-in provenance
   runbook-minikube.md                   full CP-on-Minikube run sequence (§3.2)
   runbook-ccaf.md                       full CCAF / Terraform run sequence (§3.3)
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
   terraform.png                         rendered resource graph (embedded in §3.3)
+  qrcode_github.com.png                 QR code to this repo
   visualize-out-of-band-propagation.png     out-of-band propagation — the producer interceptor
                                         stamps context on send; consume-side capture
                                         records the edge (§intro)
   visualize-in-band-propagation.png     in-band propagation — the isotope rides inside the
                                         record so it survives a shuffle (docs/flink-collector.md)
-Makefile                                cp-up / cp-flink-up / kafka-pf-up / flink-reports-up /
+  *.pdf                                 print copy generated beside each *.md (repo-wide)
+Makefile                                cp-up / cp-core-up / cp-flink-up / kafka-pf-up /
+                                        cp-flink-reports-up / cp-flink-reports-down /
                                         cc-flink-reports-up / cc-flink-reports-down /
-                                        metrics-up / metrics-down / metrics-delete / ...
+                                        reports-jar / flink-image-build / metrics-up /
+                                        metrics-down / metrics-delete / cp-down /
+                                        cp-flink-down / cp-teardown / nuke / ...
+settings.gradle                         Gradle multi-project root — the app + ptf modules
+gradle/libs.versions.toml               version catalog — Kafka, Flink, Protobuf, test deps
+                                        (the kafka-isotope version is pinned per module)
+CHANGELOG.md                            release notes
+KNOWN_ISSUES.md                         open issues + upstream bugs worth knowing before a run
 ```
 </details>
 

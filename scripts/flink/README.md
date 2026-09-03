@@ -23,8 +23,8 @@ Control Center deserializes both sink formats natively.
 - [**4.0 Wire-format detail (CP only)**](#40-wire-format-detail-cp-only)
 - [**5.0 PTF JAR**](#50-ptf-jar)
 - [**6.0 Operations**](#60-operations)
-  - [**6.1 CP Flink (Minikube)**](#61-cp-flink-minikube)
-  - [**6.2 CCAF (Confluent Cloud, Terraform-driven)**](#62-ccaf-confluent-cloud-terraform-driven)
+  - [**6.1 CP Flink on Minikube**](#61-cp-flink-on-minikube)
+  - [**6.2 CCAF**](#62-ccaf)
 <!-- tocstop -->
 
 ---
@@ -94,11 +94,11 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
 The three `OPTIONAL` files are applied only when the reports application is started with `--merge-provenance`
 (`MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up`); CCAF's equivalent is
 `terraform apply -var enable_merge_provenance=true`. Off, none of them is parsed and no extra topic is created.
-See [docs/flink-collector.md §2.4](../../docs/flink-collector.md#24-fan-in-provenance-optional).
+See [docs/flink-collector.md §2.4](../../docs/flink-collector.md#24-optional-fan-in-provenance).
 ```
 ```
 
-CCAF runs the same seven reports plus the collector, but the SQL lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — 28 statements: ALTER (×4) + raw view + typed produce view + typed consume view + 7 sinks + `STUCK_TRACE_PTF`, `LATENCY_PERCENTILES`, `ISOTOPE_APPEND_HOP`, `ISOTOPE_MERGE_TRACE` and `ISOTOPE_MERGE_TRACE_ID` drop+register (×2 each = 10) + the collector sink and its two header ALTERs + **1 statement set holding all 8 INSERTs**. The two merge functions register regardless of `var.enable_merge_provenance`; the statements that *call* them live in [terraform/setup-ccaf-merge-provenance.tf](../../terraform/setup-ccaf-merge-provenance.tf) and are gated. The JAR is uploaded as a `confluent_flink_artifact` and referenced via `USING JAR 'confluent-artifact://<id>'`.
+CCAF runs the same seven reports plus the collector, but the SQL lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf) — 24 statements: ALTER (×4) + raw view + typed produce view + typed consume view + 7 sinks + `STUCK_TRACE_PTF`, `LATENCY_PERCENTILES` and `ISOTOPE_APPEND_HOP` drop+register (×2 each = 6) + the collector sink and its two header ALTERs + **1 statement set holding all 8 INSERTs**. A normal apply creates 28, because the `ISOTOPE_MERGE_TRACE` / `ISOTOPE_MERGE_TRACE_ID` drop+register statements (×2 each = 4) live in [terraform/setup-ccaf-merge-provenance.tf](../../terraform/setup-ccaf-merge-provenance.tf) and are *not* gated — they register regardless of `var.enable_merge_provenance`, and only the 5 statements that *call* them are gated. The JAR is uploaded as a `confluent_flink_artifact` and referenced via `USING JAR 'confluent-artifact://<id>'`.
 
 **Why one statement rather than eight.** CCAF's `EXECUTE STATEMENT SET BEGIN … END` runs multiple INSERTs as a single optimized statement, and Confluent documents it for exactly this case — INSERTs that read the same table or share intermediate results, which all eight do. It mirrors what CP already does through `IsotopeReportsJob`'s `StatementSet`, and it matters for cost: every separate CCAF statement carries its own 1-CFU compute-pool floor, so eight statements meant eight floors and a saturated pool. The tradeoff is one failure domain — a fault in any INSERT stops them all — which is the same property CP's single job has.
 
@@ -119,7 +119,7 @@ All five register on both runtimes; only the `CREATE FUNCTION … USING JAR …`
 
 ## **6.0 Operations**
 
-### **6.1 CP Flink (Minikube)**
+### **6.1 CP Flink on Minikube**
 ```bash
 make cp-flink-up               # cert-manager → CFK Flink Operator → MinIO → CMF 2.4 → env → app image
 make kafka-pf-up            # localhost:30092 → Kafka, localhost:8081 → SR
@@ -130,7 +130,7 @@ make cp-flink-down             # tear down the application, CMF, MinIO, operator
 
 The 7 reports run as a single Flink 2.1 CMF **Application** (`isotope-reports`, entry point `IsotopeReportsJob`) — visible in CMF and Control Center's Flink tab.
 
-### **6.2 CCAF (Confluent Cloud, Terraform-driven)**
+### **6.2 CCAF**
 ```bash
 make cc-flink-reports-up  CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
                           # terraform apply: env + cluster + topics + compute pool + artifact + 28 statements
@@ -139,7 +139,7 @@ make cc-flink-reports-up  CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
 or
 ```bash
 make cc-flink-reports-up  CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=... ENABLE_TRACE_RCA=true RCA_MODEL_API_KEY=... RCA_MODEL_PROVIDER=... RCA_MODEL_VERSION=... RCA_MODEL_ENDPOINT=...
-                          # terraform apply: env + cluster + topics + compute pool + artifact + 28 statements (AI root-cause analysis setup)
+                          # terraform apply: env + cluster + topics + compute pool + artifact + 31 statements (28 + the 3 AI root-cause analysis statements)
                           # also regenerates terraform/terraform.png via `terraform graph | dot`
 ```
 
