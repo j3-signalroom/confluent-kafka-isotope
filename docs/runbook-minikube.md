@@ -139,8 +139,8 @@ make flink-delete           # drop just the 'flink-basic' ad-hoc SQL session clu
 make metrics-delete         # remove the Prometheus/Grafana showcase (pods + namespace)
 make cp-flink-down          # Flink cluster + CMF + operator + cert-manager (includes flink-delete)
 make cp-down                # CP + operator (keeps Minikube running)
-make confluent-teardown     # everything + stop Minikube
-make nuke                   # confluent-teardown + minikube-delete + uninstall-prereqs (factory reset)
+make cp-teardown            # everything + stop Minikube
+make nuke                   # cp-teardown + minikube-delete + uninstall-prereqs (factory reset)
 ```
 
 ## **9.0 Minimal path (no Flink)**
