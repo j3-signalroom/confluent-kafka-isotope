@@ -95,8 +95,8 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 - _Did this customer’s order traverse all the services it should have?_
 - _Can we reconstruct the full per-trace journey for an audit?_
 - _For Sarbanes-OXley Act (SOX): prove that every transaction was either completed or logged as stuck._
-- _Correlate isotope trace IDs with Application Performance Monitoring (APM) spans, OpenTelemetry (OTel) traces, or business transaction IDs._
 - _Which input records produced this merged output?_
+- _Why was this trace stuck — not just that it was?_
 </details>
 
 ---
