@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2040" height="2190" viewBox="0 0 2040 2190" role="img" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
 <title>Confluent Kafka Isotope — collectors and interpreter</title>
-<desc>Four-stage order workflow stamps isotope headers; Flink SQL reads them to emit seven one-minute reports and also acts as a second collector, appending its own hop onto orders.flink_enriched. An optional CCAF-only AI root-cause path is off by default.</desc>
+<desc>Four-stage order workflow stamps isotope headers; Flink SQL reads them to emit seven one-minute reports and also acts as a second collector, appending its own hop onto orders.flink_enriched. Two opt-in paths are off by default: fan-in (merge) provenance, where a windowed merge mints a fresh trace and writes its parent edges to their own topic, and a CCAF-only AI root-cause report.</desc>
 <rect x="0" y="0" width="2040" height="2190" fill="#F7F9FB"/>
 <text x="20" y="75" text-anchor="start" font-size="44" fill="#2C2C2A">Collector</text>
 <text x="20" y="128" text-anchor="start" font-size="32" fill="#5F5E5A">Stamp headers; emit markers + metrics</text>
@@ -31,8 +31,8 @@
 <text x="724" y="775" text-anchor="middle" font-size="34" fill="#5B4BA8">+ x-isotope</text>
 <line x1="485" y1="727" x2="543" y2="727" stroke="#8A8A85" stroke-width="2"/>
 <rect x="543" y="860" width="362" height="165" rx="24" fill="#FBE4EC" stroke="#C2537E" stroke-width="2"/>
-<text x="724" y="937" text-anchor="middle" font-size="34" fill="#A83A63">consume_events</text>
-<text x="724" y="990" text-anchor="middle" font-size="34" fill="#A83A63">edge markers</text>
+<text x="724" y="937" text-anchor="middle" font-size="22" fill="#A83A63">isotope_consume_edge_markers</text>
+<text x="724" y="990" text-anchor="middle" font-size="26" fill="#A83A63">consume-edge markers</text>
 <line x1="485" y1="942" x2="543" y2="942" stroke="#8A8A85" stroke-width="2" stroke-dasharray="14 12"/>
 <rect x="543" y="1075" width="362" height="165" rx="24" fill="#E7E3F8" stroke="#8B7FD1" stroke-width="2"/>
 <text x="724" y="1152" text-anchor="middle" font-size="34" fill="#5B4BA8">orders.flink_enriched</text>
@@ -54,10 +54,18 @@
 <text x="1223" y="716" text-anchor="middle" font-size="32" fill="#1E7A5C" font-family="SF Mono, Menlo, Consolas, monospace">TUMBLE(1 minute)</text>
 <line x1="1000" y1="735" x2="931" y2="1157" stroke="#8A8A85" stroke-width="2"/>
 <polygon points="935,1144 905,1157 935,1170" fill="#8A8A85"/>
+<line x1="1000" y1="735" x2="931" y2="1420" stroke="#4FAE8B" stroke-width="2" stroke-dasharray="14 12"/>
+<polygon points="935,1407 905,1420 935,1433" fill="#4FAE8B"/>
+<rect x="543" y="1300" width="362" height="265" rx="20" fill="#E8F5EF" stroke="#4FAE8B" stroke-width="2" stroke-dasharray="16 12"/>
+<text x="724" y="1357" text-anchor="middle" font-size="28" fill="#146A50">Fan-in (Merge) Provenance</text>
+<text x="724" y="1405" text-anchor="middle" font-size="22" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">orders.flink_batched</text>
+<text x="724" y="1447" text-anchor="middle" font-size="22" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">FRESH trace · 1 hop</text>
+<text x="724" y="1489" text-anchor="middle" font-size="22" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">isotope_merge_edge_markers</text>
+<text x="724" y="1538" text-anchor="middle" font-size="28" fill="#4A7F6C">off by default</text>
 <line x1="1223" y1="735" x2="1223" y2="795" stroke="#8A8A85" stroke-width="2"/>
 <rect x="1000" y="795" width="447" height="155" rx="20" fill="#E9E6DE" stroke="#A9A497" stroke-width="2"/>
 <text x="1223" y="858" text-anchor="middle" font-size="34" fill="#44443F" font-family="SF Mono, Menlo, Consolas, monospace">isotope-flink-udf.jar</text>
-<text x="1223" y="910" text-anchor="middle" font-size="34" fill="#5F5E5A">2 PTFs + 1 UDF</text>
+<text x="1223" y="910" text-anchor="middle" font-size="34" fill="#5F5E5A">2 PTFs + 3 UDFs</text>
 <text x="1223" y="1000" text-anchor="middle" font-size="34" fill="#5F5E5A">One JAR · same DDL · CP or CCAF</text>
 <rect x="1540" y="140" width="490" height="105" rx="20" fill="#FCEBD5" stroke="#E0A44E" stroke-width="2"/>
 <text x="1785" y="205" text-anchor="middle" font-size="34" fill="#8F5A14" font-family="SF Mono, Menlo, Consolas, monospace">latency_1m</text>
@@ -89,13 +97,22 @@
 <text x="1785" y="1236" text-anchor="middle" font-size="26" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">CREATE MODEL + ML_PREDICT</text>
 <text x="1785" y="1281" text-anchor="middle" font-size="26" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">rca_findings_1m</text>
 <text x="1785" y="1330" text-anchor="middle" font-size="28" fill="#4A7F6C">off by default</text>
-<text x="505" y="1322" text-anchor="start" font-size="35" fill="#44443F">Four-stage order workflow; traces ride in headers.</text>
-<text x="505" y="1372" text-anchor="start" font-size="35" fill="#44443F">shipping-notify can't append a header (no re-produce),</text>
-<text x="505" y="1422" text-anchor="start" font-size="35" fill="#44443F">so it emits a consume-edge marker to its own topic.</text>
-<text x="505" y="1522" text-anchor="start" font-size="35" fill="#44443F">Flink is a collector too: ISOTOPE_APPEND_HOP appends</text>
-<text x="505" y="1572" text-anchor="start" font-size="35" fill="#44443F">its own hop onto orders.flink_enriched, so Flink appears</text>
-<text x="505" y="1622" text-anchor="start" font-size="35" fill="#44443F">in the topology graph as a producer, not only a reader.</text>
-<text x="505" y="1722" text-anchor="start" font-size="35" fill="#44443F">AI root-cause analysis is opt-in and CCAF-only.</text>
+<text x="1000" y="1055" text-anchor="start" font-size="30" fill="#44443F">Four-stage order workflow; traces</text>
+<text x="1000" y="1093" text-anchor="start" font-size="30" fill="#44443F">ride in headers. shipping-notify</text>
+<text x="1000" y="1131" text-anchor="start" font-size="30" fill="#44443F">can't append a header (no re-produce),</text>
+<text x="1000" y="1169" text-anchor="start" font-size="30" fill="#44443F">so it emits a consume-edge marker</text>
+<text x="1000" y="1207" text-anchor="start" font-size="30" fill="#44443F">to its own topic.</text>
+<text x="1000" y="1283" text-anchor="start" font-size="30" fill="#44443F">Flink is a collector too:</text>
+<text x="1000" y="1321" text-anchor="start" font-size="30" fill="#44443F">ISOTOPE_APPEND_HOP appends its own</text>
+<text x="1000" y="1359" text-anchor="start" font-size="30" fill="#44443F">hop onto orders.flink_enriched, so</text>
+<text x="1000" y="1397" text-anchor="start" font-size="30" fill="#44443F">Flink appears in the topology graph</text>
+<text x="1000" y="1435" text-anchor="start" font-size="30" fill="#44443F">as a producer, not only a reader.</text>
+<text x="1000" y="1511" text-anchor="start" font-size="30" fill="#44443F">A windowed merge cannot forward a</text>
+<text x="1000" y="1549" text-anchor="start" font-size="30" fill="#44443F">trace — many parents — so</text>
+<text x="1000" y="1587" text-anchor="start" font-size="30" fill="#44443F">ISOTOPE_MERGE_TRACE mints a fresh one</text>
+<text x="1000" y="1625" text-anchor="start" font-size="30" fill="#44443F">and the parent edges go to their own</text>
+<text x="1000" y="1663" text-anchor="start" font-size="30" fill="#44443F">topic. Opt-in, like AI root-cause</text>
+<text x="1000" y="1701" text-anchor="start" font-size="30" fill="#44443F">analysis (which is CCAF-only).</text>
 <rect x="20" y="1750" width="2000" height="400" rx="24" fill="#F0F2EF" stroke="#C9CDC9" stroke-width="2"/>
 <rect x="45" y="1815" width="38" height="38" rx="8" fill="#DEEBF7" stroke="#8AB6DE" stroke-width="2"/>
 <text x="103" y="1845" text-anchor="start" font-size="34" fill="#44443F">Service</text>

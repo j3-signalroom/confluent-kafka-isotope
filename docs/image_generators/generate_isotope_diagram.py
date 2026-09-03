@@ -52,7 +52,7 @@ TOPICS = [
     ("orders.placed", "+ x-isotope", "topic"),
     ("orders.enriched", "+ x-isotope", "topic"),
     ("orders.fulfilled", "+ x-isotope", "topic"),
-    ("consume_events", "edge markers", "marker"),
+    ("isotope_consume_edge_markers", "consume-edge markers", "marker"),
     ("orders.flink_enriched", "+ x-isotope", "topic"),
 ]
 # Index into TOPICS of the topic Flink itself produces (propagation model B).
@@ -62,6 +62,16 @@ SINKS = [
     "latency_1m", "topology_1m", "bipartite_topology_1m", "hop_distribution_1m",
     "coverage_1m", "stuck_trace_1m (PTF)", "latency_percentiles_1m",
 ]
+# Set to None to drop the opt-in fan-in (merge) provenance path from the chart.
+# Flink produces both of these; they are gated (--merge-provenance on CP,
+# var.enable_merge_provenance on CCAF), hence the dashed treatment.
+MERGE_BOX = {
+    "title": "Fan-in (Merge) Provenance",
+    "mono": ["orders.flink_batched", "FRESH trace \u00b7 1 hop",
+             "isotope_merge_edge_markers"],
+    "foot": "off by default",
+    "y": 1300,
+}
 # Set to None to drop the opt-in AI path from the chart entirely.
 OPTIONAL_BOX = {
     "title": "AI Root-Cause Analysis",
@@ -70,17 +80,29 @@ OPTIONAL_BOX = {
     "feeds_from_sink": 6,          # 1-based index into SINKS
 }
 
+# Wrapped narrow (<= ~34 chars) so the block clears the AI box on its right.
 NOTE_LEFT = [
-    "Four-stage order workflow; traces ride in headers.",
-    "shipping-notify can't append a header (no re-produce),",
-    "so it emits a consume-edge marker to its own topic.",
+    "Four-stage order workflow; traces",
+    "ride in headers. shipping-notify",
+    "can't append a header (no re-produce),",
+    "so it emits a consume-edge marker",
+    "to its own topic.",
     "",
-    "Flink is a collector too: ISOTOPE_APPEND_HOP appends",
-    "its own hop onto orders.flink_enriched, so Flink appears",
-    "in the topology graph as a producer, not only a reader.",
+    "Flink is a collector too:",
+    "ISOTOPE_APPEND_HOP appends its own",
+    "hop onto orders.flink_enriched, so",
+    "Flink appears in the topology graph",
+    "as a producer, not only a reader.",
     "",
-    "AI root-cause analysis is opt-in and CCAF-only.",
+    "A windowed merge cannot forward a",
+    "trace \u2014 many parents \u2014 so",
+    "ISOTOPE_MERGE_TRACE mints a fresh one",
+    "and the parent edges go to their own",
+    "topic. Opt-in, like AI root-cause",
+    "analysis (which is CCAF-only).",
 ]
+NOTE_X, NOTE_Y0, NOTE_SIZE, NOTE_PITCH = 1000, 1055, 30, 38
+
 LEGEND = [
     [("swatch", "service", "Service"), ("swatch", "topic", "Event topic (x-isotope)"),
      ("swatch", "marker", "Marker topic")],
@@ -121,8 +143,9 @@ def build():
     add('<title>Confluent Kafka Isotope \u2014 collectors and interpreter</title>')
     add('<desc>Four-stage order workflow stamps isotope headers; Flink SQL reads them '
         'to emit seven one-minute reports and also acts as a second collector, appending '
-        'its own hop onto orders.flink_enriched. An optional CCAF-only AI root-cause path '
-        'is off by default.</desc>')
+        'its own hop onto orders.flink_enriched. Two opt-in paths are off by default: '
+        'fan-in (merge) provenance, where a windowed merge mints a fresh trace and writes '
+        'its parent edges to their own topic, and a CCAF-only AI root-cause report.</desc>')
     add(f'<rect x="0" y="0" width="{W}" height="{H}" fill="{PALETTE["bg"]}"/>')
 
     text(20, 75, "Collector", 44, PALETTE["ink"], "start")
@@ -143,8 +166,8 @@ def build():
         y = row_y(i)
         box(TOP_X, y, TOP_W, ROW_H, key)
         _, _, t, s = PALETTE[key]
-        text(TOP_X + TOP_W // 2, y + 77, title, 34, t)
-        text(TOP_X + TOP_W // 2, y + 130, sub, 34, s)
+        text(TOP_X + TOP_W // 2, y + 77, title, 34 if len(title) <= 21 else 22, t)
+        text(TOP_X + TOP_W // 2, y + 130, sub, 34 if len(sub) <= 16 else 26, s)
         if i != FLINK_TOPIC_INDEX:
             line(SVC_X + SVC_W, row_mid(i), TOP_X, row_mid(i), dashed=(key == "marker"))
 
@@ -177,11 +200,28 @@ def build():
     line(MID_X, 735, TOP_X + TOP_W + 26, fy)
     add(f'<polygon points="{TOP_X + TOP_W + 30},{fy - 13} {TOP_X + TOP_W},{fy} '
         f'{TOP_X + TOP_W + 30},{fy + 13}" fill="{PALETTE["line"]}"/>')
+    # Flink -> the optional fan-in pair. Shares its origin with the model-B
+    # arrow above: both topics are produced by Flink, this one only when the
+    # merge stage is switched on.
+    if MERGE_BOX:
+        fill, stroke, t2, s2 = PALETTE["optional"]
+        my, mh = MERGE_BOX["y"], 265
+        aty = my + 120
+        line(MID_X, 735, TOP_X + TOP_W + 26, aty, stroke=stroke, dashed=True)
+        add(f'<polygon points="{TOP_X + TOP_W + 30},{aty - 13} {TOP_X + TOP_W},{aty} '
+            f'{TOP_X + TOP_W + 30},{aty + 13}" fill="{stroke}"/>')
+        box(TOP_X, my, TOP_W, mh, "optional", rx=20, dashed=True)
+        mcx = TOP_X + TOP_W // 2
+        text(mcx, my + 57, MERGE_BOX["title"], 28, t2)
+        for j, m in enumerate(MERGE_BOX["mono"]):
+            text(mcx, my + 105 + j * 42, m, 22, s2, mono=True)
+        text(mcx, my + 238, MERGE_BOX["foot"], 28, s2)
+
     line(MID_X + MID_W // 2, 735, MID_X + MID_W // 2, 795)
     box(MID_X, 795, MID_W, 155, "jar", rx=20)
     _, _, t, s = PALETTE["jar"]
     text(MID_X + MID_W // 2, 858, "isotope-flink-udf.jar", 34, t, mono=True)
-    text(MID_X + MID_W // 2, 910, "2 PTFs + 1 UDF", 34, s)
+    text(MID_X + MID_W // 2, 910, "2 PTFs + 3 UDFs", 34, s)
     text(MID_X + MID_W // 2, 1000, "One JAR \u00b7 same DDL \u00b7 CP or CCAF", 34, PALETTE["muted"])
 
     # report sinks
@@ -212,7 +252,8 @@ def build():
     # notes
     for i, ln in enumerate(NOTE_LEFT):
         if ln:
-            text(505, 1322 + i * 50, ln, 35, PALETTE["body"], "start")
+            text(NOTE_X, NOTE_Y0 + i * NOTE_PITCH, ln, NOTE_SIZE,
+                 PALETTE["body"], "start")
 
     # legend
     add('<rect x="20" y="1750" width="2000" height="400" rx="24" '

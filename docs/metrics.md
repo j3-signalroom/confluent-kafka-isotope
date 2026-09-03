@@ -10,10 +10,12 @@ A metrics-native alternative to three of the seven Flink reports: emit them as M
 - [**3.0 The three reports as PromQL**](#30-the-three-reports-as-promql)
 - [**4.0 Consume-side meters**](#40-consume-side-meters)
 - [**5.0 Operational queries (cookbook)**](#50-operational-queries-cookbook)
-- [**6.0 Mapping questions to PromQL (Easy → Medium)**](#60-mapping-questions-to-promql-easy--medium)
+- [**6.0 Mapping questions to PromQL**](#60-mapping-questions-to-promql)
   + [**6.1 Easy — single record, single trace**](#61-easy--single-record-single-trace)
   + [**6.2 Easy → Medium — single per-minute aggregates**](#62-easy--medium--single-per-minute-aggregates)
   + [**6.3 Medium — cross-window deltas, anomalies, multi-report joins**](#63-medium--cross-window-deltas-anomalies-multi-report-joins)
+  + [**6.4 Hard — tail latency, drift, correlation**](#64-hard--tail-latency-drift-correlation)
+  + [**6.5 Harder — forensic replay, compliance, cross-system**](#65-harder--forensic-replay-compliance-cross-system)
 - [**7.0 What stays in Flink — and two deliberate gaps**](#70-what-stays-in-flink--and-two-deliberate-gaps)
 - [**8.0 One-command showcase: Prometheus + Grafana on Minikube**](#80-one-command-showcase-prometheus--grafana-on-minikube)
 <!-- tocstop -->
@@ -140,7 +142,7 @@ up{job="isotope-stages"} == 0
 
 > **Why no `histogram_quantile`?** These are Micrometer `Timer`s exported as `_sum`/`_count`/`_max` — there are **no `_bucket` series**, so percentiles aren't available. Use `rate(_sum)/rate(_count)` for the average and `_max` for the recent worst case (a decaying per-step max, not an all-time high). Enable client-side histograms in the exporter if you need true quantiles.
 
-## **6.0 Mapping questions to PromQL (Easy → Medium)**
+## **6.0 Mapping questions to PromQL**
 What can you actually *ask* these meters? Below, each question carries a verdict:
 
 - ✅ **PromQL** — answerable directly from the meters.
@@ -219,6 +221,30 @@ unless
 | Where did each stuck trace last get seen? | 🔴 | Per-trace state → Flink / the header trail. |
 
 The pattern: **aggregates and time-deltas → PromQL; identity, dedup, and absence → Flink.** That boundary is the same one [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java) draws (3 metrics-native reports, 4 stay in Flink), and the next section spells out the two columns that can never cross it.
+
+### **6.4 Hard — tail latency, drift, correlation**
+Past this point PromQL is out of the running — not because the questions are exotic, but because every one of them needs either an adaptive sketch or a join across two reports. Listed to complete the [five-tier ladder](../README.md) the root README shows; the "where to look" column is the answer.
+
+| Question | Verdict | Where to look |
+|---|---|---|
+| What are p50 / p95 / p99 across the pipeline? | 🔴 | `latency_percentiles_flat_1m` — a T-Digest sketch inside `LATENCY_PERCENTILES`, keyed `(pipeline, origin_service, this_topic)`. These Timers publish no `_bucket` series, so `histogram_quantile` is unavailable (§5.0, §7.0). |
+| Which edge owns the tail? | 🔴 | Same report — rank `p99_ms` across `this_topic` inside one window. |
+| Did the tail get worse after a deploy? | 🔴 | Compare `p99_ms` for one key across two windows. PromQL's `offset` trick in §6.3 drifts the **average**, never the tail. |
+| Is a tail regression global, or confined to one pipeline? | 🔴 | `p99_ms` per `pipeline` in the same window; `sample_count` says whether the key carried enough traffic to trust the number. |
+| Are the slow windows the retry-storm windows? | 🔴 | Join `hop_distribution_1m` to `latency_percentiles_flat_1m` on `(window_start, pipeline, this_topic)` — hop-count outliers against the tail. |
+| Is the average hiding the tail? | 🔴 | `avg_latency_ms` / `max_latency_ms` from `latency_report_1m` against `p99_ms` on the same key. Prometheus ports avg and max, but not the windowed min (§7.0). |
+
+### **6.5 Harder — forensic replay, compliance, cross-system**
+Identity, derivation, and absence — the three things a counter structurally cannot hold. Two of these need an opt-in stage, marked inline.
+
+| Question | Verdict | Where to look |
+|---|---|---|
+| Reconstruct a full per-trace journey for an audit? | 🔴 | The record's own `isotope` header hop list, plus `bipartite_topology_report_1m` for the edges around it and `stuck_trace_alerts_1m` (`last_service`, `last_topic`, `last_hop_count`) for where it stopped. |
+| Which input records produced this merged output? | 🔴 | **Opt-in** fan-in provenance ([flink-collector.md §2.4](./flink-collector.md#24-optional-fan-in-provenance)): join `orders.flink_batched` to `isotope_merge_edge_markers` on `merge_trace_id` for the whole parent set — `contributing_trace_id` / `_service` / `_topic`, one row per contributing record. No aggregate ever forwards a parent's trace, so this is the *only* way to recover the derivation. |
+| Which stage lost the traces that never reached the terminal consumer? | 🔴 | `coverage_report_1m`'s `distinct_traces`, walked topic by topic, locates the drop-off; naming the lost traces takes an anti-join over the `isotope` view against the consume edges. |
+| Did the isotope survive Flink's own hop? | 🔴 | `orders.flink_enriched` carries the hop `ISOTOPE_APPEND_HOP` stamped in-band, so Flink appears in `topology_report_1m` / `bipartite_topology_report_1m` as a `producer_service` like any service ([flink-collector.md](./flink-collector.md)). |
+| What fraction of records on a topic carried a parseable isotope at all? | 🔴 | Count `isotope_raw` (unfiltered) against the `isotope` view, which keeps only rows with `x-isotope-trace-id`. Prometheus cannot supply the denominator: an untagged record never reaches a meter in the first place. |
+| Why was this trace stuck — not just that it was? | 🔴 | **Opt-in**, CCAF-only AI report (root README §3.3.2): `isotope_report_trace_rca_1m.root_cause`, one `ML_PREDICT` call per stuck-trace alert. |
 
 ## **7.0 What stays in Flink — and two deliberate gaps**
 Moving these out isn't free — two columns the Flink reports carry have **no Prometheus equivalent**, and both are documented in [PrometheusIsotopeMetrics.java](https://github.com/j3-signalroom/kafka-isotope/blob/main/kafka-isotope-metrics/src/main/java/ai/signalroom/kafka/isotope/metrics/PrometheusIsotopeMetrics.java):
