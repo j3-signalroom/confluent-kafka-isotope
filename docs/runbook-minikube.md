@@ -81,7 +81,7 @@ All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`): 
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true
 ```
 
-That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more INSERTs to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing record, so it roughly doubles the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-optional-fan-in-provenance). Teardown removes those topics either way.
+That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more `INSERT`s to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing record, so it roughly doubles the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-optional-fan-in-provenance). Teardown removes those topics either way.
 
 ## **6.0 Drive traffic (required to see report rows)**
 All report jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, which only emit when the watermark advances past `window_end`. Spread records across **multiple** windows:
