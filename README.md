@@ -110,11 +110,11 @@ A `ProducerInterceptor` stamps the isotope onto each record and appends one hop 
 
 For services that consume and then produce, Kafka Isotope supports **two complementary propagation models** for carrying the trace identity forward:
 
-* **Out-of-band propagation** — `IsotopeContext.adoptFromRecord()` places the inbound isotope into ambient thread-local context, where the subsequent `send()` retrieves it. This model is designed for conventional Kafka applications where the consume → produce hop remains within the same execution context.
+* **Out-of-band propagation** — `IsotopeContext.adoptFromRecord()` places the inbound isotope into thread-local context, where the subsequent `send()` retrieves it. This model is designed for conventional Kafka applications where the consume → produce hop remains within the same execution context.
 
 * **In-band propagation** — the isotope remains attached to the record as it moves through the processing graph. Because propagation does not depend on thread-local state, the trace identity can survive thread, task, shuffle, network, and JVM boundaries such as those introduced by Apache Flink.
 
-Both models produce the same Kafka isotope headers and preserve the same trace identity across hops; they differ only in **how that identity is propagated between consume and produce**: out-of-band through ambient application context, or in-band with the record itself.
+Both models produce the same Kafka isotope headers and preserve the same trace identity across hops; they differ only in **how that identity is propagated between consume and produce**: out-of-band through thread-local context, or in-band with the record itself.
 
 Apache Flink combines the isotope headers and consume-edge markers to reconstruct the complete **service → topic → service** graph and produce seven reports:
 
