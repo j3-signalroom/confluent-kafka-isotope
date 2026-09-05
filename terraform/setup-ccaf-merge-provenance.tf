@@ -14,7 +14,8 @@
 #                                because forwarding one of its 1,000 parents'
 #                                trace IDs would fabricate provenance.
 #   isotope_merge_edge_markers   the many-to-one edges, one row per
-#                                contributing trace. Same architectural
+#                                contributing trace, weighted by
+#                                contributing_records. Same architectural
 #                                pattern as isotope_consume_edge_markers.
 #
 # The merged record and its edge rows are emitted by two different statements
@@ -176,7 +177,12 @@ resource "confluent_flink_statement" "merge_edge_markers_sink" {
         `pipeline`              STRING,
         `contributing_trace_id` STRING,
         `contributing_service`  STRING,
-        `contributing_topic`    STRING
+        `contributing_topic`    STRING,
+        -- Weight of the edge: how many records that parent fed into the window.
+        -- One row per contributing TRACE, so the count lives here rather than in
+        -- duplicate rows. Keep in step with
+        -- scripts/flink/sql/cp/08_merge_provenance_sinks.fql.
+        `contributing_records`  BIGINT
     ) WITH (
         'value.format' = 'proto-registry'
     );
@@ -399,7 +405,8 @@ resource "confluent_flink_statement" "insert_merge_provenance" {
         `pipeline`,
         `trace_id`                                            AS `contributing_trace_id`,
         `this_service`                                        AS `contributing_service`,
-        `this_topic`                                          AS `contributing_topic`
+        `this_topic`                                          AS `contributing_topic`,
+        COUNT(*)                                              AS `contributing_records`
     FROM TABLE(
         TUMBLE(TABLE `isotope`, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
     )

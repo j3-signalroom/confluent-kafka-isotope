@@ -58,7 +58,8 @@ SELECT
     `pipeline`,
     `trace_id`                                            AS `contributing_trace_id`,
     `this_service`                                        AS `contributing_service`,
-    `this_topic`                                          AS `contributing_topic`
+    `this_topic`                                          AS `contributing_topic`,
+    COUNT(*)                                              AS `contributing_records`
 FROM TABLE(
     TUMBLE(TABLE `isotope`, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
 )
@@ -74,15 +75,16 @@ WHERE `this_topic` = 'orders.placed'
 --
 -- Grouping also deduplicates: one row per contributing TRACE per window
 -- rather than per record. An edge list is a set of edges, and the same parent
--- trace contributing twice is still one derivation edge. The invariant that
--- falls out is exact and worth checking:
+-- trace contributing twice is still one derivation edge — so the weight lives
+-- in `contributing_records` instead of in duplicate rows. Nothing is lost, and
+-- BOTH reconciliations become exact:
 --
---   COUNT(*) per merge_trace_id  ==  orders.flink_batched.distinct_traces
+--   COUNT(*)                  per merge_trace_id == orders.flink_batched.distinct_traces
+--   SUM(contributing_records) per merge_trace_id == orders.flink_batched.event_count
 --
--- (not `event_count`, which counts records). To go back to one row per
--- record, add a per-record key to the GROUP BY — but note the `isotope` view
--- does not project one today, and CCAF does not expose partition/offset
--- metadata the way the CP source tables do.
+-- Going back to one row per record would need a per-record key in the GROUP BY;
+-- the `isotope` view does not project one today, and CCAF does not expose
+-- partition/offset metadata the way the CP source tables do.
 GROUP BY
     `window_start`,
     `window_end`,

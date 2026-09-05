@@ -15,7 +15,8 @@
 --                               than record it.
 --
 --   isotope_merge_edge_markers  the many-to-one edges, one row per
---                               contributing trace, joining each parent
+--                               contributing trace (weighted by
+--                               contributing_records), joining each parent
 --                               trace to the merge trace its record fed.
 --                               Same architectural pattern as
 --                               isotope_consume_edge_markers.
@@ -87,7 +88,15 @@ CREATE TABLE IF NOT EXISTS `isotope_merge_edge_markers` (
     `pipeline`               STRING,
     `contributing_trace_id`  STRING,
     `contributing_service`   STRING,
-    `contributing_topic`     STRING
+    `contributing_topic`     STRING,
+    -- How many records that parent trace fed into this window. The row is one
+    -- EDGE (a parent either contributed or it did not, and asserting it twice
+    -- does not make it truer), so weight belongs in a column rather than in
+    -- duplicate rows. Keeps skew analysis possible and makes both
+    -- reconciliations hold:
+    --   COUNT(*)                  per merge_trace_id == distinct_traces
+    --   SUM(contributing_records) per merge_trace_id == event_count
+    `contributing_records`   BIGINT
 ) WITH (
     'connector'                    = 'kafka',
     'topic'                        = 'isotope_merge_edge_markers',

@@ -81,7 +81,7 @@ All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`): 
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true
 ```
 
-That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more `INSERT`s to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing trace per window, a material fraction of the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-optional-fan-in-provenance). Teardown removes those topics either way.
+That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more `INSERT`s to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing trace per window, weighted by `contributing_records`, a material fraction of the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-optional-fan-in-provenance). Teardown removes those topics either way.
 
 **[OPTIONAL] State-level provenance (§3.6).** A second, independent switch:
 

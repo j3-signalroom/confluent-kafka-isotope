@@ -433,8 +433,8 @@ scripts/
     75_flink_collector.fql              INSERT INTO: Flink stamps its own hop (1:1)
     80_merge_collector.fql              OPTIONAL (§3.5) — windowed merge, fresh trace
     81_merge_edge_markers.fql           OPTIONAL (§3.5) — one row per contributing trace
-                                        per window; GROUP BY keeps its lateness in step
-                                        with 80
+                                        per window, weighted by contributing_records;
+                                        GROUP BY keeps its lateness in step with 80
     85_state_provenance.fql             OPTIONAL (§3.6) — one record per emitted state,
                                         parents inline (CP only)
     99_teardown.fql                     DROP TABLE / VIEW / FUNCTION
@@ -661,7 +661,7 @@ The other four reports — `latency_percentiles`, `coverage`, `bipartite_topolog
 ### **3.5 [OPTIONAL] Fan-in (Merge) Provenance**
 The Flink collector is **1:1 by design** — it appends a hop to records it forwards one-for-one. That is tracing, and a trace is only a truthful derivation record while every step has exactly one parent. A windowed aggregate breaks that: a `SUM` over 1,000 records has 1,000 parents, and forwarding one of their trace IDs would not be incomplete provenance — it would **fabricate** provenance.
 
-This optional path records the fan-in case honestly, without changing the isotope wire format. The merged record on `orders.flink_batched` carries a **fresh** trace with one hop, and the many-to-one edges go to `isotope_merge_edge_markers` — one row per contributing trace per window — the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges. Join the two on `merge_trace_id` to recover any merged record's full parent set.
+This optional path records the fan-in case honestly, without changing the isotope wire format. The merged record on `orders.flink_batched` carries a **fresh** trace with one hop, and the many-to-one edges go to `isotope_merge_edge_markers` — one row per contributing trace per window, weighted by `contributing_records` — the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges. Join the two on `merge_trace_id` to recover any merged record's full parent set.
 
 Both runtimes use the same switch, off by default:
 

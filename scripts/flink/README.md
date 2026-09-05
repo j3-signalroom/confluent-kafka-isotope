@@ -86,7 +86,7 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
                                         + isotope_merge_edge_markers (typed edge list)
   80_merge_collector.fql                OPTIONAL — INSERT INTO: windowed merge, fresh trace via
                                         ISOTOPE_MERGE_TRACE (fan-in, so it cannot continue a trace)
-  81_merge_edge_markers.fql             OPTIONAL — INSERT INTO: one merge edge per contributing trace,
+  81_merge_edge_markers.fql             OPTIONAL — one merge edge per contributing trace (+ record count),
                                         labelled with the same derived ID via ISOTOPE_MERGE_TRACE_ID
   09_state_provenance_sinks.fql         OPTIONAL — CREATE VIEW entity_log (append-mode change log)
                                         + isotope_state_provenance (version chain, parents inline)
@@ -156,4 +156,4 @@ make cc-flink-reports-down CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
                            # terraform destroy: deletes the environment and everything in it
 ```
 
-See the [root README §3.3 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#33-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit.
+See the [root README §3.3 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#33-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit
