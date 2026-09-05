@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2040" height="2190" viewBox="0 0 2040 2190" role="img" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="2040" height="2370" viewBox="0 0 2040 2370" role="img" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
 <title>Confluent Kafka Isotope — collectors and interpreter</title>
-<desc>Four-stage order workflow stamps isotope headers; Flink SQL reads them to emit seven one-minute reports and also acts as a second collector, appending its own hop onto orders.flink_enriched. Two opt-in paths are off by default: fan-in (merge) provenance, where a windowed merge mints a fresh trace and writes its parent edges to their own topic, and a CCAF-only AI root-cause report.</desc>
-<rect x="0" y="0" width="2040" height="2190" fill="#F7F9FB"/>
+<desc>Four-stage order workflow stamps isotope headers; Flink SQL reads them to emit seven one-minute reports and also acts as a second collector, appending its own hop onto orders.flink_enriched. Three opt-in paths are off by default: fan-in (merge) provenance, where a windowed merge mints a fresh trace and writes its parent edges to their own topic; CP-only state-level provenance, which publishes a content-addressed version chain per entity instead of stamping hops; and a CCAF-only AI root-cause report.</desc>
+<rect x="0" y="0" width="2040" height="2370" fill="#F7F9FB"/>
 <text x="20" y="75" text-anchor="start" font-size="44" fill="#2C2C2A">Collector</text>
 <text x="20" y="128" text-anchor="start" font-size="32" fill="#5F5E5A">Stamp headers; emit markers + metrics</text>
 <text x="1540" y="75" text-anchor="start" font-size="44" fill="#2C2C2A">Interpreter</text>
@@ -62,6 +62,13 @@
 <text x="724" y="1447" text-anchor="middle" font-size="22" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">FRESH trace · 1 hop</text>
 <text x="724" y="1489" text-anchor="middle" font-size="22" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">isotope_merge_edge_markers</text>
 <text x="724" y="1538" text-anchor="middle" font-size="28" fill="#4A7F6C">off by default</text>
+<line x1="1000" y1="735" x2="931" y2="1695" stroke="#4FAE8B" stroke-width="2" stroke-dasharray="14 12"/>
+<polygon points="935,1682 905,1695 935,1708" fill="#4FAE8B"/>
+<rect x="543" y="1600" width="362" height="210" rx="20" fill="#E8F5EF" stroke="#4FAE8B" stroke-width="2" stroke-dasharray="16 12"/>
+<text x="724" y="1657" text-anchor="middle" font-size="28" fill="#146A50">State Provenance · CP only</text>
+<text x="724" y="1705" text-anchor="middle" font-size="22" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">isotope_state_provenance</text>
+<text x="724" y="1747" text-anchor="middle" font-size="22" fill="#4A7F6C" font-family="SF Mono, Menlo, Consolas, monospace">version chain · parents[]</text>
+<text x="724" y="1785" text-anchor="middle" font-size="28" fill="#4A7F6C">off by default</text>
 <line x1="1223" y1="735" x2="1223" y2="795" stroke="#8A8A85" stroke-width="2"/>
 <rect x="1000" y="795" width="447" height="155" rx="20" fill="#E9E6DE" stroke="#A9A497" stroke-width="2"/>
 <text x="1223" y="858" text-anchor="middle" font-size="34" fill="#44443F" font-family="SF Mono, Menlo, Consolas, monospace">isotope-flink-udf.jar</text>
@@ -113,25 +120,29 @@
 <text x="1000" y="1625" text-anchor="start" font-size="30" fill="#44443F">and the parent edges go to their own</text>
 <text x="1000" y="1663" text-anchor="start" font-size="30" fill="#44443F">topic. Opt-in, like AI root-cause</text>
 <text x="1000" y="1701" text-anchor="start" font-size="30" fill="#44443F">analysis (which is CCAF-only).</text>
-<rect x="20" y="1750" width="2000" height="400" rx="24" fill="#F0F2EF" stroke="#C9CDC9" stroke-width="2"/>
-<rect x="45" y="1815" width="38" height="38" rx="8" fill="#DEEBF7" stroke="#8AB6DE" stroke-width="2"/>
-<text x="103" y="1845" text-anchor="start" font-size="34" fill="#44443F">Service</text>
-<rect x="700" y="1815" width="38" height="38" rx="8" fill="#E7E3F8" stroke="#8B7FD1" stroke-width="2"/>
-<text x="758" y="1845" text-anchor="start" font-size="34" fill="#44443F">Event topic (x-isotope)</text>
-<rect x="1420" y="1815" width="38" height="38" rx="8" fill="#FBE4EC" stroke="#C2537E" stroke-width="2"/>
-<text x="1478" y="1845" text-anchor="start" font-size="34" fill="#44443F">Marker topic</text>
-<rect x="45" y="1895" width="38" height="38" rx="8" fill="#DDF2E9" stroke="#4FAE8B" stroke-width="2"/>
-<text x="103" y="1925" text-anchor="start" font-size="34" fill="#44443F">Flink interpreter + collector</text>
-<rect x="700" y="1895" width="38" height="38" rx="8" fill="#FCEBD5" stroke="#E0A44E" stroke-width="2"/>
-<text x="758" y="1925" text-anchor="start" font-size="34" fill="#44443F">Report sink (1-min)</text>
-<rect x="1420" y="1895" width="38" height="38" rx="8" fill="#E9E6DE" stroke="#A9A497" stroke-width="2"/>
-<text x="1478" y="1925" text-anchor="start" font-size="34" fill="#44443F">Shadow JAR</text>
-<rect x="45" y="1975" width="38" height="38" rx="8" fill="#E4E8F0" stroke="#9AA3B5" stroke-width="2"/>
-<text x="103" y="2005" text-anchor="start" font-size="34" fill="#44443F">Metrics backend</text>
-<line x1="700" y1="1994" x2="738" y2="1994" stroke="#8A8A85" stroke-width="3"/>
-<text x="758" y="2005" text-anchor="start" font-size="34" fill="#44443F">Produce</text>
-<line x1="1420" y1="1994" x2="1458" y2="1994" stroke="#8A8A85" stroke-width="3" stroke-dasharray="14 12"/>
-<text x="1478" y="2005" text-anchor="start" font-size="34" fill="#44443F">Edge marker emit</text>
-<rect x="45" y="2055" width="38" height="38" rx="8" fill="#E8F5EF" stroke="#4FAE8B" stroke-width="2" stroke-dasharray="8 6"/>
-<text x="103" y="2085" text-anchor="start" font-size="34" fill="#44443F">Optional · off by default</text>
+<text x="1000" y="1777" text-anchor="start" font-size="30" fill="#44443F">State provenance (CP only) versions</text>
+<text x="1000" y="1815" text-anchor="start" font-size="30" fill="#44443F">each entity by content instead — no</text>
+<text x="1000" y="1853" text-anchor="start" font-size="30" fill="#44443F">window to key on, and no hops: a</text>
+<text x="1000" y="1891" text-anchor="start" font-size="30" fill="#44443F">revision is not a movement.</text>
+<rect x="20" y="1930" width="2000" height="400" rx="24" fill="#F0F2EF" stroke="#C9CDC9" stroke-width="2"/>
+<rect x="45" y="1995" width="38" height="38" rx="8" fill="#DEEBF7" stroke="#8AB6DE" stroke-width="2"/>
+<text x="103" y="2025" text-anchor="start" font-size="34" fill="#44443F">Service</text>
+<rect x="700" y="1995" width="38" height="38" rx="8" fill="#E7E3F8" stroke="#8B7FD1" stroke-width="2"/>
+<text x="758" y="2025" text-anchor="start" font-size="34" fill="#44443F">Event topic (x-isotope)</text>
+<rect x="1420" y="1995" width="38" height="38" rx="8" fill="#FBE4EC" stroke="#C2537E" stroke-width="2"/>
+<text x="1478" y="2025" text-anchor="start" font-size="34" fill="#44443F">Marker topic</text>
+<rect x="45" y="2075" width="38" height="38" rx="8" fill="#DDF2E9" stroke="#4FAE8B" stroke-width="2"/>
+<text x="103" y="2105" text-anchor="start" font-size="34" fill="#44443F">Flink interpreter + collector</text>
+<rect x="700" y="2075" width="38" height="38" rx="8" fill="#FCEBD5" stroke="#E0A44E" stroke-width="2"/>
+<text x="758" y="2105" text-anchor="start" font-size="34" fill="#44443F">Report sink (1-min)</text>
+<rect x="1420" y="2075" width="38" height="38" rx="8" fill="#E9E6DE" stroke="#A9A497" stroke-width="2"/>
+<text x="1478" y="2105" text-anchor="start" font-size="34" fill="#44443F">Shadow JAR</text>
+<rect x="45" y="2155" width="38" height="38" rx="8" fill="#E4E8F0" stroke="#9AA3B5" stroke-width="2"/>
+<text x="103" y="2185" text-anchor="start" font-size="34" fill="#44443F">Metrics backend</text>
+<line x1="700" y1="2174" x2="738" y2="2174" stroke="#8A8A85" stroke-width="3"/>
+<text x="758" y="2185" text-anchor="start" font-size="34" fill="#44443F">Produce</text>
+<line x1="1420" y1="2174" x2="1458" y2="2174" stroke="#8A8A85" stroke-width="3" stroke-dasharray="14 12"/>
+<text x="1478" y="2185" text-anchor="start" font-size="34" fill="#44443F">Edge marker emit</text>
+<rect x="45" y="2235" width="38" height="38" rx="8" fill="#E8F5EF" stroke="#4FAE8B" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="103" y="2265" text-anchor="start" font-size="34" fill="#44443F">Optional · off by default</text>
 </svg>

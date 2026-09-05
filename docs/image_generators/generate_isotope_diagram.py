@@ -14,7 +14,7 @@ import argparse
 import os
 from xml.sax.saxutils import escape
 
-W, H = 2040, 2190
+W, H = 2040, 2370
 SANS = "Helvetica Neue, Helvetica, Arial, sans-serif"
 MONO = "SF Mono, Menlo, Consolas, monospace"
 
@@ -41,6 +41,7 @@ MID_X, MID_W = 1000, 447        # interpreter column
 SNK_X, SNK_W = 1540, 490        # report sink column
 ROW_H, ROW_PITCH, ROW_Y0 = 165, 215, 215   # collector rows
 SNK_H, SNK_PITCH, SNK_Y0 = 105, 120, 140   # sink rows
+LEGEND_Y = 1930                            # legend panel top
 
 SERVICES = [
     ("order-intake", "producer"),
@@ -72,6 +73,15 @@ MERGE_BOX = {
     "foot": "off by default",
     "y": 1300,
 }
+# Set to None to drop the opt-in state-provenance path from the chart. CP only:
+# the version preimage needs raw value bytes, which CCAF's catalog tables do not
+# expose (docs/state-provenance.md 5.0).
+STATE_BOX = {
+    "title": "State Provenance \u00b7 CP only",
+    "mono": ["isotope_state_provenance", "version chain \u00b7 parents[]"],
+    "foot": "off by default",
+    "y": 1600,
+}
 # Set to None to drop the opt-in AI path from the chart entirely.
 OPTIONAL_BOX = {
     "title": "AI Root-Cause Analysis",
@@ -100,6 +110,11 @@ NOTE_LEFT = [
     "and the parent edges go to their own",
     "topic. Opt-in, like AI root-cause",
     "analysis (which is CCAF-only).",
+    "",
+    "State provenance (CP only) versions",
+    "each entity by content instead \u2014 no",
+    "window to key on, and no hops: a",
+    "revision is not a movement.",
 ]
 NOTE_X, NOTE_Y0, NOTE_SIZE, NOTE_PITCH = 1000, 1055, 30, 38
 
@@ -143,9 +158,11 @@ def build():
     add('<title>Confluent Kafka Isotope \u2014 collectors and interpreter</title>')
     add('<desc>Four-stage order workflow stamps isotope headers; Flink SQL reads them '
         'to emit seven one-minute reports and also acts as a second collector, appending '
-        'its own hop onto orders.flink_enriched. Two opt-in paths are off by default: '
+        'its own hop onto orders.flink_enriched. Three opt-in paths are off by default: '
         'fan-in (merge) provenance, where a windowed merge mints a fresh trace and writes '
-        'its parent edges to their own topic, and a CCAF-only AI root-cause report.</desc>')
+        'its parent edges to their own topic; CP-only state-level provenance, which '
+        'publishes a content-addressed version chain per entity instead of stamping hops; '
+        'and a CCAF-only AI root-cause report.</desc>')
     add(f'<rect x="0" y="0" width="{W}" height="{H}" fill="{PALETTE["bg"]}"/>')
 
     text(20, 75, "Collector", 44, PALETTE["ink"], "start")
@@ -217,6 +234,23 @@ def build():
             text(mcx, my + 105 + j * 42, m, 22, s2, mono=True)
         text(mcx, my + 238, MERGE_BOX["foot"], 28, s2)
 
+    # Flink -> the optional state-provenance topic. Same origin again: a third
+    # thing Flink produces, and only when switched on. Unlike the two above it
+    # carries no hops at all — a revision is not a movement.
+    if STATE_BOX:
+        fill, stroke, t3, s3 = PALETTE["optional"]
+        sy, sh = STATE_BOX["y"], 210
+        aty2 = sy + 95
+        line(MID_X, 735, TOP_X + TOP_W + 26, aty2, stroke=stroke, dashed=True)
+        add(f'<polygon points="{TOP_X + TOP_W + 30},{aty2 - 13} {TOP_X + TOP_W},{aty2} '
+            f'{TOP_X + TOP_W + 30},{aty2 + 13}" fill="{stroke}"/>')
+        box(TOP_X, sy, TOP_W, sh, "optional", rx=20, dashed=True)
+        scx = TOP_X + TOP_W // 2
+        text(scx, sy + 57, STATE_BOX["title"], 28, t3)
+        for j, m in enumerate(STATE_BOX["mono"]):
+            text(scx, sy + 105 + j * 42, m, 22, s3, mono=True)
+        text(scx, sy + 185, STATE_BOX["foot"], 28, s3)
+
     line(MID_X + MID_W // 2, 735, MID_X + MID_W // 2, 795)
     box(MID_X, 795, MID_W, 155, "jar", rx=20)
     _, _, t, s = PALETTE["jar"]
@@ -256,11 +290,11 @@ def build():
                  PALETTE["body"], "start")
 
     # legend
-    add('<rect x="20" y="1750" width="2000" height="400" rx="24" '
+    add(f'<rect x="20" y="{LEGEND_Y}" width="2000" height="400" rx="24" '
         'fill="#F0F2EF" stroke="#C9CDC9" stroke-width="2"/>')
     cols = [45, 700, 1420]
     for r, row in enumerate(LEGEND):
-        y = 1815 + r * 80
+        y = LEGEND_Y + 65 + r * 80
         for c, item in enumerate(row):
             if not item:
                 continue
