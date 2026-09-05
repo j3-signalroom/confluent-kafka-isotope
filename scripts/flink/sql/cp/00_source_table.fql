@@ -1,5 +1,5 @@
 -- ============================================================================
--- Source tables — Confluent Platform Flink (CMF on Minikube)
+-- Source tables — Confluent Platform Flink (CMF on minikube)
 --
 -- Apply via the Flink SQL Client against the CP Flink session cluster:
 --   make cp-flink-up                              # bring up the cluster

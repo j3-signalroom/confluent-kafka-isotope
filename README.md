@@ -7,8 +7,8 @@
   + [**1.1 Anatomy of the Isotope Tracing Artifact**](#11-anatomy-of-the-isotope-tracing-artifact)
 - [**2.0 Architecture**](#20-architecture)
 - [**3.0 Getting Started**](#30-getting-started)
-  + [**3.1 Integration Tests with Confluent Platform on Minikube**](#31-integration-tests-with-confluent-platform-on-minikube)
-  + [**3.2 Seven Scalar Headers Flink SQL Reports with Apache Flink on Minikube**](#32-seven-scalar-headers-flink-sql-reports-with-apache-flink-on-minikube)
+  + [**3.1 Integration Tests with Confluent Platform on minikube**](#31-integration-tests-with-confluent-platform-on-minikube)
+  + [**3.2 Seven Scalar Headers Flink SQL Reports with Apache Flink on minikube**](#32-seven-scalar-headers-flink-sql-reports-with-apache-flink-on-minikube)
   + [**3.3 Seven Scalar Headers Flink SQL Reports with Confluent Cloud for Apache Flink**](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink)
     - [**3.3.1 Why `latency_percentiles` is a `ProcessTableFunction` (PTF)**](#331-why-latency_percentiles-is-a-processtablefunction-ptf)
     - [**3.3.2 [OPTIONAL] Eighth Report — AI Root-Cause Analysis (RCA)**](#332-optional-eighth-report--ai-root-cause-analysis-rca)
@@ -185,7 +185,7 @@ The isotope is a **JSON object** that travels in the `x-isotope` Kafka record he
 ## **2.0 Architecture**
 A bird's-eye view of the moving parts. The demo CLI in [`app/`](app/) consumes the external tracing library ([`ai.signalroom:kafka-isotope-core`](https://github.com/j3-signalroom/kafka-isotope)), which registers a Kafka `ProducerInterceptor` that stamps an isotope into record headers on every `send()`. Consume-then-produce services propagate the inbound trace by explicitly calling `IsotopeContext.adoptFromRecord(record)`. Business events then flow through a three-topic Kafka pipeline, where Flink SQL reads the isotope metadata and emits one-minute aggregate reports.
 
-Both runtimes run the same seven logical reports off the same source and view definitions, though each runtime keeps its own copy of the SQL. **Confluent Platform (CP) + Flink** on Minikube executes the `.fql` files under [`scripts/flink/sql/cp/`](scripts/flink/sql/cp/) as a single Flink 2.1 Confluent Manager for Apache Flink (CMF) Application (`IsotopeReportsJob`), while **Confluent Cloud for Apache Flink (CCAF)** applies the same logical SQL as inline `confluent_flink_statement` Terraform resources under [`terraform/`](terraform/). The shadow JAR from [`ptf/`](ptf/)—which powers two of the seven reports plus the collector UDF—runs unchanged on both runtimes: bundled into the CP application JAR and uploaded as a Flink artifact on CCAF.
+Both runtimes run the same seven logical reports off the same source and view definitions, though each runtime keeps its own copy of the SQL. **Confluent Platform (CP) + Flink** on minikube executes the `.fql` files under [`scripts/flink/sql/cp/`](scripts/flink/sql/cp/) as a single Flink 2.1 Confluent Manager for Apache Flink (CMF) Application (`IsotopeReportsJob`), while **Confluent Cloud for Apache Flink (CCAF)** applies the same logical SQL as inline `confluent_flink_statement` Terraform resources under [`terraform/`](terraform/). The shadow JAR from [`ptf/`](ptf/)—which powers two of the seven reports plus the collector UDF—runs unchanged on both runtimes: bundled into the CP application JAR and uploaded as a Flink artifact on CCAF.
 
 Alongside the seven reports, both runtimes run one **collector** INSERT that forwards `orders.placed` to `orders.flink_enriched`, appending a Flink hop on the way. Each side runs all eight as a **single job**: CP through `IsotopeReportsJob`'s `StatementSet`, CCAF through `EXECUTE STATEMENT SET BEGIN ... END`. That matters for cost as much as symmetry — every separate CCAF statement carries its own 1-CFU floor, so eight statements meant eight floors.
 
@@ -238,7 +238,7 @@ flowchart TB
 
     subgraph Flink["Flink SQL reports — identical source/view DDL; sink format differs by runtime"]
         direction LR
-        subgraph CP["Minikube · Flink 2.1 CMF Application"]
+        subgraph CP["minikube · Flink 2.1 CMF Application"]
             SQLCP["scripts/flink/sql/cp/*.fql<br/>(bundled in the app JAR)"]
             JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+2 with --merge-provenance<br/>+1 with --state-provenance (§3.6)<br/>Avro+SR sinks"]
             SQLCP --> JCP
@@ -325,7 +325,7 @@ app/                                    demo CLI + tests (consumes the isotope l
                                         ThreeStageHopPropagationIT, BipartiteTopologyIT,
                                         IsotopeTestHarness — live-broker tests; produce/consume
                                         DemoEvent via SR-framed Protobuf
-                                        (need Minikube CP + SR port-forwarded)
+                                        (need minikube CP + SR port-forwarded)
 ptf/                                    Flink reports application + PTF shadow JAR
   build.gradle                          ptf module build — Flink deps + the shadow JAR both
                                         deploy paths upload (`make reports-jar`)
@@ -486,7 +486,7 @@ docs/                                   extracted long-form docs (linked from th
   state-provenance.md                   state-level provenance (§3.6) — content-addressed
                                         versions, why the parent set is inline, and the
                                         CCAF canonicalization gap
-  runbook-minikube.md                   full CP-on-Minikube run sequence (§3.2)
+  runbook-minikube.md                   full CP-on-minikube run sequence (§3.2)
   runbook-ccaf.md                       full CCAF / Terraform run sequence (§3.3)
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
   terraform.png                         rendered resource graph (embedded in §3.3)
@@ -536,13 +536,13 @@ cd /path/to/confluent-kafka-isotope
 
 Then decide how you want to run the repo:
 
-### **3.1 Integration Tests with Confluent Platform on Minikube**
+### **3.1 Integration Tests with Confluent Platform on minikube**
 ```bash
 make install-prereqs     # docker, kubectl, minikube, helm, gettext, gradle, openjdk17
 make check-prereqs       # verify they're on PATH
 ```
 
-Default Minikube sizing (override via env): `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480`, `MINIKUBE_DISK=50g`.
+Default minikube sizing (override via env): `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480`, `MINIKUBE_DISK=50g`.
 
 Bring up the local Confluent Platform stack and port-forward Kafka + SR:
 
@@ -582,10 +582,10 @@ The integration tests cover:
 | `ThreeStageHopPropagationIT` | `order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service` produces a stable trace ID, 2-hop trail in send order, and correct scalar headers (origin = `order-intake-service`, this = `order-enrichment-service`, hop count = 2) at the terminal; consume-then-produce hops use `IsotopeContext.adoptFromRecord` to carry the trace forward |
 | `BipartiteTopologyIT` | The 4-stage `order-intake-service → topic-AB → order-enrichment-service → topic-BC → order-fulfillment-service → topic-CD → shipping-notification-service` chain emits exactly three consume-edge markers to a per-test markers topic — one per consume edge. Every marker carries the trace ID, forwarded `x-isotope-*` scalars describing the upstream producer, and the new `x-isotope-consumer-service` naming the downstream consumer. Asserts the `(consumer_service, consumed_topic)` set is exactly the three pairs of stages 2-4 |
 
-### **3.2 Seven Scalar Headers Flink SQL Reports with Apache Flink on Minikube**
-> **Caveat:** Minikube is a single-node cluster. It is not a production-like environment, but it is sufficient for local development and testing. The Confluent Platform (CP) + Flink stack runs in Minikube, and you can port-forward Kafka and Schema Registry to your local machine.
+### **3.2 Seven Scalar Headers Flink SQL Reports with Apache Flink on minikube**
+> **Caveat:** minikube is a single-node cluster. It is not a production-like environment, but it is sufficient for local development and testing. The Confluent Platform (CP) + Flink stack runs in minikube, and you can port-forward Kafka and Schema Registry to your local machine.
 
-To **_run_**, **_test_**, and **_debug_** Apache Flink like a production engineer, this project provides a full Confluent Platform + Flink stack running locally on [Minikube](https://minikube.sigs.k8s.io/docs/) — no cloud required.
+To **_run_**, **_test_**, and **_debug_** Apache Flink like a production engineer, this project provides a full Confluent Platform + Flink stack running locally on [minikube](https://minikube.sigs.k8s.io/docs/) — no cloud required.
 
 You get an environment on your machine, with all the components you’d expect in a real deployment:
 
@@ -593,7 +593,7 @@ You get an environment on your machine, with all the components you’d expect i
 - **Apache Flink 2.1.2** via the Confluent Flink Kubernetes Operator 1.140.1
 - **Confluent Manager for Apache Flink (CMF) 2.4.0** for Flink environment management
 
-To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with apt-get)**.  The full stack — **Minikube + Confluent Platform + Flink + CMF** — is resource-intensive and designed to mirror an adequate development environment. Therefore, the following defaults are recommended:
+To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with apt-get)**.  The full stack — **minikube + Confluent Platform + Flink + CMF** — is resource-intensive and designed to mirror an adequate development environment. Therefore, the following defaults are recommended:
 
 | Resource | Default |
 | -------- | ------- |
@@ -603,7 +603,7 @@ To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with ap
 
 > These settings ensure stable performance across all components. You can tune them as needed, but lower resource levels may cause pod restarts or degraded performance.
 
-Seven reports — five pure Flink SQL plus two JAR-backed PTFs — and the collector INSERT run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, eight sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. One StatementSet means one failure domain: a fault in any INSERT stops them all, so a missing sink topic takes the reports down with it (which is why `deploy-cmf-flink-reports.sh` pre-creates every sink — unlike CCAF, OSS Flink's Kafka connector declares a table over a topic that must already exist rather than creating it). No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-Minikube one.
+Seven reports — five pure Flink SQL plus two JAR-backed PTFs — and the collector INSERT run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, eight sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. One StatementSet means one failure domain: a fault in any INSERT stops them all, so a missing sink topic takes the reports down with it (which is why `deploy-cmf-flink-reports.sh` pre-creates every sink — unlike CCAF, OSS Flink's Kafka connector declares a table over a topic that must already exist rather than creating it). No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-minikube one.
 
 **The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make cp-flink-up` then `make cp-flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
 

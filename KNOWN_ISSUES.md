@@ -17,7 +17,7 @@ All known release issues related to this project will be documented in this file
 
 
 ## **1.0 Control Center never becomes Ready when it wins the race against Kafka's DNS**
-**Affects:** `cp-enterprise-control-center-next-gen:2.5.0` on Minikube (`make cp-core-up`)
+**Affects:** `cp-enterprise-control-center-next-gen:2.5.0` on minikube (`make cp-core-up`)
 
 ### **1.1 Symptom**
 `make c3-open` reports a healthy port-forward, but the browser shows `ERR_CONNECTION_REFUSED` on

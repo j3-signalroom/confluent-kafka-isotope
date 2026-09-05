@@ -6,7 +6,7 @@ junit-jupiter = "6.0.3"
 
 # Phase 2: Flink PTF artifact (ptf/ subproject). Compile-time only;
 # the runtime is provided by whichever Flink the JAR is deployed onto
-# (cp-flink:2.1.2-cp1-java21 on Minikube, managed version on CCAF).
+# (cp-flink:2.1.2-cp1-java21 on minikube, managed version on CCAF).
 flink = "2.1.2"
 t-digest = "3.3"
 shadow = "9.4.1"

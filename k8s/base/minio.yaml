@@ -4,7 +4,7 @@
 # Confluent Manager for Apache Flink (CMF) 2.4.0+ stores uploaded Flink
 # artifacts (the PTF/UDF shadow JAR) in blob storage and references them from
 # `CREATE FUNCTION ... USING JAR 'cmf://<artifact-id>'`. CMF supports S3, GCS,
-# Azure Blob, or any S3-compatible store. On Minikube there is no cloud bucket,
+# Azure Blob, or any S3-compatible store. On minikube there is no cloud bucket,
 # so we run MinIO (S3-compatible) in-cluster and point CMF's
 # `cmf.artifacts.basePath` at an `s3://` path backed by it.
 #
@@ -13,7 +13,7 @@
 #   2. The compute-pool Flink clusters — to pull the `cmf://` JAR at function
 #      registration time (S3 filesystem config in the ComputePool clusterSpec).
 #
-# Credentials are intentionally static/demo-grade — this is a local Minikube
+# Credentials are intentionally static/demo-grade — this is a local minikube
 # stack, not a shared environment.
 ---
 apiVersion: v1
@@ -26,7 +26,7 @@ spec:
   resources:
     requests:
       storage: 2Gi
-  # Minikube ships a default 'standard' StorageClass (hostpath provisioner);
+  # minikube ships a default 'standard' StorageClass (hostpath provisioner);
   # leaving storageClassName unset uses it. A PVC (not emptyDir) so an uploaded
   # artifact survives a MinIO pod restart — otherwise CMF's cmf:// reference
   # would dangle.

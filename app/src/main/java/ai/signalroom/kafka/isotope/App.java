@@ -62,7 +62,7 @@ import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
  *      see scripts/cc-app-run.sh verify-inband.
  *
  * Reads kafka.bootstrap / schema.registry.url system properties; defaults
- * are wired for the local Minikube setup once `make kafka-pf-up` is up.
+ * are wired for the local minikube setup once `make kafka-pf-up` is up.
  *
  * For Confluent Cloud, also pass:
  *   -Dkafka.security.protocol=SASL_SSL
@@ -85,7 +85,7 @@ public final class App {
     private static final String PIPELINE =
         System.getProperty("isotope.pipeline", "orders");
 
-    // Optional CCAF / SASL_SSL config. Defaults are blank (the Minikube
+    // Optional CCAF / SASL_SSL config. Defaults are blank (the minikube
     // dev cluster is plaintext-no-auth), so applying these is a no-op
     // unless the user passes the matching -D properties.
     private static final String SECURITY_PROTOCOL =

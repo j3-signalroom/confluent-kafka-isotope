@@ -3,13 +3,13 @@
 #
 # @author Jeffrey Jonathan Jennings (J3)
 #
-# Confluent Platform + Apache Flink on Minikube — End-to-End Makefile
+# Confluent Platform + Apache Flink on minikube — End-to-End Makefile
 #
 # Orchestrates the full lifecycle of a local Confluent Platform environment
-# running on Minikube, from prerequisite installation through Flink job
+# running on minikube, from prerequisite installation through Flink job
 # deployment.  Phases include:
-#   1. Prerequisite tooling (Docker, kubectl, Minikube, Helm, Gradle, OpenJDK 17)
-#   2. Minikube cluster management (start, stop, delete)
+#   1. Prerequisite tooling (Docker, kubectl, minikube, Helm, Gradle, OpenJDK 17)
+#   2. minikube cluster management (start, stop, delete)
 #   3. Confluent for Kubernetes (CFK) operator
 #   4. Confluent Platform components in KRaft mode (Kafka, Schema Registry,
 #      Connect, ksqlDB, REST Proxy, Control Center)
@@ -27,7 +27,7 @@ MINIKUBE_CPUS       ?= 6
 MINIKUBE_MEM        ?= 20480
 MINIKUBE_DISK       ?= 50g
 
-# Detect the Minikube node architecture (fallback to host architecture if kubectl is unavailable).
+# Detect the minikube node architecture (fallback to host architecture if kubectl is unavailable).
 MINIKUBE_NODE_ARCH  := $(shell kubectl get node -o jsonpath='{.items[0].status.nodeInfo.architecture}' 2>/dev/null || uname -m)
 ifeq ($(MINIKUBE_NODE_ARCH),x86_64)
 MINIKUBE_NODE_ARCH := amd64
@@ -152,7 +152,7 @@ mkfile_dir         := $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
 .PHONY: help
 help: ## Show this help message
 	@echo ""
-	@echo "  Confluent Platform + Apache Flink on Minikube — Quickstart"
+	@echo "  Confluent Platform + Apache Flink on minikube — Quickstart"
 	@echo ""
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-25s\033[0m %s\n", $$1, $$2}'
@@ -261,10 +261,10 @@ uninstall-prereqs: ## Uninstall all tools installed by install-prereqs (docker, 
 	fi
 
 # ------------------------------------------------------------------------------
-# Phase 2: Minikube cluster
+# Phase 2: minikube cluster
 # ------------------------------------------------------------------------------
 .PHONY: minikube-start
-minikube-start: ## Start Minikube with resources required for Confluent Platform + Flink
+minikube-start: ## Start minikube with resources required for Confluent Platform + Flink
 	@echo "→ Checking Docker is running..."
 	@if ! docker info >/dev/null 2>&1; then \
 		echo "⚠ Docker is not running. Attempting to start it..."; \
@@ -290,10 +290,10 @@ minikube-start: ## Start Minikube with resources required for Confluent Platform
 	else \
 		echo "✔ Docker is already running."; \
 	fi
-	@echo "→ Starting Minikube (cpus=$(MINIKUBE_CPUS), memory=$(MINIKUBE_MEM), disk=$(MINIKUBE_DISK))..."
+	@echo "→ Starting minikube (cpus=$(MINIKUBE_CPUS), memory=$(MINIKUBE_MEM), disk=$(MINIKUBE_DISK))..."
 	@MINIKUBE_FORCE=""
 	@if [ "$$EUID" = "0" ]; then \
-		echo "⚠ Minikube Docker driver should not be used as root."; \
+		echo "⚠ minikube Docker driver should not be used as root."; \
 		if [ -t 1 ]; then \
 			read -p "Continue with --force anyway? [y/N]: " answer; \
 			case "$$answer" in \
@@ -312,16 +312,16 @@ minikube-start: ## Start Minikube with resources required for Confluent Platform
 		--disk-size=$(MINIKUBE_DISK)
 
 .PHONY: minikube-status
-minikube-status: ## Check Minikube and cluster node status
+minikube-status: ## Check minikube and cluster node status
 	minikube status
 	kubectl get nodes
 
 .PHONY: minikube-stop
-minikube-stop: ## Stop the Minikube cluster
+minikube-stop: ## Stop the minikube cluster
 	minikube stop
 
 .PHONY: minikube-delete
-minikube-delete: ## Completely delete the Minikube cluster
+minikube-delete: ## Completely delete the minikube cluster
 	minikube delete
 
 # ------------------------------------------------------------------------------
@@ -367,7 +367,7 @@ cp-deploy: ## Deploy all CP components: Kafka KRaft, Schema Registry, Connect, k
 .PHONY: cp-watch
 cp-watch: ## Watch pods come up in the confluent namespace (Ctrl+C to exit)
 	@if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then \
-		echo "✘ Minikube is not running — nothing to watch. Run 'make minikube-start' first."; \
+		echo "✘ minikube is not running — nothing to watch. Run 'make minikube-start' first."; \
 	elif ! kubectl get pods -n $(NAMESPACE) 2>/dev/null | grep -q .; then \
 		echo "✘ No pods found in namespace '$(NAMESPACE)' — nothing to watch. Run 'make cp-core-up' first."; \
 	else \
@@ -377,7 +377,7 @@ cp-watch: ## Watch pods come up in the confluent namespace (Ctrl+C to exit)
 .PHONY: cp-status
 cp-status: ## Show current pod status for all CP components
 	@if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then \
-		echo "✘ Minikube is not running — nothing to get status on. Run 'make minikube-start' first."; \
+		echo "✘ minikube is not running — nothing to get status on. Run 'make minikube-start' first."; \
 	elif ! kubectl get pods -n $(NAMESPACE) 2>/dev/null | grep -q .; then \
 		echo "✘ No pods found in namespace '$(NAMESPACE)' — nothing to get status on. Run 'make cp-core-up' first."; \
 	else \
@@ -478,7 +478,7 @@ kafka-pf-down: ## Stop the background Kafka port-forwards
 .PHONY: metrics-up
 metrics-up: ## Deploy Prometheus+Grafana, port-forward both in the background, and open Grafana
 	@if ! minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then \
-		echo "✘ Minikube is not running — cannot deploy the metrics showcase. Run 'make minikube-start' first."; \
+		echo "✘ minikube is not running — cannot deploy the metrics showcase. Run 'make minikube-start' first."; \
 		exit 1; \
 	fi
 	@echo "→ Deploying metrics showcase to the 'monitoring' namespace"
@@ -538,11 +538,11 @@ minio-up: namespace ## Deploy MinIO (S3-compatible store for CMF artifacts) and 
 	@echo "✔ MinIO ready at $(MINIO_S3_ENDPOINT) (bucket: $(CMF_ARTIFACT_BUCKET))."
 
 .PHONY: flink-image-build
-flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S3 plugin) and load it into Minikube
+flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S3 plugin) and load it into minikube
 	@echo "→ Building $(POOL_IMAGE) FROM $(FLINK_IMAGE)..."
 	@test -f $(FLINK_SQL_DOCKERFILE) || (echo "✘ $(FLINK_SQL_DOCKERFILE) not found." && exit 1)
 	docker build --build-arg FLINK_IMAGE=$(FLINK_IMAGE) -t $(POOL_IMAGE) -f $(FLINK_SQL_DOCKERFILE) k8s/base
-	@echo "→ Loading $(POOL_IMAGE) into Minikube (so the Kubelet needs no registry pull)..."
+	@echo "→ Loading $(POOL_IMAGE) into minikube (so the Kubelet needs no registry pull)..."
 	minikube image load $(POOL_IMAGE)
 	@echo "✔ $(POOL_IMAGE) built and loaded."
 
@@ -935,7 +935,7 @@ cmf-proxy-remove: ## Remove the cmf-proxy sidecar + liveness patch, and resume C
 # Composite workflows
 # ------------------------------------------------------------------------------
 .PHONY: cp-up
-cp-up: check-prereqs minikube-start cp-core-up ## Full stack: Minikube → cp-core-up (run 'make cp-flink-up' separately for Flink)
+cp-up: check-prereqs minikube-start cp-core-up ## Full stack: minikube → cp-core-up (run 'make cp-flink-up' separately for Flink)
 	@echo ""
 	@echo "✔ Confluent Platform is deploying."
 	@echo "  Run 'make cp-watch' to monitor pod startup."
@@ -959,7 +959,7 @@ cp-flink-up: flink-cert-manager flink-operator-install minio-up cmf-install cmf-
 	@echo "  Once running, open the Flink UI with 'make flink-ui'."
 
 .PHONY: cp-down
-cp-down: cp-delete operator-uninstall ## Tear down CP and Operator (keeps Minikube running)
+cp-down: cp-delete operator-uninstall ## Tear down CP and Operator (keeps minikube running)
 	@echo "✔ Confluent Platform and Operator removed."
 
 .PHONY: cp-flink-down
@@ -980,11 +980,11 @@ cert-manager-uninstall: ## Uninstall cert-manager (safe to run even if not insta
 		|| echo "→ cert-manager not installed, skipping."
 
 .PHONY: cp-teardown
-cp-teardown: ## Full teardown: remove Flink, CP, Operator, namespace, and stop Minikube
+cp-teardown: ## Full teardown: remove Flink, CP, Operator, namespace, and stop minikube
 	@if minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then \
 		$(MAKE) cp-teardown-run; \
 	else \
-		echo "✔ Minikube is not running — nothing to tear down."; \
+		echo "✔ minikube is not running — nothing to tear down."; \
 	fi
 
 .PHONY: cp-teardown-run
@@ -1001,7 +1001,7 @@ cp-teardown-run:
 
 .PHONY: nuke
 nuke: ## Full wipe: cp-teardown + minikube-delete + uninstall-prereqs (leaves machine as close to factory as possible)
-	@echo "⚠ This will destroy the Minikube cluster and uninstall all tools. Ctrl+C within 5s to abort."
+	@echo "⚠ This will destroy the minikube cluster and uninstall all tools. Ctrl+C within 5s to abort."
 	@sleep 5
 	$(MAKE) cp-teardown
 	$(MAKE) minikube-delete

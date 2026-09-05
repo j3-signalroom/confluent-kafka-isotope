@@ -3,7 +3,7 @@
 # Architecture A: the Isotope pipeline stages run on the HOST via
 # `./gradlew :app:run` (see scripts/cc-app-run.sh), NOT in-cluster. Each stage
 # is launched on a distinct metrics port and Prometheus — running here as a
-# Minikube pod — scrapes them across the Minikube→host bridge
+# minikube pod — scrapes them across the minikube→host bridge
 # `host.minikube.internal`.
 #
 # Stage → port convention used below (one port per locally-run stage so they
@@ -78,7 +78,7 @@ spec:
               mountPath: /prometheus
           # Requests are what the scheduler and the eviction logic actually see.
           # Without them the pod is BestEffort: OOM score 1000 and first in line
-          # when the single Minikube node hits memory pressure — which on a box
+          # when the single minikube node hits memory pressure — which on a box
           # also running Kafka/Flink/MinIO means the demo's metrics silently
           # disappear mid-run. No CPU limit on purpose: CFS throttling a scrape
           # loop is more confusing than the over-use it would prevent.

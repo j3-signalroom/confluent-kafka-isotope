@@ -6,7 +6,7 @@ The conceptual foundation for `confluent-kafka-isotope`:
 - how produce- and consume-side edges are captured, and 
 - why the topology is modelled as a bipartite graph.
 
-For *running* the project, see the [root README](../README.md) and either the [CCAF Runbook](../docs/runbook-ccaf.md) or the [Confluent Platform + Flink on Minikube Runbook](../docs/runbook-minikube.md), depending on which runtime you choose.
+For *running* the project, see the [root README](../README.md) and either the [CCAF Runbook](../docs/runbook-ccaf.md) or the [Confluent Platform + Flink on minikube Runbook](../docs/runbook-minikube.md), depending on which runtime you choose.
 
 ---
 

@@ -1,7 +1,7 @@
-# Runbook — Confluent Platform + Flink on Minikube
-End-to-end operational guide for running `confluent-kafka-isotope` locally on **Minikube**: cluster → Kafka/Confluent Platform → Flink → SQL reports → traffic → observe → teardown. Every step maps to a target in the [Makefile](../Makefile), which is the source of truth.
+# Runbook — Confluent Platform + Flink on minikube
+End-to-end operational guide for running `confluent-kafka-isotope` locally on **minikube**: cluster → Kafka/Confluent Platform → Flink → SQL reports → traffic → observe → teardown. Every step maps to a target in the [Makefile](../Makefile), which is the source of truth.
 
-> This is the **Confluent Platform + Flink (self-managed) on Minikube** path. The Confluent Cloud for Apache Flink (CCAF) path is entirely different — Terraform-driven via `make cc-flink-reports-up`, no Minikube — see [root README §3.3](../README.md#33-flink-sql-reporting-with-confluent-cloud-for-apache-flink).
+> This is the **Confluent Platform + Flink (self-managed) on minikube** path. The Confluent Cloud for Apache Flink (CCAF) path is entirely different — Terraform-driven via `make cc-flink-reports-up`, no minikube — see [root README §3.3](../README.md#33-flink-sql-reporting-with-confluent-cloud-for-apache-flink).
 
 ---
 
@@ -28,7 +28,7 @@ make install-prereqs     # docker, kubectl, minikube, helm, gettext, gradle, ope
 make check-prereqs       # verify they're on PATH
 ```
 
-Default Minikube sizing (override via env): `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480`, `MINIKUBE_DISK=50g`. The node architecture is auto-detected so the right `cp-flink` image (amd64/arm64) is selected.
+Default minikube sizing (override via env): `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480`, `MINIKUBE_DISK=50g`. The node architecture is auto-detected so the right `cp-flink` image (amd64/arm64) is selected.
 
 ## **2.0 Cluster + Confluent Platform**
 ```bash
@@ -36,7 +36,7 @@ make cp-up               # = check-prereqs → minikube-start → operator-insta
 make cp-watch            # watch pods come up (Ctrl+C to exit); or: make cp-status
 ```
 
-`cp-up` boots Minikube, installs the CFK (Confluent for Kubernetes) operator, and deploys Kafka (KRaft) + Schema Registry + Connect + ksqlDB + REST Proxy + Control Center into the `confluent` namespace.
+`cp-up` boots minikube, installs the CFK (Confluent for Kubernetes) operator, and deploys Kafka (KRaft) + Schema Registry + Connect + ksqlDB + REST Proxy + Control Center into the `confluent` namespace.
 
 > `cp-up` deliberately does **not** bring up Flink — run [§3.0 Flink](#30-flink) separately.
 
@@ -358,8 +358,8 @@ make cp-flink-reports-down  # drop reports / views / functions only
 make flink-delete           # drop just the 'flink-basic' ad-hoc SQL session cluster
 make metrics-delete         # remove the Prometheus/Grafana showcase (pods + namespace)
 make cp-flink-down          # Flink cluster + CMF + operator + cert-manager (includes flink-delete)
-make cp-down                # CP + operator (keeps Minikube running)
-make cp-teardown            # everything + stop Minikube
+make cp-down                # CP + operator (keeps minikube running)
+make cp-teardown            # everything + stop minikube
 make nuke                   # cp-teardown + minikube-delete + uninstall-prereqs (factory reset)
 ```
 
@@ -376,7 +376,7 @@ Flink ([§3.0 Flink](#30-flink)) and the reports ([§5.0 Deploy the 7 Flink repo
 
 ## **10.0 Troubleshooting**
 
-- **Pods stuck `Pending`.** Minikube is under-resourced — raise `MINIKUBE_CPUS` / `MINIKUBE_MEM` and `make minikube-delete && make cp-up`.
+- **Pods stuck `Pending`.** minikube is under-resourced — raise `MINIKUBE_CPUS` / `MINIKUBE_MEM` and `make minikube-delete && make cp-up`.
 - **Flink job submission fails (`services` forbidden).** The supplemental RBAC didn't apply — `make flink-rbac`.
 - **No report rows.** Almost always the watermark — see [§6.0 Drive traffic (required to see report rows)](#60-drive-traffic-required-to-see-report-rows); traffic must span multiple 1-minute windows and you must wait ~90s after the last record.
 - **App can't reach Kafka.** `make kafka-pf-up` isn't running, or the forward died — re-run it and confirm `localhost:30092` / `localhost:8081` are live.

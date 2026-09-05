@@ -48,7 +48,7 @@ Note this is not a Flink limitation being worked around. Nothing in Flink core n
 ## **2.0 What is wired, and where**
 Flink collects onto a **new parallel topic**, `orders.flink_enriched`. It reads `orders.placed` and re-emits each record with one extra hop. The three-stage service pipeline is untouched — `orders.{placed,enriched,fulfilled}` still belong entirely to out-of-band propagation — and Flink now appears as a producer in `topology_1m` and `bipartite_topology_1m`, where it was previously invisible.
 
-| Piece | CP (Minikube) | CCAF |
+| Piece | CP (minikube) | CCAF |
 |---|---|---|
 | UDF registration | [`01_register_functions.fql`](../scripts/flink/sql/cp/01_register_functions.fql) | `register_isotope_append_hop` in [`setup-confluent-flink.tf`](../terraform/setup-confluent-flink.tf) |
 | Writable sink table | [`07_flink_collector_sink.fql`](../scripts/flink/sql/cp/07_flink_collector_sink.fql) | `flink_collector_sink` + two `ALTER`s in [`setup-confluent-flink.tf`](../terraform/setup-confluent-flink.tf) |
@@ -131,7 +131,7 @@ The two statements — [`80_merge_collector.fql`](../scripts/flink/sql/cp/80_mer
 Turning it on:
 
 ```bash
-# CP — Minikube
+# CP — minikube
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true
 
 # CCAF

@@ -1,4 +1,4 @@
-# Isotope metrics showcase — Prometheus + Grafana on Minikube
+# Isotope metrics showcase — Prometheus + Grafana on minikube
 
 A throwaway, opt-in observability stack that visualizes the three stateless Isotope reports (latency / topology / hop-distribution), the three consume-side signals, and a third **Health & ratios (operational)** row (hop failure ratio, hop completion — share reaching hop 3, consume throughput) straight from the app's Micrometer meters — no Flink, no Control Center. See [root README §3.4](../../README.md#34-optional-prometheus-metrics-reporting-with-grafana-visualization) for what each meter means.
 
@@ -17,14 +17,14 @@ A throwaway, opt-in observability stack that visualizes the three stateless Isot
 ---
 
 ## **1.0 Architecture (A — scrape host stages)**
-The Isotope pipeline stages run on your **host** via `./gradlew :app:run`, not in the cluster. Prometheus runs as a Minikube pod and scrapes the host across the `host.minikube.internal` bridge — one host port per stage:
+The Isotope pipeline stages run on your **host** via `./gradlew :app:run`, not in the cluster. Prometheus runs as a minikube pod and scrapes the host across the `host.minikube.internal` bridge — one host port per stage:
 
 ```
 host:  gradle enrich :9410   gradle fulfill :9411   gradle ship :9412
                   \                  |                    /
             host.minikube.internal  (scraped every 5s)
                                      |
-Minikube:               Prometheus :9090  →  Grafana :3000
+minikube:               Prometheus :9090  →  Grafana :3000
 ```
 
 Port↔stage mapping lives in [10-prometheus.yaml](10-prometheus.yaml); change it there if you run different stages.
