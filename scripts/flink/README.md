@@ -8,7 +8,7 @@ The headline addition is the `bipartite_topology` report: it unions the produce 
 
 | Runtime | Reports | Sink format | Where the SQL lives |
 |---|---|---|---|
-| **Confluent Platform Flink** (Flink 2.1 CMF Application on Minikube) | 7 (latency, topology, bipartite-topology, hop-distribution, coverage, stuck-trace, latency-percentiles) + 1 collector | `avro-confluent` (SR-framed Avro) | [scripts/flink/sql/cp/](sql/cp/) — run by `IsotopeReportsJob` as one `StatementSet`, deployed by [scripts/deploy-cmf-flink-reports.sh](../deploy-cmf-flink-reports.sh) |
+| **Confluent Platform Flink** (Flink 2.1 CMF Application on minikube) | 7 (latency, topology, bipartite-topology, hop-distribution, coverage, stuck-trace, latency-percentiles) + 1 collector | `avro-confluent` (SR-framed Avro) | [scripts/flink/sql/cp/](sql/cp/) — run by `IsotopeReportsJob` as one `StatementSet`, deployed by [scripts/deploy-cmf-flink-reports.sh](../deploy-cmf-flink-reports.sh) |
 | **Confluent Cloud for Apache Flink (CCAF)** | 7 (same set as CP) + 1 collector | `proto-registry` (SR-framed Protobuf) | Inlined as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](../../terraform/setup-confluent-flink.tf), the INSERTs consolidated into one `EXECUTE STATEMENT SET` — applied by [scripts/deploy-cc-flink-reports.sh](../deploy-cc-flink-reports.sh) |
 
 Control Center deserializes both sink formats natively.
@@ -23,7 +23,7 @@ Control Center deserializes both sink formats natively.
 - [**4.0 Wire-format detail (CP only)**](#40-wire-format-detail-cp-only)
 - [**5.0 PTF JAR**](#50-ptf-jar)
 - [**6.0 Operations**](#60-operations)
-  - [**6.1 CP Flink on Minikube**](#61-cp-flink-on-minikube)
+  - [**6.1 CP Flink on minikube**](#61-cp-flink-on-minikube)
   - [**6.2 CCAF**](#62-ccaf)
 <!-- tocstop -->
 
@@ -125,7 +125,7 @@ All five register on both runtimes; only the `CREATE FUNCTION … USING JAR …`
 
 ## **6.0 Operations**
 
-### **6.1 CP Flink on Minikube**
+### **6.1 CP Flink on minikube**
 ```bash
 make cp-flink-up               # cert-manager → CFK Flink Operator → MinIO → CMF 2.4 → env → app image
 make kafka-pf-up            # localhost:30092 → Kafka, localhost:8081 → SR

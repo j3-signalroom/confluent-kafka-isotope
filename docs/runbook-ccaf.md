@@ -1,8 +1,8 @@
 # Runbook — Confluent Cloud for Apache Flink (CCAF)
 End-to-end operational guide for running the `confluent-kafka-isotope` reports on **Confluent Cloud for Apache Flink (CCAF)**: provision → deploy reports → drive
-traffic → observe → teardown. Unlike the [Confluent Platform + Flink on Minikube](runbook-minikube.md), this is **Terraform-driven** — no local cluster — and everything runs in a fresh Confluent Cloud environment under [terraform/](../terraform/).
+traffic → observe → teardown. Unlike the [Confluent Platform + Flink on minikube](runbook-minikube.md), this is **Terraform-driven** — no local cluster — and everything runs in a fresh Confluent Cloud environment under [terraform/](../terraform/).
 
-> This is the **managed CCAF** path. The self-managed **Confluent Platform + Flink on Minikube** path is in [docs/runbook-minikube.md](runbook-minikube.md). Both runtimes run the same seven reports from the same PTF JAR — see [root README §3.3](../README.md#33-flink-sql-reporting-with-confluent-cloud-for-apache-flink) for the format-by-runtime split.
+> This is the **managed CCAF** path. The self-managed **Confluent Platform + Flink on minikube** path is in [docs/runbook-minikube.md](runbook-minikube.md). Both runtimes run the same seven reports from the same PTF JAR — see [root README §3.3](../README.md#33-flink-sql-reporting-with-confluent-cloud-for-apache-flink) for the format-by-runtime split.
 
 ---
 

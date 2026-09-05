@@ -1,5 +1,5 @@
 # [OPTIONAL] Prometheus Metrics Reporting with Grafana Visualization
-A metrics-native alternative to three of the seven Flink reports: emit them as Micrometer meters from the producer interceptor and let Prometheus do the windowing at read time. **Additive and opt-in** — it does not replace the Flink reports. The companion one-command showcase (Prometheus + Grafana on Minikube) has its own runbook: [k8s/monitoring/README.md](../k8s/monitoring/README.md).
+A metrics-native alternative to three of the seven Flink reports: emit them as Micrometer meters from the producer interceptor and let Prometheus do the windowing at read time. **Additive and opt-in** — it does not replace the Flink reports. The companion one-command showcase (Prometheus + Grafana on minikube) has its own runbook: [k8s/monitoring/README.md](../k8s/monitoring/README.md).
 
 ---
 
@@ -17,7 +17,7 @@ A metrics-native alternative to three of the seven Flink reports: emit them as M
   + [**6.4 Hard — tail latency, drift, correlation**](#64-hard--tail-latency-drift-correlation)
   + [**6.5 Harder — forensic replay, compliance, cross-system**](#65-harder--forensic-replay-compliance-cross-system)
 - [**7.0 What stays in Flink — and two deliberate gaps**](#70-what-stays-in-flink--and-two-deliberate-gaps)
-- [**8.0 One-command showcase: Prometheus + Grafana on Minikube**](#80-one-command-showcase-prometheus--grafana-on-minikube)
+- [**8.0 One-command showcase: Prometheus + Grafana on minikube**](#80-one-command-showcase-prometheus--grafana-on-minikube)
 <!-- tocstop -->
 
 ---
@@ -257,11 +257,11 @@ So the line between "metric" and "Flink job" runs *through* a couple of these re
 
 **Why `latency_percentiles_1m` is NOT in this list.** Percentiles *can* be served by Prometheus — but only via a *classic* histogram (`publishPercentileHistogram()` + `histogram_quantile()`), whose accuracy is **bucket-bound, not adaptive**: error is the width of fixed, pre-chosen buckets, so the tail (p99) is only as good as your bucket layout, and covering a range finely means emitting hundreds of `le` series per tag combo. Prometheus's adaptive answer — *native histograms* (exponential buckets, the closest thing to a [T-Digest](https://www.sciencedirect.com/science/article/pii/S2665963820300403)) — isn't emittable through Micrometer yet (experimental, protobuf-only as of late 2024). So the [T-Digest PTF](../scripts/flink/sql/cp/70_latency_percentiles_report.fql) wins on tail accuracy **and** scales better: its sketch is bounded (~few KB/key) and mergeable, whereas at production volume a Micrometer percentile-histogram's `le`-bucket cardinality grows with the range you need to resolve. The built-in Flink `PERCENTILE` aggregate (exact, pure SQL) is *also* the wrong call at high volume — it retains every value in the window — so percentiles stay a **T-Digest sketch PTF** on purpose (see that file's header for the full rationale). This is a 3-Micrometer / 4-Flink split, not 4/3.
 
-## **8.0 One-command showcase: Prometheus + Grafana on Minikube**
+## **8.0 One-command showcase: Prometheus + Grafana on minikube**
 
-To *see* these meters instead of `curl`-ing `/metrics`, there's an optional, self-contained stack under [k8s/monitoring/](../k8s/monitoring/) — Prometheus + Grafana as Minikube pods, with the datasource and a dashboard (all six produce/consume signals above) **auto-provisioned**, so it opens straight to a populated board with no login.
+To *see* these meters instead of `curl`-ing `/metrics`, there's an optional, self-contained stack under [k8s/monitoring/](../k8s/monitoring/) — Prometheus + Grafana as minikube pods, with the datasource and a dashboard (all six produce/consume signals above) **auto-provisioned**, so it opens straight to a populated board with no login.
 
-The pipeline stages run on your **host** via `./gradlew :app:run`, not in-cluster — so Prometheus scrapes back across the Minikube→host bridge `host.minikube.internal`, one host port per stage (`enrich`→9410, `fulfill`→9411, `ship`→9412; edit [k8s/monitoring/10-prometheus.yaml](../k8s/monitoring/10-prometheus.yaml) to change the mapping).
+The pipeline stages run on your **host** via `./gradlew :app:run`, not in-cluster — so Prometheus scrapes back across the minikube→host bridge `host.minikube.internal`, one host port per stage (`enrich`→9410, `fulfill`→9411, `ship`→9412; edit [k8s/monitoring/10-prometheus.yaml](../k8s/monitoring/10-prometheus.yaml) to change the mapping).
 
 ```bash
 make metrics-up        # deploy, wait, port-forward Prometheus+Grafana, open Grafana

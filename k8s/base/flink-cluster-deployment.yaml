@@ -21,7 +21,7 @@ spec:
     # earlier 2-slot setting hit NoResourceAvailableException as soon
     # as a 3rd streaming job tried to schedule.
     taskmanager.numberOfTaskSlots: "8"
-    # Dev-friendly: sized for Minikube
+    # Dev-friendly: sized for minikube
     jobmanager.memory.process.size: "2048m"
     taskmanager.memory.process.size: "2048m"
     # Remote debugging: JDWP agent on TaskManager (suspend=n so processing starts immediately)

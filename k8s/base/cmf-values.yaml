@@ -9,7 +9,7 @@
 #
 # NOTE: the S3 endpoint + credentials below MUST match k8s/base/minio.yaml
 # (MINIO_ROOT_USER / MINIO_ROOT_PASSWORD) and the Makefile MINIO_* / CMF_ARTIFACT_*
-# defaults. They are static demo values for a local Minikube stack only.
+# defaults. They are static demo values for a local minikube stack only.
 cmf:
   sql:
     # DEPRECATED alias for encryption.enabled; kept false for the demo (no secret
