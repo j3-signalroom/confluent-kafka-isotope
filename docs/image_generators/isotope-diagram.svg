@@ -110,9 +110,9 @@
 <text x="1000" y="1169" text-anchor="start" font-size="30" fill="#44443F">so it emits a consume-edge marker</text>
 <text x="1000" y="1207" text-anchor="start" font-size="30" fill="#44443F">to its own topic.</text>
 <text x="1000" y="1283" text-anchor="start" font-size="30" fill="#44443F">Flink is a collector too:</text>
-<text x="1000" y="1321" text-anchor="start" font-size="30" fill="#44443F">ISOTOPE_APPEND_HOP appends its own</text>
-<text x="1000" y="1359" text-anchor="start" font-size="30" fill="#44443F">hop onto orders.flink_enriched, so</text>
-<text x="1000" y="1397" text-anchor="start" font-size="30" fill="#44443F">Flink appears in the topology graph</text>
+<text x="1000" y="1321" text-anchor="start" font-size="30" fill="#44443F">ISOTOPE_APPEND_HOP appends its</text>
+<text x="1000" y="1359" text-anchor="start" font-size="30" fill="#44443F">own hop onto orders.flink_enriched,</text>
+<text x="1000" y="1397" text-anchor="start" font-size="30" fill="#44443F">so Flink appears in the topology graph</text>
 <text x="1000" y="1435" text-anchor="start" font-size="30" fill="#44443F">as a producer, not only a reader.</text>
 <text x="1000" y="1511" text-anchor="start" font-size="30" fill="#44443F">A windowed merge cannot forward a</text>
 <text x="1000" y="1549" text-anchor="start" font-size="30" fill="#44443F">trace — many parents — so</text>
