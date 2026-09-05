@@ -256,7 +256,7 @@ def build():
     _, _, t, s = PALETTE["jar"]
     text(MID_X + MID_W // 2, 858, "isotope-flink-udf.jar", 34, t, mono=True)
     text(MID_X + MID_W // 2, 910, "3 PTFs + 3 UDFs", 34, s)
-    text(MID_X + MID_W // 2, 1000, "One JAR \u00b7 same DDL \u00b7 CP or CCAF", 34, PALETTE["muted"])
+    text(MID_X + MID_W // 2, 1000, "1 JAR \u00b7 same DDL \u00b7 CP/CCAF", 34, PALETTE["muted"])
 
     # report sinks
     fan = [192, 312, 432, 552, 672, 792, 912]
