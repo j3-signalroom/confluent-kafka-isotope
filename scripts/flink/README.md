@@ -86,12 +86,18 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
                                         + isotope_merge_edge_markers (typed edge list)
   80_merge_collector.fql                OPTIONAL — INSERT INTO: windowed merge, fresh trace via
                                         ISOTOPE_MERGE_TRACE (fan-in, so it cannot continue a trace)
-  81_merge_edge_markers.fql             OPTIONAL — INSERT INTO: one merge edge per contributing record,
+  81_merge_edge_markers.fql             OPTIONAL — one merge edge per contributing trace (+ record count),
                                         labelled with the same derived ID via ISOTOPE_MERGE_TRACE_ID
+  09_state_provenance_sinks.fql         OPTIONAL — CREATE VIEW entity_log (append-mode change log)
+                                        + isotope_state_provenance (version chain, parents inline)
+  85_state_provenance.fql               OPTIONAL — INSERT INTO: one record per emitted state via
+                                        STATE_PROVENANCE (content-addressed, no window, no hops)
   99_teardown.fql                       DROP TABLE/VIEW/FUNCTION (companion to cp-flink-reports-down)
 ```
 
-The three `OPTIONAL` files are applied only when the reports application is started with `--merge-provenance`
+The two state-provenance files are applied only with `--state-provenance`
+(`STATE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up`), and have **no CCAF equivalent** — see
+[docs/state-provenance.md](../../docs/state-provenance.md). The three merge `OPTIONAL` files are applied only when the reports application is started with `--merge-provenance`
 (`MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up`); CCAF's equivalent is
 `terraform apply -var enable_merge_provenance=true`. Off, none of them is parsed and no extra topic is created.
 See [docs/flink-collector.md §2.4](../../docs/flink-collector.md#24-optional-fan-in-provenance).
@@ -150,4 +156,4 @@ make cc-flink-reports-down CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
                            # terraform destroy: deletes the environment and everything in it
 ```
 
-See the [root README §3.3 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#33-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit.
+See the [root README §3.3 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#33-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit

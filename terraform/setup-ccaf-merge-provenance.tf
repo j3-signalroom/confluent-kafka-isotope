@@ -14,7 +14,8 @@
 #                                because forwarding one of its 1,000 parents'
 #                                trace IDs would fabricate provenance.
 #   isotope_merge_edge_markers   the many-to-one edges, one row per
-#                                contributing record. Same architectural
+#                                contributing trace, weighted by
+#                                contributing_records. Same architectural
 #                                pattern as isotope_consume_edge_markers.
 #
 # The merged record and its edge rows are emitted by two different statements
@@ -23,7 +24,7 @@
 # joins them; see MergeTrace's javadoc for why it cannot be a random mint.
 #
 # Off by default. On, it adds two topics and one statement, and the edge topic
-# writes one record per record ENTERING the merge — roughly doubling that
+# writes one record per contributing TRACE per window — a material fraction of that
 # stage's write volume. CP's equivalent switch is
 # MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up.
 #
@@ -153,7 +154,7 @@ resource "confluent_flink_statement" "merge_batched_writable_headers" {
 # ---------------------------------------------------------------------------
 # 2) The merge-edge sideband.
 #
-# One row per record entering the merge stage: `merge_trace_id` is the trace the
+# One row per contributing trace per window: `merge_trace_id` is the trace the
 # merged record carries, `contributing_trace_id` is a parent that fed it. Join
 # the two on merge_trace_id to recover a merged record's full parent set.
 #
@@ -176,7 +177,12 @@ resource "confluent_flink_statement" "merge_edge_markers_sink" {
         `pipeline`              STRING,
         `contributing_trace_id` STRING,
         `contributing_service`  STRING,
-        `contributing_topic`    STRING
+        `contributing_topic`    STRING,
+        -- Weight of the edge: how many records that parent fed into the window.
+        -- One row per contributing TRACE, so the count lives here rather than in
+        -- duplicate rows. Keep in step with
+        -- scripts/flink/sql/cp/08_merge_provenance_sinks.fql.
+        `contributing_records`  BIGINT
     ) WITH (
         'value.format' = 'proto-registry'
     );
@@ -378,7 +384,12 @@ resource "confluent_flink_statement" "insert_merge_provenance" {
         `window_end`,
         `pipeline`;
 
-    -- merge edges: one row per contributing record
+    -- merge edges: one row per contributing trace per window. The GROUP BY is
+    -- load-bearing — it puts this statement behind the same window operator as
+    -- the merge above, so both drop late records identically. Without it the
+    -- windowing TVF is a plain projection with no watermark gate, and late
+    -- records emit edges for an already-published merged record. Must stay
+    -- byte-for-byte in step with scripts/flink/sql/cp/81_merge_edge_markers.fql.
     INSERT INTO `isotope_merge_edge_markers`
     SELECT
         ISOTOPE_MERGE_TRACE_ID(
@@ -394,11 +405,19 @@ resource "confluent_flink_statement" "insert_merge_provenance" {
         `pipeline`,
         `trace_id`                                            AS `contributing_trace_id`,
         `this_service`                                        AS `contributing_service`,
-        `this_topic`                                          AS `contributing_topic`
+        `this_topic`                                          AS `contributing_topic`,
+        COUNT(*)                                              AS `contributing_records`
     FROM TABLE(
         TUMBLE(TABLE `isotope`, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
     )
-    WHERE `this_topic` = 'orders.placed';
+    WHERE `this_topic` = 'orders.placed'
+    GROUP BY
+        `window_start`,
+        `window_end`,
+        `pipeline`,
+        `trace_id`,
+        `this_service`,
+        `this_topic`;
 
     END;
   EOT

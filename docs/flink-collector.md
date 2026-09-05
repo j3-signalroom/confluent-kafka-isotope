@@ -19,6 +19,8 @@ Two propagation models now coexist in this project. They emit the identical wire
 - [**3.0 Constraints**](#30-constraints)
     + [**3.1 1:1 Statements Only**](#31-11-statements-only)
     + [**3.2 Header Keys Must Be Unique**](#32-header-keys-must-be-unique)
+    + [**3.3 Windowed Fan-in Only**](#33-windowed-fan-in-only)
+    + [**3.4 Append-only Sources Only**](#34-append-only-sources-only)
 - [**4.0 What neither addition changes**](#40-what-neither-addition-changes)
 <!-- tocstop -->
 
@@ -120,7 +122,7 @@ It writes two topics:
 | Topic | Carries |
 |---|---|
 | `orders.flink_batched` | The merged event — a 1-minute batch summary per pipeline, carrying a **fresh** isotope trace with one hop. |
-| `isotope_merge_edge_markers` | The many-to-one edges: `(merge_trace_id, window_start, window_end, operator, pipeline, contributing_trace_id, contributing_service, contributing_topic)`, one row per contributing record. |
+| `isotope_merge_edge_markers` | The many-to-one edges: `(merge_trace_id, window_start, window_end, operator, pipeline, contributing_trace_id, contributing_service, contributing_topic, contributing_records)`, one row per contributing **trace** per window, with `contributing_records` carrying how many records that parent fed. |
 
 Join the two on `merge_trace_id` to recover any merged record's full parent set. The merged record does **not** continue a parent's trace, because a `SUM` over 1,000 records has 1,000 parents and naming one of them would fabricate provenance rather than report it.
 
@@ -141,7 +143,9 @@ Same switch name on both runtimes, and the same shape as `ENABLE_TRACE_RCA`. It 
 
 Off, neither runtime creates a table, a topic, or a statement for it. The two UDFs are registered either way — registration is inert until a statement calls it, and always-registering them means flipping the feature on needs no artifact re-upload.
 
-Two costs, stated plainly. The edge stream writes one record per record *entering* the merge, roughly doubling that stage's write volume — inherent to materializing an edge list. And `orders.flink_batched` is deliberately **not** added to the `isotope_raw` union, exactly as `orders.flink_enriched` is not: the union is typed `MAP<STRING, BYTES>` and the collector sinks are `MAP<STRING, STRING>`, and keeping them out is what lets this feature be optional without the seven reports changing shape.
+Both statements are window aggregates, and that is deliberate: a windowing TVF used as a bare projection has no watermark gate at all, so late records would emit edges for a merged record already published without them, and the edge list would drift above the parent set permanently. Grouping puts both behind the same window operator, so a late record is dropped by both. It also deduplicates — an edge list is a set of edges, and the same parent trace contributing twice is one derivation edge, so the *weight* of that edge lives in a `contributing_records` column rather than in duplicate rows. Nothing is lost, and both reconciliations become exact and worth asserting in tests: **the edge count for a `merge_trace_id` equals that merged record's `distinct_traces`, and `SUM(contributing_records)` equals its `event_count`.**
+
+Two costs, stated plainly. The edge stream writes one record per contributing trace per window, a material fraction of that stage's write volume — inherent to materializing an edge list. And `orders.flink_batched` is deliberately **not** added to the `isotope_raw` union, exactly as `orders.flink_enriched` is not: the union is typed `MAP<STRING, BYTES>` and the collector sinks are `MAP<STRING, STRING>`, and keeping them out is what lets this feature be optional without the seven reports changing shape.
 
 ## **3.0 Constraints**
 
@@ -158,7 +162,7 @@ The trace-RCA report is the one case that reads a report rather than the event s
 
 The 1:1 boundary happens to land exactly where tracing needs to reach.
 
-Full provenance would **not** require a change to the isotope format. The fix is out-of-band rather than in-band: the merged output carries a **fresh trace**, while a side-channel *merge-edge* topic records the many-to-one edges — `(merge_trace_id, window_start, window_end, operator, contributing_trace_id)`, one row per contributing record — following the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges. The wire format remains untouched, and `isotope_raw`, the typed views, and all seven reports remain exactly as they are.
+Full provenance would **not** require a change to the isotope format. The fix is out-of-band rather than in-band: the merged output carries a **fresh trace**, while a side-channel *merge-edge* topic records the many-to-one edges — `(merge_trace_id, window_start, window_end, operator, contributing_trace_id, contributing_records)`, one row per contributing trace per window — following the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges. The wire format remains untouched, and `isotope_raw`, the typed views, and all seven reports remain exactly as they are.
 
 Carrying that provenance **in-band** is what is impractical. An aggregation over 1,000 inputs would require 1,000 UUIDv7 trace IDs — **16 KB of raw IDs alone** against Kafka's typical 1 MB `max.message.bytes`, before encoding, hop history, headers, or the business payload. `Isotope` already acknowledges this boundedness through `MAX_HOPS` and the `truncated` flag: the format is intentionally not designed to carry unbounded provenance history along a path. A fresh trace at the merge is therefore not a workaround for that limitation — **it is the correct identity for the new record created by the merge**.
 
@@ -170,7 +174,7 @@ That derivation needs a way to supply the trace ID, and `Isotope` does not offer
 
 Three implementation decisions follow from constraints already documented here. First, the edge topic is typed — **Avro+Schema Registry** on CP, **proto-registry** on CCAF, matching each runtime's report sinks — rather than the headers-only representation used by `isotope_consume_edge_markers`. Those markers are written by a Kafka client that has only headers to work with; Flink writes these, so a schema is available, and [§3.2](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#32-header-keys-must-be-unique) rules out representing multiple contributing traces as repeated same-key headers anyway. Second, the merged record and its edges come from **two INSERT statements** rather than one PTF emitting both row types, because splitting tagged PTF output requires a `CREATE VIEW` over the PTF — a shape the CP Flink 2.1.2 Expander round-trip rejects, as documented in [`60_stuck_trace_report.fql`](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/scripts/flink/sql/cp/60_stuck_trace_report.fql). Third, the capability is **opt-in on both runtimes**, using gating each already had: `count = var.enable_merge_provenance ? 1 : 0` on CCAF, mirroring `var.enable_trace_rca`, and the formerly unused `args` in `IsotopeReportsJob.main` on CP. Disabled — the default — no extra DDL is applied, no extra INSERT joins the statement set, and no extra topic is created.
 
-Two costs should be explicit. The edge stream emits one record per record *entering* the merge, so it roughly doubles that stage's write volume — an inherent cost of materializing a DAG edge list rather than a peculiarity of this design. And a trace walk still **terminates at the merge boundary**. The merge edges make ancestry queryable, not recursively traversable in Flink SQL, which lacks [recursive CTEs](https://nightlies.apache.org/flink/flink-docs-stable/docs/sql/hive-compatibility/hive-dialect/queries/cte/). Closing over multiple generations of merges therefore belongs outside Flink, in a relational store — see below. In this design, **“full provenance” means that every derivation edge is recorded, not that a single Flink SQL query returns the complete ancestor set.**
+Two costs should be explicit. The edge stream emits one record per contributing trace per window, a material fraction of that stage's write volume — an inherent cost of materializing a DAG edge list rather than a peculiarity of this design. And a trace walk still **terminates at the merge boundary**. The merge edges make ancestry queryable, not recursively traversable in Flink SQL, which lacks [recursive CTEs](https://nightlies.apache.org/flink/flink-docs-stable/docs/sql/hive-compatibility/hive-dialect/queries/cte/). Closing over multiple generations of merges therefore belongs outside Flink, in a relational store — see below. In this design, **“full provenance” means that every derivation edge is recorded, not that a single Flink SQL query returns the complete ancestor set.**
 
 > A recursive CTE (Common Table Expression) is a SQL subquery that repeatedly references its own results, allowing hierarchical or graph-like relationships to be traversed until the complete result set is reached.
 
@@ -214,6 +218,18 @@ This is now implemented, and **off by default** — see [§2.4](https://github.c
 
 ### **3.2 Header Keys Must Be Unique**
 Confluent's ALTER TABLE reference states [multi-key headers are unsupported](https://docs.confluent.io/cloud/current/flink/reference/statements/alter-table.html#read-and-write-ak-headers). Isotope uses distinct keys throughout, but this rules out ever expressing hops as repeated same-key headers.
+
+### **3.3 Windowed Fan-in Only**
+The merged record's identity is *derived*, not minted — `ISOTOPE_MERGE_TRACE(pipeline, operator, window_start_ms, window_end_ms, group_key, …)` — and that derivation needs an input set that is **bounded, deterministic, and nameable**. A tumbling window is all three, which is why the merge collector is scoped to windowed aggregates.
+
+Nothing else in Flink SQL offers that key. An unbounded `GROUP BY`, a regular (non-windowed) join, and a dedup (`ROW_NUMBER() = 1`) all produce a *changelog*: the output row is revised as inputs arrive, and each revision has a different parent set. There is no window bound to hash, and no stable version exposed in SQL to hash instead. Provenance for those is not this mechanism with different arguments — it would have to become a changelog itself, inserting an edge on a contributor's `+I`/`+U` and retracting it on `-U`/`-D`, with the merged record's identity keyed on the group key alone.
+
+The escape hatch, if that case ever matters, is the one this project already uses twice: a `ProcessTableFunction` holds state, so it can mint an identity per key and remember it without a window. Note before starting that CCAF rejects `MapView`/`ListView` in PTF state — a plain `Map`/`List` field is the documented replacement — and still rejects a `byte[]` map *value*, where a Base64 `String` works. Both fail at `CREATE FUNCTION` time, not at runtime.
+
+### **3.4 Append-only Sources Only**
+The `isotope` view is a projection with a filter over the `isotope_raw` union, and a projection inherits its input's changelog mode. Everything downstream therefore assumes the sources are **append-only**, which the demo's `'connector' = 'kafka'` tables are.
+
+Point it at `upsert-kafka` or a CDC source and most of this fails loudly rather than silently: window TVF aggregation refuses updating input, so the merge collector and the five windowed reports will not compile. The dangerous exception is the **1:1 collector** ([`75_flink_collector.fql`](../scripts/flink/sql/cp/75_flink_collector.fql)), a plain projection that *will* run — where `ISOTOPE_APPEND_HOP` would stamp a hop on every `-U`/`+U`. A record being revised is not a record taking a hop, so hop counts inflate and the topology reports a movement that never happened: exactly the fabrication [§3.1](#31-11-statements-only) exists to prevent, arriving through a different door. Adapting to an upsert world means deciding what a hop *means* under revision before touching any SQL.
 
 ## **4.0 What neither addition changes**
 Neither addition — the always-on 1:1 collector, nor the opt-in fan-in provenance of [§2.4](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#24-optional-fan-in-provenance) — changes anything below. Each point is argued where it belongs, in §2.4 and [§3.1](https://github.com/j3-signalroom/confluent-kafka-isotope/blob/main/docs/flink-collector.md#31-11-statements-only); this is the consolidated blast radius, for deciding what adopting either one costs.

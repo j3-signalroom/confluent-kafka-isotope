@@ -8,6 +8,7 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -65,6 +66,9 @@ public final class IsotopeReportsJob {
     /** Enables the optional merge-provenance stage. */
     private static final String MERGE_PROVENANCE_FLAG = "--merge-provenance";
 
+    /** Enables the optional state-level provenance stage (docs/state-provenance.md). */
+    private static final String STATE_PROVENANCE_FLAG = "--state-provenance";
+
     /**
      * Merge-provenance DDL, applied only when {@value #MERGE_PROVENANCE_FLAG} is
      * passed. Kept out of {@link #DDL_FILES} so that off, this job creates
@@ -82,22 +86,54 @@ public final class IsotopeReportsJob {
             "80_merge_collector.fql",
             "81_merge_edge_markers.fql");
 
+    /**
+     * State-provenance DDL — the append-mode `entity_log` view over the order
+     * topics plus the lineage sink. Applied only with
+     * {@value #STATE_PROVENANCE_FLAG}.
+     */
+    private static final List<String> STATE_PROVENANCE_DDL_FILES = List.of(
+            "09_state_provenance_sinks.fql");
+
+    /**
+     * The state-provenance INSERT. One statement by design: the parent set is a
+     * column of the record it describes, so there is no second statement to
+     * drift from it. See docs/state-provenance.md.
+     */
+    private static final List<String> STATE_PROVENANCE_FILES = List.of(
+            "85_state_provenance.fql");
+
     private IsotopeReportsJob() {
     }
 
     public static void main(String[] args) throws Exception {
         // Opt-in fan-in provenance (docs/flink-collector.md 3.1). Off by default:
         // it adds a second collector stage and an edge topic that writes one
-        // record per record entering the merge, which is not something every
+        // record per contributing trace per window, which is not something every
         // deployment should pay for. CCAF's equivalent switch is the Terraform
         // variable var.enable_merge_provenance.
         final boolean mergeProvenance = List.of(args).contains(MERGE_PROVENANCE_FLAG);
+        // Opt-in state-level provenance (docs/state-provenance.md). Off by
+        // default: it adds a per-entity keyed state machine and a lineage topic
+        // that writes one record per emitted state. Unlike the merge collector
+        // this one needs no window, because version identity is content-derived.
+        final boolean stateProvenance = List.of(args).contains(STATE_PROVENANCE_FLAG);
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         // Streaming report jobs aggregate over event-time tumbling windows and
         // write to Kafka sinks — checkpointing must be on.
         env.enableCheckpointing(30_000L);
 
         StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
+        // Every report converts its window bounds with
+        // UNIX_TIMESTAMP(CAST(window_start AS STRING)) * 1000, which formats and
+        // parses through table.local-time-zone. Left unset it defaults to the
+        // machine's zone, so the same data yields different epochs on CP (JVM
+        // zone) and CCAF (UTC) — and different derived merge trace IDs, since
+        // ISOTOPE_MERGE_TRACE derives them from those milliseconds. A zone with
+        // DST is worse: during the fall-back overlap the local string is
+        // ambiguous and the parse silently picks one of two instants. Pinning
+        // UTC removes both. CCAF's twin is sql.local-time-zone in
+        // terraform/setup-confluent-flink.tf.
+        tableEnv.getConfig().setLocalTimeZone(ZoneId.of("UTC"));
 
         // Register the two JAR-backed PTFs from their on-classpath classes (this
         // jar bundles them), so the report SQL can call STUCK_TRACE_PTF /
@@ -113,12 +149,20 @@ public final class IsotopeReportsJob {
         // registers its functions the same way regardless of the feature flag.
         tableEnv.createTemporarySystemFunction("ISOTOPE_MERGE_TRACE", IsotopeMergeTrace.class);
         tableEnv.createTemporarySystemFunction("ISOTOPE_MERGE_TRACE_ID", IsotopeMergeTraceId.class);
+        // State-level provenance. Registered unconditionally for the same
+        // reason as the merge functions: registration is inert until a
+        // statement calls it.
+        tableEnv.createTemporarySystemFunction("STATE_PROVENANCE", StateProvenancePTF.class);
 
         List<String> ddlFiles = new ArrayList<>(DDL_FILES);
         List<String> insertFiles = new ArrayList<>(REPORT_FILES);
         if (mergeProvenance) {
             ddlFiles.addAll(MERGE_PROVENANCE_DDL_FILES);
             insertFiles.addAll(MERGE_PROVENANCE_FILES);
+        }
+        if (stateProvenance) {
+            ddlFiles.addAll(STATE_PROVENANCE_DDL_FILES);
+            insertFiles.addAll(STATE_PROVENANCE_FILES);
         }
 
         // DDL: source tables, views, sinks (each statement applied individually).

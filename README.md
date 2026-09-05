@@ -14,6 +14,7 @@
     - [**3.3.2 [OPTIONAL] Eighth Report — AI Root-Cause Analysis (RCA)**](#332-optional-eighth-report--ai-root-cause-analysis-rca)
   - [**3.4 [OPTIONAL] Prometheus Metrics Reporting with Grafana Visualization**](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)
   - [**3.5 [OPTIONAL] Fan-in (Merge) Provenance**](#35-optional-fan-in-merge-provenance)
+  - [**3.6 [OPTIONAL] State-Level Provenance**](#36-optional-state-level-provenance)
 - [**Resources**](#resources)
 <!-- tocstop -->
 
@@ -37,9 +38,21 @@ This project demonstrates how **Kafka Interceptors become collectors** — inser
 
 ![visualize-in-band-propagation](docs/visualize-in-band-propagation.png)
 
+**A third collector records state, not messages.** The first two both record *message* lineage, and an isotope is an itinerary — one identity and its ordered hops — which is a truthful derivation record only while every step is 1:1. A row in an upsert table has no itinerary: its current value is the fold of every change that ever touched it, a DAG over versions rather than a path over messages. Asking whether a `-U`/`+U` pair is one hop or two has no good answer, because the question is wrong. So the third collector stamps **no hops at all**. `STATE_PROVENANCE` publishes one record per emitted state, identified by its *content* rather than by a window, carrying the versions it was derived from inline — which is what lets a lineage stream describing an *updating* table stay append-only end to end. Opt-in and CP-only; see [docs/state-provenance.md](docs/state-provenance.md).
+
+That makes three collectors, distinguished by what they can truthfully record:
+
+| Collector | Records | Propagation | Availability |
+|---|---|---|---|
+| `IsotopeProducerInterceptor` | message lineage — one hop per `send()` | out-of-band (`ThreadLocal`) | always on |
+| `ISOTOPE_APPEND_HOP` | message lineage — Flink's own hop, 1:1 statements only | in-band (record headers) | always on; opt-in fan-in variant for windowed merges mints a fresh trace rather than forwarding one ([§3.5](#35-optional-fan-in-merge-provenance)) |
+| `STATE_PROVENANCE` | state lineage — a content-addressed version chain per entity | neither: a parallel record keyed by version | opt-in, CP only ([§3.6](#36-optional-state-level-provenance)) |
+
+The first two share one wire format, so no report can tell them apart. The third deliberately does not participate in it — which is the point: overloading the hop list to mean "revision" would fabricate movement that never happened.
+
 With this approach, developers gain **end-to-end observability** into the flow of events through the Kafka-based microservices architecture, enabling both **real-time monitoring** and **post-hoc analysis** of event traces.
 
-This end-to-end observability of the isotope tracing pipeline creates a **ladder of insights**, allowing developers to trace each event’s journey, identify bottlenecks, and improve the performance and reliability of the entire system. The ladder is organized into **five tiers that answer 31 questions**, as visualized below. All 31 are enumerated, tier by tier, in [docs/metrics.md §6](docs/metrics.md#60-mapping-questions-to-promql).
+This end-to-end observability of the isotope tracing pipeline creates a **ladder of insights**, allowing developers to trace each event’s journey, identify bottlenecks, and improve the performance and reliability of the entire system. The ladder is organized into **five tiers that answer 32 questions**, as visualized below. All 32 are enumerated, tier by tier, in [docs/metrics.md §6](docs/metrics.md#60-mapping-questions-to-promql).
 
 ![tier-ladder-diagram](docs/image_generators/tier-ladder-diagram.png)
 
@@ -197,7 +210,7 @@ flowchart TB
         TC[("isotope_consume_edge_markers<br/>value-less consume markers")]
         T4[("orders.flink_enriched<br/>produced by Flink, not a service")]
         T5[("orders.flink_batched<br/>merged event — FRESH trace, 1 hop")]
-        TM[("isotope_merge_edge_markers<br/>one edge row per contributing record")]
+        TM[("isotope_merge_edge_markers<br/>one edge row per contributing trace")]
     end
 
     IPI -- "produce (x-isotope JSON + 7 scalar headers)" --> Kafka
@@ -215,23 +228,24 @@ flowchart TB
     IPI -. "opt-in flag<br/>produce-side meters" .-> PIM
     Mark -. "consume-side meters" .-> PIM
 
-    subgraph PTF["ptf/ — isotope-flink-udf shadow JAR · 2 PTFs + 3 UDFs"]
+    subgraph PTF["ptf/ — isotope-flink-udf shadow JAR · 3 PTFs + 3 UDFs"]
         Pcts["LatencyPercentilesPTF<br/>T-Digest p50/p95/p99"]
         Stuck["StuckTracePTF<br/>per-trace state + event-time timer"]
         Hop["IsotopeAppendHop (ScalarFunction)<br/>collector, not interpreter —<br/>appends a Flink hop to the headers"]
         MergeFn["IsotopeMergeTrace + IsotopeMergeTraceId<br/>(ScalarFunctions) fan-in collector —<br/>mints a fresh trace, ID derived from<br/>the window so both statements agree"]
+        StateFn["StateProvenancePTF (§3.6, CP only)<br/>state collector — per-entity version chain,<br/>content-addressed ID, parents inline<br/>(no window, no hops, no changelog)"]
     end
 
     subgraph Flink["Flink SQL reports — identical source/view DDL; sink format differs by runtime"]
         direction LR
         subgraph CP["Minikube · Flink 2.1 CMF Application"]
             SQLCP["scripts/flink/sql/cp/*.fql<br/>(bundled in the app JAR)"]
-            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+2 with --merge-provenance<br/>Avro+SR sinks"]
+            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+2 with --merge-provenance<br/>+1 with --state-provenance (§3.6)<br/>Avro+SR sinks"]
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
             TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-confluent-flink.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf<br/>(+3 with trace_rca, +5 with merge_provenance)"]
-            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>Protobuf+SR sinks"]
+            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>no state-provenance on CCAF (§3.6)<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
     end
@@ -248,6 +262,9 @@ flowchart TB
     PTF -. "CREATE FUNCTION USING JAR" .-> CC
 
     T5 -. "JOIN ON merge_trace_id<br/>recovers a merged record's full parent set" .- TM
+
+    SP[("isotope_state_provenance<br/>one record per emitted state —<br/>version_id + parents[]")]
+    JCP -. "optional (§3.6) — STATE_PROVENANCE<br/>CP only, see §3.6" .-> SP
 
     R["report sink topics<br/>latency · topology · bipartite_topology ·<br/>hop_distribution · coverage · stuck_trace ·<br/>latency_percentiles"]
     JCP --> R
@@ -284,6 +301,7 @@ flowchart TB
     classDef optional stroke-dasharray: 5
     class AI,MODEL,RCAJ,RCA optional
     class T5,TM,MergeFn optional
+    class SP,StateFn optional
 ```
 
 <details>
@@ -313,11 +331,13 @@ ptf/                                    Flink reports application + PTF shadow J
                                         deploy paths upload (`make reports-jar`)
   src/main/java/ai/signalroom/kafka/isotope/flink/
     IsotopeReportsJob.java              CP entry point — reads the bundled sql/*.fql,
-                                        registers both PTFs + the three collector UDFs
-                                        programmatically, runs the 8 INSERT INTOs
+                                        registers all three PTFs + the three collector
+                                        UDFs programmatically, runs the 8 INSERT INTOs
                                         (7 reports + collector) as one StatementSet
                                         (CMF Application); --merge-provenance adds the
-                                        merge DDL + the 2 merge INSERTs (§3.5)
+                                        merge DDL + the 2 merge INSERTs (§3.5),
+                                        --state-provenance adds the state DDL + its
+                                        single INSERT (§3.6)
     IsotopeAppendHop.java               collector-side scalar UDF — appends a Flink hop
                                         to a record's isotope headers (in-band
                                         propagation, 1:1 statements only; see
@@ -328,13 +348,21 @@ ptf/                                    Flink reports application + PTF shadow J
                                         their trace IDs would fabricate provenance (§3.5)
     IsotopeMergeTraceId.java            same window's merge trace ID as hex, so the
                                         edge-marker statement can label each contributing
-                                        record with the merged record it fed (§3.5)
+                                        trace with the merged record it fed (§3.5)
     MergeTrace.java                     shared deterministic merge-trace derivation — the
                                         agreement that joins the two merge statements
+    StateProvenancePTF.java             state collector (§3.6) — one record per emitted
+                                        state, keyed per entity; parents carried inline
+                                        so an output and its lineage cannot drift.
+                                        Stamps no hops: a revision is not a movement
+    StateVersion.java                   content-addressed version identity — no window
+                                        needed, so unbounded GROUP BY / joins / dedup
+                                        all have something to key on
     LatencyPercentilesPTF.java          T-Digest p50/p95/p99 (PTF: per-window state + timers)
     StuckTracePTF.java                  per-trace state + event-time timer
     TDigests.java                       shared T-Digest (de)serialization
-  src/test/java/.../                    TDigestsTest, IsotopeAppendHopTest, MergeTraceTest
+  src/test/java/.../                    TDigestsTest, IsotopeAppendHopTest, MergeTraceTest,
+                                        StateVersionTest
 k8s/base/                               CFK / CMF manifests (applied by `make cp-up` / `cp-flink-up`)
   confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
   minio.yaml                            in-cluster S3-compatible store backing CMF's
@@ -377,20 +405,39 @@ scripts/
   flink/README.md                       Flink SQL reports — runtime split (CP=7 reports/Avro+SR,
                                         CCAF=7 reports/Protobuf+SR), plus the collector
                                         INSERT on both; layout, operations
-  flink/sql/cp/                         CP Flink SQL (bundled into the reports JAR):
-                                        00_source_table, 01_register_functions,
-                                        05_isotope_view, 06_consume_events_view,
-                                        05_report_sinks (avro-confluent),
-                                        07_flink_collector_sink (writable headers column),
-                                        10/20/25/30/40/60/70 INSERT INTO reports,
-                                        75_flink_collector (INSERT INTO: Flink stamps its
-                                        own hop), 99_teardown; plus the optional merge
-                                        trio (§3.5) — 08_merge_provenance_sinks
-                                        (orders.flink_batched + isotope_merge_edge_markers),
-                                        80_merge_collector (fresh trace on the merged
-                                        record), 81_merge_edge_markers (one row per
-                                        contributing record)
-                                        (CCAF SQL is inlined under terraform/setup-confluent-flink.tf.)
+  flink/sql/cp/                         CP Flink SQL, bundled into the reports JAR and
+                                        listed here in apply order. (CCAF's copy is
+                                        inlined in terraform/setup-confluent-flink.tf.)
+    00_source_table.fql                 4 source tables + the isotope_raw union view;
+                                        pins table.local-time-zone = UTC for the
+                                        SQL-Client path
+    01_register_functions.fql           CREATE FUNCTION ... USING JAR — SQL-Client path
+                                        only (the Application registers from classpath)
+    05_isotope_view.fql                 typed produce-side view over the 7 scalar headers
+    05_report_sinks.fql                 the 7 report sink tables (avro-confluent)
+    06_consume_events_view.fql          typed consume-marker view (8th header present)
+    07_flink_collector_sink.fql         orders.flink_enriched — writable headers column
+    08_merge_provenance_sinks.fql       OPTIONAL (§3.5) — orders.flink_batched +
+                                        isotope_merge_edge_markers
+    09_state_provenance_sinks.fql       OPTIONAL (§3.6) — entity_log append-mode view +
+                                        isotope_state_provenance sink
+    10_latency_report.fql               avg / min / max per pipeline, origin, topic
+    20_topology_report.fql              produce edges
+    25_bipartite_topology_report.fql    produce + consume edges, both directions
+    30_hop_distribution.fql             hop-count histogram (retry-storm tell)
+    40_coverage_report.fql              distinct traces per topic
+    60_stuck_trace_report.fql           STUCK_TRACE_PTF — per-trace state + event-time
+                                        timer (no TUMBLE)
+    70_latency_percentiles_report.fql   LATENCY_PERCENTILES — T-Digest p50/p95/p99
+                                        (no TUMBLE)
+    75_flink_collector.fql              INSERT INTO: Flink stamps its own hop (1:1)
+    80_merge_collector.fql              OPTIONAL (§3.5) — windowed merge, fresh trace
+    81_merge_edge_markers.fql           OPTIONAL (§3.5) — one row per contributing trace
+                                        per window, weighted by contributing_records;
+                                        GROUP BY keeps its lateness in step with 80
+    85_state_provenance.fql             OPTIONAL (§3.6) — one record per emitted state,
+                                        parents inline (CP only)
+    99_teardown.fql                     DROP TABLE / VIEW / FUNCTION
 terraform/                              CCAF infrastructure-as-code (`make cc-flink-reports-up`)
   providers.tf                          Confluent provider — cloud key/secret vars
   versions.tf                           required Terraform (>= 1.13) + provider versions
@@ -436,6 +483,9 @@ docs/                                   extracted long-form docs (linked from th
   design.md                             isotope tracing deep-dive
   flink-collector.md                    Flink as a collector — in-band propagation, the
                                         1:1 rule, and §2.4 optional fan-in provenance
+  state-provenance.md                   state-level provenance (§3.6) — content-addressed
+                                        versions, why the parent set is inline, and the
+                                        CCAF canonicalization gap
   runbook-minikube.md                   full CP-on-Minikube run sequence (§3.2)
   runbook-ccaf.md                       full CCAF / Terraform run sequence (§3.3)
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
@@ -458,6 +508,15 @@ gradle/libs.versions.toml               version catalog — Kafka, Flink, Protob
                                         (the kafka-isotope version is pinned per module)
 CHANGELOG.md                            release notes
 KNOWN_ISSUES.md                         open issues + upstream bugs worth knowing before a run
+LICENSE.md                              MIT license
+.java-version                           JDK pin for the Gradle build (companion to
+                                        docs/image_generators/.python-version)
+.github/                                repo-level agent instructions
+  copilot-instructions.md               house style + conventions for code assistants
+  instructions/mermaid.instructions.md  how the README's mermaid diagrams are written
+.vscode/                                launch.json / tasks.json — run + debug the demo CLI
+.idea/runConfigurations/                attach a debugger to, and port-forward, the Flink
+                                        TaskManager (companions to scripts/port-forward-*.sh)
 ```
 </details>
 
@@ -602,7 +661,7 @@ The other four reports — `latency_percentiles`, `coverage`, `bipartite_topolog
 ### **3.5 [OPTIONAL] Fan-in (Merge) Provenance**
 The Flink collector is **1:1 by design** — it appends a hop to records it forwards one-for-one. That is tracing, and a trace is only a truthful derivation record while every step has exactly one parent. A windowed aggregate breaks that: a `SUM` over 1,000 records has 1,000 parents, and forwarding one of their trace IDs would not be incomplete provenance — it would **fabricate** provenance.
 
-This optional path records the fan-in case honestly, without changing the isotope wire format. The merged record on `orders.flink_batched` carries a **fresh** trace with one hop, and the many-to-one edges go to `isotope_merge_edge_markers` — one row per contributing record — the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges. Join the two on `merge_trace_id` to recover any merged record's full parent set.
+This optional path records the fan-in case honestly, without changing the isotope wire format. The merged record on `orders.flink_batched` carries a **fresh** trace with one hop, and the many-to-one edges go to `isotope_merge_edge_markers` — one row per contributing trace per window, weighted by `contributing_records` — the same architectural pattern `isotope_consume_edge_markers` already uses for consume edges. Join the two on `merge_trace_id` to recover any merged record's full parent set.
 
 Both runtimes use the same switch, off by default:
 
@@ -616,6 +675,26 @@ make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
 Disabled, neither runtime creates a table, a topic, or a statement for it, and `isotope_raw`, the typed views, and all seven reports are untouched either way.
 
 > **Full details** — why the merge trace ID must be *derived* from the window rather than minted (two statements have to agree on it independently), why it is two INSERTs rather than one PTF, and the two costs worth knowing about — are in **[docs/flink-collector.md §2.4](docs/flink-collector.md#24-optional-fan-in-provenance)**.
+
+### **3.6 [OPTIONAL] State-Level Provenance**
+Fan-in provenance above answers "which records produced this merged output?" — but it needs a **window** to derive the merged record's identity from. That rules out the entire updating world: an unbounded `GROUP BY`, a regular join, and a dedup all produce a changelog whose output row is revised as inputs arrive, with a different parent set each time and no window bound to hash. Point the reports at `upsert-kafka` or CDC sources and most of them will not even plan.
+
+This optional path answers the same question for **state**: not "where did this message go" but "which versions produced the current value of this row." Identity is **content-addressed** rather than window-derived — `StateVersion` hashes `(source_name, entity_key, content)` into a UUIDv7 whose high bits carry the event time — so it needs no window at all, and a version is never revised, only superseded. That single choice is what makes a lineage stream describing an *updating* table itself **append-only**, so no operator in the pipeline ever consumes a changelog.
+
+`STATE_PROVENANCE` is a `ProcessTableFunction` keyed by entity, publishing one record per emitted state to `isotope_state_provenance`, with the versions it came from carried **inline** in a `parents` array. That is deliberately unlike the merge collector's two-statement shape: the parent set is a column of the record it describes, so an output and its parents cannot drift apart, and no second statement has to independently re-derive an ID. A flat edge table, if wanted, is an `UNNEST` projection of this topic.
+
+Note that this collector **does not stamp hops**. A row being revised is not a record taking a hop, and asking whether a `-U`/`+U` pair is one hop or two has no good answer because the question is wrong. Message lineage stays with the isotope; state lineage is a parallel record keyed by version. The two coexist without either lying.
+
+```bash
+make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true
+
+# both collectors at once — they answer different questions
+make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=true
+```
+
+**CP only, for one specific reason.** The version preimage needs bytes that are stable for a given state, and CP's source tables are declared `'value.format' = 'raw'`, so the raw value is available as a `BYTES` column. CCAF's Topic Catalog imports each topic with typed Protobuf columns instead and does not hand back the raw value, so the same statement cannot be written there verbatim — it would hash a canonical rendering of the typed columns, which is a legitimate design but yields IDs that differ from CP's for identical data. The PTF itself is portable (its state is plain `String`/`List`, which is what CCAF requires), so this is a *canonicalization* gap, not a capability gap. There is no `ENABLE_STATE_PROVENANCE` on `make cc-flink-reports-up`.
+
+> **Full details** — the identity model, why one operator instead of two statements, the CCAF assessment, and the limits (unbounded parent sets, no recursive ancestry in Flink SQL, compaction bounding replay) — are in **[docs/state-provenance.md](docs/state-provenance.md)**.
 
 ## **Resources**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)

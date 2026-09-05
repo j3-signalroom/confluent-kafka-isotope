@@ -50,10 +50,25 @@ MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin123}"
 #   MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up
 # CCAF's equivalent switch is the Terraform variable var.enable_merge_provenance.
 MERGE_PROVENANCE="${MERGE_PROVENANCE:-false}"
-if [ "${MERGE_PROVENANCE}" = "true" ]; then
-    APP_JOB_ARGS='["--merge-provenance"]'
-else
+
+# Opt-in state-level provenance (docs/state-provenance.md). Off by default: it
+# adds a per-entity keyed state machine and a lineage topic carrying one record
+# per emitted state. Independent of MERGE_PROVENANCE — the two collectors answer
+# different questions (a DAG over versions vs a fan-in edge list) and either,
+# both, or neither can be on.
+#   STATE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up
+# CCAF has no equivalent switch; see docs/state-provenance.md section 5.0.
+STATE_PROVENANCE="${STATE_PROVENANCE:-false}"
+
+# if/then, not `[ ... ] && ...`: under `set -e` a bare test-and-append exits the
+# script the moment a flag is false.
+JOB_ARGS=()
+if [ "${MERGE_PROVENANCE}" = "true" ]; then JOB_ARGS+=('"--merge-provenance"'); fi
+if [ "${STATE_PROVENANCE}" = "true" ]; then JOB_ARGS+=('"--state-provenance"'); fi
+if [ ${#JOB_ARGS[@]} -eq 0 ]; then
     APP_JOB_ARGS='[]'
+else
+    APP_JOB_ARGS="[$(IFS=,; echo "${JOB_ARGS[*]}")]"
 fi
 
 CMF_API="http://localhost:18080/cmf/api/v1"
@@ -84,6 +99,12 @@ SINK_TOPICS=(
 MERGE_TOPICS=(orders.flink_batched isotope_merge_edge_markers)
 if [ "${MERGE_PROVENANCE}" = "true" ]; then
     SINK_TOPICS+=("${MERGE_TOPICS[@]}")
+fi
+# State-provenance topic (docs/state-provenance.md), pre-created and torn down
+# on the same unconditional terms as the merge topics above.
+STATE_TOPICS=(isotope_state_provenance)
+if [ "${STATE_PROVENANCE}" = "true" ]; then
+    SINK_TOPICS+=("${STATE_TOPICS[@]}")
 fi
 
 KAFKA_POD=$(kubectl get pods -n "${NAMESPACE}" --no-headers -o custom-columns=":metadata.name" 2>/dev/null \
@@ -170,7 +191,7 @@ if [ "${ACTION}" = "up" ]; then
     VERSION=$(printf '%s' "${UP}" | sed '$d' | python3 -c "import sys,json;print(json.load(sys.stdin).get('status',{}).get('version',1))" 2>/dev/null || echo 1)
     echo "  ✔ artifact '${ARTIFACT_NAME}' version ${VERSION} → cmf://${CMF_ENV}/${ARTIFACT_NAME}?version=${VERSION}"
 
-    echo "→ Deploying FlinkApplication '${APP_NAME}' (image=${POOL_IMAGE}, ${APP_FLINK_VERSION}, merge-provenance=${MERGE_PROVENANCE})..."
+    echo "→ Deploying FlinkApplication '${APP_NAME}' (image=${POOL_IMAGE}, ${APP_FLINK_VERSION}, merge-provenance=${MERGE_PROVENANCE}, state-provenance=${STATE_PROVENANCE})..."
     APP_NAME="${APP_NAME}" POOL_IMAGE="${POOL_IMAGE}" APP_FLINK_VERSION="${APP_FLINK_VERSION}" \
         CMF_ENV_NAME="${CMF_ENV}" APP_ARTIFACT_NAME="${ARTIFACT_NAME}" APP_ARTIFACT_VERSION="${VERSION}" \
         MINIO_S3_ENDPOINT="${MINIO_S3_ENDPOINT}" MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY}" MINIO_SECRET_KEY="${MINIO_SECRET_KEY}" \
@@ -203,6 +224,7 @@ else
     purge_statements
     DOWN_TOPICS=("${SINK_TOPICS[@]}")
     [ "${MERGE_PROVENANCE}" = "true" ] || DOWN_TOPICS+=("${MERGE_TOPICS[@]}")
+    [ "${STATE_PROVENANCE}" = "true" ] || DOWN_TOPICS+=("${STATE_TOPICS[@]}")
     echo "→ Deleting ${#DOWN_TOPICS[@]} sink topics..."
     for t in "${DOWN_TOPICS[@]}"; do echo "  ↳ ${t}"; delete_topic "${t}"; done
     echo "✔ Reports application torn down."

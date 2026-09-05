@@ -34,7 +34,8 @@
 --     splitting a PTF's output by a tag column needs CREATE VIEW over
 --     the PTF, which the cp-flink 2.1.2 Expander round-trip rejects.
 --     See 60_stuck_trace_report.fql for that failure in detail.
---   - Cost, stated plainly: one record written per record entering the
+--   - Cost, stated plainly: one record written per contributing trace per
+--     window entering the
 --     merge stage. This roughly doubles that stage's write volume, and
 --     that is inherent to an edge list rather than a property of this
 --     implementation.
@@ -57,8 +58,37 @@ SELECT
     `pipeline`,
     `trace_id`                                            AS `contributing_trace_id`,
     `this_service`                                        AS `contributing_service`,
-    `this_topic`                                          AS `contributing_topic`
+    `this_topic`                                          AS `contributing_topic`,
+    COUNT(*)                                              AS `contributing_records`
 FROM TABLE(
     TUMBLE(TABLE `isotope`, DESCRIPTOR(`event_time`), INTERVAL '1' MINUTE)
 )
-WHERE `this_topic` = 'orders.placed';
+WHERE `this_topic` = 'orders.placed'
+-- The GROUP BY is what makes this statement drop late records the same way
+-- 80_merge_collector.fql does. Without it, the windowing TVF is a plain
+-- projection: rows stream straight through with window bounds attached and
+-- NOTHING gates them on the watermark, so a record arriving after the 5s
+-- watermark delay still emits an edge pointing at a merged record that was
+-- computed without it and will never be corrected. Edges then drift upward
+-- from the parent set forever. A window aggregate here puts both statements
+-- behind the same window operator semantics.
+--
+-- Grouping also deduplicates: one row per contributing TRACE per window
+-- rather than per record. An edge list is a set of edges, and the same parent
+-- trace contributing twice is still one derivation edge — so the weight lives
+-- in `contributing_records` instead of in duplicate rows. Nothing is lost, and
+-- BOTH reconciliations become exact:
+--
+--   COUNT(*)                  per merge_trace_id == orders.flink_batched.distinct_traces
+--   SUM(contributing_records) per merge_trace_id == orders.flink_batched.event_count
+--
+-- Going back to one row per record would need a per-record key in the GROUP BY;
+-- the `isotope` view does not project one today, and CCAF does not expose
+-- partition/offset metadata the way the CP source tables do.
+GROUP BY
+    `window_start`,
+    `window_end`,
+    `pipeline`,
+    `trace_id`,
+    `this_service`,
+    `this_topic`;

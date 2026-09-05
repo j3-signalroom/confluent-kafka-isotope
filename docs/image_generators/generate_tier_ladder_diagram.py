@@ -32,7 +32,7 @@ RULE, MUTED = "#888780", "#5F5E5A"
 
 # Top rung first. (title, count, blurb, example, ramp)
 TIERS = [
-    ("Harder", 6, "forensic replay \u00b7 compliance \u00b7 cross-system",
+    ("Harder", 7, "forensic replay \u00b7 compliance \u00b7 cross-system",
      "\u201cReconstruct a full per-trace journey for an audit?\u201d", "pink"),
     ("Hard", 6, "tail latency \u00b7 drift \u00b7 correlation",
      "\u201cWhat are p50 / p95 / p99 across the pipeline?\u201d", "amber"),

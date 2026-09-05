@@ -1,0 +1,122 @@
+-- ==========================================================================
+-- State-provenance source view + sink — OPTIONAL (see docs/state-provenance.md).
+--
+-- Created only when the reports application is started with
+-- --state-provenance (IsotopeReportsJob). Off, nothing here exists and the
+-- deployment is byte-identical to a build without the feature.
+--
+-- WHAT THIS IS, AND WHAT IT IS NOT
+--
+-- The other two collectors record MESSAGE lineage: an isotope is an itinerary,
+-- and ISOTOPE_APPEND_HOP is restricted to 1:1 statements because a path is a
+-- truthful derivation record only while every step has one parent
+-- (docs/flink-collector.md 3.1). A row in an upsert table has no itinerary —
+-- its current value is the fold of every change that touched it, a DAG over
+-- versions — so this feature does not stamp hops at all. It publishes one
+-- record per emitted state, content-addressed by StateVersion, naming the
+-- versions it came from.
+--
+-- WHY THE SOURCE IS THE LOG, NOT AN UPSERT VIEW
+--
+-- `entity_log` reads the physical Kafka log in append mode, exactly as the
+-- report source tables do. Every restriction Flink places on updating streams
+-- (window TVFs refuse them, time attributes do not survive them, plain sinks
+-- reject them) is avoided by rebuilding entity state inside the PTF instead of
+-- asking the planner to do it. Point this at an upsert-kafka table instead and
+-- the feature stops planning — that is the whole design, not an oversight.
+--
+-- A consequence worth having: tombstones are ordinary messages with ordinary
+-- headers, so deletes get first-class provenance — something a state view
+-- cannot show you.
+--
+-- THE DEMO'S ENTITY KEY
+--
+-- A real deployment keys on the upsert primary key. This demo has none to
+-- offer: App.java sets the record key to the producing SERVICE name, and
+-- `hop` forwards the DemoEvent value verbatim, so neither identifies an
+-- entity. The isotope trace ID does — it is stamped once at the origin and
+-- survives every hop — so the demo treats one traced order as the entity and
+-- its three stage records as three versions of it. The version chain that
+-- falls out is exactly the shape a real upsert entity produces:
+--
+--   orders.placed -> orders.enriched -> orders.fulfilled
+--
+-- with each version naming its predecessor in `parents`. Because `source_name`
+-- is part of the version preimage, the three stages are three distinct
+-- versions even though the payload bytes are identical.
+-- ==========================================================================
+
+-- --------------------------------------------------------------------------
+-- entity_log — append-mode change log, one row per physical message.
+--
+-- `content` is the raw value bytes, hashed in Java. It is deliberately NOT
+-- decoded here: the CP source tables are declared 'value.format' = 'raw' so
+-- they work for any value format, and the version preimage only needs bytes
+-- that are stable for a given state. (This is the one place CCAF cannot follow
+-- as-is — its catalog tables expose typed Protobuf columns rather than raw
+-- bytes, so it would hash a canonical rendering of those columns instead. See
+-- docs/state-provenance.md 5.0.)
+--
+-- `op` reads a NULL value as a delete. The demo never writes tombstones, so it
+-- is always 'UPSERT' here; on a compacted upsert topic it is the column that
+-- makes deletions visible in the lineage.
+-- --------------------------------------------------------------------------
+CREATE VIEW IF NOT EXISTS `entity_log` AS
+SELECT
+    CAST(`headers`['x-isotope-trace-id']   AS STRING) AS `entity_key`,
+    CAST(`headers`['x-isotope-this-topic'] AS STRING) AS `source_name`,
+    `value`                                           AS `content`,
+    CASE WHEN `value` IS NULL THEN 'DELETE' ELSE 'UPSERT' END AS `op`,
+    `event_time`
+FROM `orders.placed`
+WHERE `headers`['x-isotope-trace-id'] IS NOT NULL
+UNION ALL
+SELECT
+    CAST(`headers`['x-isotope-trace-id']   AS STRING) AS `entity_key`,
+    CAST(`headers`['x-isotope-this-topic'] AS STRING) AS `source_name`,
+    `value`                                           AS `content`,
+    CASE WHEN `value` IS NULL THEN 'DELETE' ELSE 'UPSERT' END AS `op`,
+    `event_time`
+FROM `orders.enriched`
+WHERE `headers`['x-isotope-trace-id'] IS NOT NULL
+UNION ALL
+SELECT
+    CAST(`headers`['x-isotope-trace-id']   AS STRING) AS `entity_key`,
+    CAST(`headers`['x-isotope-this-topic'] AS STRING) AS `source_name`,
+    `value`                                           AS `content`,
+    CASE WHEN `value` IS NULL THEN 'DELETE' ELSE 'UPSERT' END AS `op`,
+    `event_time`
+FROM `orders.fulfilled`
+WHERE `headers`['x-isotope-trace-id'] IS NOT NULL;
+
+-- --------------------------------------------------------------------------
+-- isotope_state_provenance — the durable lineage record.
+--
+-- Append-only, and that is the point: a version is never revised, so a stream
+-- describing an UPDATING table is itself an append stream. Do not compact this
+-- topic — superseding a version is exactly what must never happen to it.
+--
+-- `parents` is an ARRAY rather than a second edge topic on purpose. The
+-- windowed merge collector emits its record and its edges from two statements
+-- that must independently agree on a derived ID; here the parent set is a
+-- column of the record it describes, so the two cannot drift. A flat edge
+-- table, if wanted, is an UNNEST projection of this topic.
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `isotope_state_provenance` (
+    `version_id`      STRING,
+    `entity_key`      STRING,
+    `source_name`     STRING,
+    `op`              STRING,
+    `parents`         ARRAY<STRING>,
+    `parent_overflow` INT,
+    `emitted_at`      BIGINT
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'isotope_state_provenance',
+    'properties.bootstrap.servers' = 'kafka:9071',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'             = 'fixed',
+    'scan.startup.mode'            = 'earliest-offset',
+    'properties.group.id'          = 'isotope-report-reader'
+);

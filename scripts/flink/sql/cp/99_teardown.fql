@@ -25,6 +25,8 @@ DROP TABLE    IF EXISTS `orders.flink_enriched`;
 -- and a teardown must not strand tables an earlier enabled run created.
 DROP TABLE    IF EXISTS `orders.flink_batched`;
 DROP TABLE    IF EXISTS `isotope_merge_edge_markers`;
+DROP TABLE    IF EXISTS `isotope_state_provenance`;
+DROP VIEW     IF EXISTS `entity_log`;
 
 -- Upstream typed views → source table.
 DROP VIEW     IF EXISTS consume_events;
@@ -37,3 +39,4 @@ DROP FUNCTION IF EXISTS LATENCY_PERCENTILES;
 DROP FUNCTION IF EXISTS ISOTOPE_APPEND_HOP;
 DROP FUNCTION IF EXISTS ISOTOPE_MERGE_TRACE;
 DROP FUNCTION IF EXISTS ISOTOPE_MERGE_TRACE_ID;
+DROP FUNCTION IF EXISTS STATE_PROVENANCE;

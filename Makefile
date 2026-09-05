@@ -666,7 +666,7 @@ flink-delete: ## Delete the Flink session cluster (safe to run even if cluster i
 		|| echo "→ Flink cluster not found or API server unreachable, skipping."
 
 .PHONY: reports-jar
-reports-jar: ## Build the reports application shadow JAR (IsotopeReportsJob + 2 PTFs + bundled .fql)
+reports-jar: ## Build the reports application shadow JAR (IsotopeReportsJob + 3 PTFs + 3 UDFs + bundled .fql)
 	@echo "→ Building reports application JAR ($(APP_JAR))..."
 	./gradlew :ptf:shadowJar -q
 
@@ -677,6 +677,7 @@ cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Appl
 		POOL_IMAGE='$(POOL_IMAGE)' APP_FLINK_VERSION='$(APP_FLINK_VERSION)' \
 		MINIO_S3_ENDPOINT='$(MINIO_S3_ENDPOINT)' MINIO_ACCESS_KEY='$(MINIO_ACCESS_KEY)' MINIO_SECRET_KEY='$(MINIO_SECRET_KEY)' \
 		MERGE_PROVENANCE='$(ENABLE_MERGE_PROVENANCE)' \
+		STATE_PROVENANCE='$(ENABLE_STATE_PROVENANCE)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh up
 
 .PHONY: cp-flink-reports-down

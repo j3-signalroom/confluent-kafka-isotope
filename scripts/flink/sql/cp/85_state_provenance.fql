@@ -1,0 +1,52 @@
+-- =====================================================================
+-- State-level provenance — OPTIONAL (see docs/state-provenance.md).
+--
+-- One statement, one operator, one piece of state. That is the whole
+-- reason this feature exists in the shape it does:
+--
+--   * No window to key on. Identity comes from StateVersion, a content
+--     address, so unbounded GROUP BY, regular joins and dedup — none of
+--     which have window bounds to hash — are all expressible. The
+--     windowed merge collector cannot say the same.
+--
+--   * No second statement to drift from. The parent set is a column of
+--     the record it describes, so the "event_count 1000, edge_list 1001"
+--     failure that 81_merge_edge_markers.fql has to defend against with
+--     a matching GROUP BY is not expressible here at all.
+--
+--   * No changelog anywhere. `entity_log` is the physical log read in
+--     append mode (09_state_provenance_sinks.fql), and the PTF rebuilds
+--     entity state itself, so no operator consumes update changes.
+--
+--   * No window bounds in any identity, so nothing round-trips through
+--     UNIX_TIMESTAMP(CAST(... AS STRING)) and no time-zone setting can
+--     change what an ID hashes to.
+--
+-- Depends on:
+--   - `entity_log` view + `isotope_state_provenance` sink
+--     (09_state_provenance_sinks.fql)
+--   - STATE_PROVENANCE (registered from the classpath by
+--     IsotopeReportsJob; CREATE FUNCTION on the SQL-Client path)
+--
+-- PARTITION BY entity_key is what makes the state per-entity: each key
+-- gets its own version chain, and the framework keys the state for us.
+-- The uid is stable so state survives a redeploy.
+-- =====================================================================
+SET 'pipeline.name' = 'isotope_state_provenance';
+
+INSERT INTO `isotope_state_provenance`
+SELECT
+    `version_id`,
+    `entity_key`,
+    `source_name`,
+    `op`,
+    `parents`,
+    `parent_overflow`,
+    `emitted_at`
+FROM TABLE(
+    STATE_PROVENANCE(
+        input   => TABLE `entity_log` PARTITION BY `entity_key`,
+        on_time => DESCRIPTOR(`event_time`),
+        uid     => 'state-provenance-v1'
+    )
+);
