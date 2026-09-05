@@ -221,7 +221,7 @@ def build():
     box(MID_X, 795, MID_W, 155, "jar", rx=20)
     _, _, t, s = PALETTE["jar"]
     text(MID_X + MID_W // 2, 858, "isotope-flink-udf.jar", 34, t, mono=True)
-    text(MID_X + MID_W // 2, 910, "2 PTFs + 3 UDFs", 34, s)
+    text(MID_X + MID_W // 2, 910, "3 PTFs + 3 UDFs", 34, s)
     text(MID_X + MID_W // 2, 1000, "One JAR \u00b7 same DDL \u00b7 CP or CCAF", 34, PALETTE["muted"])
 
     # report sinks

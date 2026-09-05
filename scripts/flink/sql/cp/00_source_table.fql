@@ -27,6 +27,18 @@
 -- ---------------------------------------------------------------------
 -- orders.placed — origin-of-trace producer topic.
 -- ---------------------------------------------------------------------
+-- Pin the session time zone before any DDL. The reports convert window bounds
+-- with UNIX_TIMESTAMP(CAST(window_start AS STRING)) * 1000, which round trips
+-- through this zone, and ISOTOPE_MERGE_TRACE derives merge trace IDs from the
+-- result. Unpinned it defaults to the machine's zone (CP) or UTC (CCAF), so the
+-- same data yields different epochs and different IDs on the two runtimes; a
+-- DST zone additionally makes the fall-back hour ambiguous.
+--
+-- For the SQL-Client path only: IsotopeReportsJob strips standalone SET
+-- directives (invalid via the Table API) and pins the same zone on its
+-- TableConfig instead.
+SET 'table.local-time-zone' = 'UTC';
+
 CREATE TABLE IF NOT EXISTS `orders.placed` (
     -- We don't decode the message value here — the isotope lives in headers,
     -- and reports only need scalar header columns. Treat the value as raw

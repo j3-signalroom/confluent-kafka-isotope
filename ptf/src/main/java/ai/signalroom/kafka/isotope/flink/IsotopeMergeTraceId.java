@@ -11,7 +11,7 @@ import org.apache.flink.table.functions.ScalarFunction;
 
 /**
  * Returns the merge trace ID for a window as a hex string, so the statement
- * writing merge-edge rows can label each contributing record with the identity
+ * writing merge-edge rows can label each contributing trace with the identity
  * of the merged record it fed.
  *
  * <h2>Why this exists as a separate function</h2>

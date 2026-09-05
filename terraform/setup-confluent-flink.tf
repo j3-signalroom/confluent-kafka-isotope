@@ -141,6 +141,15 @@ locals {
   flink_statement_properties = {
     "sql.current-catalog"  = confluent_environment.isotope.display_name
     "sql.current-database" = confluent_kafka_cluster.isotope.display_name
+
+    # Pinned, not inherited. Every report converts window bounds with
+    # UNIX_TIMESTAMP(CAST(window_start AS STRING)) * 1000, which formats and
+    # parses through the session zone; ISOTOPE_MERGE_TRACE then derives merge
+    # trace IDs from those milliseconds. An unpinned zone makes CP and CCAF
+    # disagree on both, and a DST zone makes the fall-back hour ambiguous.
+    # CP's twin is tableEnv.getConfig().setLocalTimeZone(...) in
+    # IsotopeReportsJob.
+    "sql.local-time-zone" = "UTC"
   }
 
   # Content hash of the shadow JAR. confluent_flink_artifact tracks only the

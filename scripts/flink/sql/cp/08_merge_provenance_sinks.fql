@@ -15,7 +15,7 @@
 --                               than record it.
 --
 --   isotope_merge_edge_markers  the many-to-one edges, one row per
---                               contributing record, joining each parent
+--                               contributing trace, joining each parent
 --                               trace to the merge trace its record fed.
 --                               Same architectural pattern as
 --                               isotope_consume_edge_markers.
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS `orders.flink_batched` (
 -- --------------------------------------------------------------------------
 -- isotope_merge_edge_markers — the merge-edge sideband.
 --
--- One row per record entering the merge stage. `merge_trace_id` is the trace
+-- One row per contributing trace per window. `merge_trace_id` is the trace
 -- the merged record carries; `contributing_trace_id` is the parent that fed
 -- it. Joining this topic to orders.flink_batched on merge_trace_id yields the
 -- full parent set of any merged record.

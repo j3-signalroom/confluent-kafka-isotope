@@ -81,7 +81,25 @@ All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`): 
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true
 ```
 
-That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more `INSERT`s to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing record, so it roughly doubles the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-optional-fan-in-provenance). Teardown removes those topics either way.
+That adds two topics (`orders.flink_batched`, `isotope_merge_edge_markers`) and two more `INSERT`s to the same `StatementSet`. The merged records carry a fresh trace, and the edge topic records which parent traces fed each one — one row per contributing trace per window, a material fraction of the merge stage's write volume. See [docs/flink-collector.md §2.4](./flink-collector.md#24-optional-fan-in-provenance). Teardown removes those topics either way.
+
+**[OPTIONAL] State-level provenance (§3.6).** A second, independent switch:
+
+```bash
+make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true
+
+# both collectors — they answer different questions
+make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=true
+```
+
+That adds one topic (`isotope_state_provenance`) and one `INSERT` to the same `StatementSet`. Each traced order becomes an entity whose three stage records are three versions of it, chained by a `parents` array — `orders.placed` → `orders.enriched` → `orders.fulfilled`. Unlike the merge collector this needs no window: identity is content-addressed, so it works on the updating sources (unbounded `GROUP BY`, joins, dedup) where the windowed path has nothing to key on. **CP only** — see [docs/state-provenance.md §5.0](./state-provenance.md) for why CCAF cannot run this statement verbatim. Teardown removes the topic either way.
+
+Watch it fill:
+
+```bash
+kubectl exec -n confluent kafka-0 -- kafka-console-consumer \
+    --bootstrap-server localhost:9071 --topic isotope_state_provenance --from-beginning --max-messages 5
+```
 
 ## **6.0 Drive traffic (required to see report rows)**
 All report jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, which only emit when the watermark advances past `window_end`. Spread records across **multiple** windows:
