@@ -14,7 +14,16 @@ End-to-end operational guide for running `confluent-kafka-isotope` locally on **
 - [**5.0 Deploy the 7 Flink reports (as a CMF Application)**](#50-deploy-the-7-flink-reports-as-a-cmf-application)
 - [**6.0 Drive traffic (required to see report rows)**](#60-drive-traffic-required-to-see-report-rows)
 - [**7.0 Observe**](#70-observe)
-    + [**7.1 [OPTIONAL] Showcase the two provenance collectors**](#71-optional-showcase-the-two-provenance-collectors)
+    - [**7.1 [OPTIONAL] Showcase the two provenance collectors**](#71-optional-showcase-the-two-provenance-collectors)
+        - [**7.1.1 Fan-in (Merge) Provenance — Three things to point at**](#711-fan-in-merge-provenance--three-things-to-point-at)
+            + [**7.1.1.1 The merged record carries a _fresh_ trace, not a stolen one**](#7111-the-merged-record-carries-a-fresh-trace-not-a-stolen-one)
+            + [**7.1.1.2 The merge trace ID is derived, not minted — the window is readable inside it**](#7112-the-merge-trace-id-is-derived-not-minted--the-window-is-readable-inside-it)
+            + [**7.1.1.3 Both reconciliations hold exactly**](#7113-both-reconciliations-hold-exactly)
+        - [**7.1.2 State Provenance — Three things to point at**](#712-state-provenance--three-things-to-point-at)
+            + [**7.1.2.1 The version chain, inline**](#7121-the-version-chain-inline)
+            + [**7.1.2.2 The whole topic is internally consistent**](#7122-the-whole-topic-is-internally-consistent)
+            + [**7.1.2.3 No hops anywhere**](#7123-no-hops-anywhere)
+        - [**7.1.3 The punchline — one order, three registers**](#713-the-punchline--one-order-three-registers)
 - [**8.0 Teardown**](#80-teardown)
 - [**9.0 Minimal path (no Flink)**](#90-minimal-path-no-flink)
 - [**10.0 Troubleshooting**](#100-troubleshooting)
@@ -107,23 +116,24 @@ kubectl exec -n confluent schemaregistry-0 -- kafka-avro-console-consumer \
 Both optional collectors have a guided walkthrough — [§7.1](#71-optional-showcase-the-two-provenance-collectors).
 
 ## **6.0 Drive traffic (required to see report rows)**
-All report jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, which only emit when the watermark advances past `window_end`. Spread records across **multiple** windows:
+All report jobs aggregate over `TUMBLE(event_time, INTERVAL '1' MINUTE)` windows, which only emit when the watermark advances past `window_end`. Spread records across **multiple** windows.
+
+Start the three pipeline stages, each in its own terminal. They are long-running consumers that idle until traffic arrives:
+
+```bash
+./gradlew :app:run --args="enrich"        # orders.placed   → orders.enriched
+./gradlew :app:run --args="fulfill"       # orders.enriched → orders.fulfilled
+./gradlew :app:run --args="ship"          # terminal consume orders.fulfilled
+```
+
+Then, in a fourth terminal, drive the traffic through them:
 
 ```bash
 # 30 records, 5s apart ≈ 2.5 min of event-time → spans 3+ windows
 for i in {1..30}; do ./gradlew :app:run --args="place burst-$i" -q; sleep 5; done
 ```
 
-Or run the pipeline-position stages, each in its own terminal:
-
-```bash
-./gradlew :app:run --args="place hello"   # origin → orders.placed
-./gradlew :app:run --args="enrich"        # orders.placed   → orders.enriched
-./gradlew :app:run --args="fulfill"       # orders.enriched → orders.fulfilled
-./gradlew :app:run --args="ship"          # terminal consume orders.fulfilled
-```
-
-Wait ~90s after the **last** record before checking results — that's the watermark catching up. `stuck_trace_alerts_1m` only fires for a trace that goes ≥60s of event time without a fresh hop; to exercise it, send one record to `orders.placed`, skip the `enrich`/`fulfill` hops, and keep sending unrelated records so the watermark crosses `event_time + 60s`.
+Wait ~90s after the **last** record before checking results — that's the watermark catching up. `stuck_trace_alerts_1m` only fires for a trace that goes ≥60s of event time without a fresh hop; to exercise it, **stop the enrich/fulfill stages**, send one record to `orders.placed`, and keep sending unrelated records so the watermark crosses `event_time + 60s`.
 
 ## **7.0 Observe**
 ```bash
@@ -160,7 +170,9 @@ Both collectors from [§5.0](#50-deploy-the-7-flink-reports-as-a-cmf-application
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=true
 ```
 
-The walkthrough needs **two** consumers, and they live in **different pods** — worth setting up before you present, because neither pod has both:
+> **Note about rendering the topics in Control Center**: `make c3-open`, then Topics → any of `orders.flink_batched`, `isotope_merge_edge_markers`, `isotope_state_provenance` — all three are SR-framed Avro and render natively. If C3 will not come up, it is almost certainly the startup race in [KNOWN_ISSUES.md §1.0](../KNOWN_ISSUES.md#10-control-center-never-becomes-ready-when-it-wins-the-race-against-kafkas-dns).
+
+Showcasing the **two** provenance collectors takes both consumers, and they live in **different pods** — set them up before you present:
 
 | Topic | Format | Consumer | Pod |
 |---|---|---|---|
@@ -186,9 +198,9 @@ plain() { kubectl exec -n confluent kafka-0 -- kafka-console-consumer \
     "$@" 2>/dev/null | grep -a '^x-isotope'; }
 ```
 
-#### **Fan-in — three things to point at**
+#### **7.1.1 Fan-in (Merge) Provenance — Three things to point at**
 
-**1. The merged record carries a _fresh_ trace, not a stolen one.**
+##### **7.1.1.1 The merged record carries a _fresh_ trace, not a stolen one**
 
 ```bash
 avro --topic orders.flink_batched --max-messages 1 --property print.headers=true \
@@ -226,7 +238,8 @@ x-isotope-hop-count:2
 
 **That single digit is the whole argument.** Same UDF family, same header shape, two different answers: the 1:1 forward **continued** an identity that `order-intake-service` minted (`hop_count = 2`, origin unchanged), and the merge **started** one (`hop_count = 1`, `origin_service = flink-batch`). Nobody told either statement which it was — the count says it. That is the [flink-collector.md §3.1](flink-collector.md#31-11-statements-only) rule made visible: a trace is truthful only while every step has exactly one parent, so the merge does not get to claim one.
 
-**2. The merge trace ID is _derived_, not minted — the window is readable inside it.** It is already visible in the output above: the trace ID opens with `01a073036f00`, and `0x01a073036f00` is `1788636000000` — the `window_end`. The first 12 hex characters are the UUIDv7 timestamp field, and the merge collector fills it from the window rather than from a clock:
+##### **7.1.1.2 The merge trace ID is _derived_, not minted — the window is readable inside it**
+It is already visible in the output above: the trace ID opens with `01a073036f00`, and `0x01a073036f00` is `1788636000000` — the `window_end`. The first 12 hex characters are the UUIDv7 timestamp field, and the merge collector fills it from the window rather than from a clock:
 
 ```
 01a073036f00 → 1788636000000 = window_end
@@ -236,7 +249,8 @@ x-isotope-hop-count:2
 
 This is why [`80_merge_collector.fql`](../scripts/flink/sql/cp/80_merge_collector.fql) and [`81_merge_edge_markers.fql`](../scripts/flink/sql/cp/81_merge_edge_markers.fql) can agree on an ID without ever exchanging one, and why a replayed window reproduces it byte for byte.
 
-**3. Both reconciliations hold exactly.** Join the edges to the merged records on `merge_trace_id` and check the two identities [flink-collector.md §2.4](flink-collector.md#24-optional-fan-in-provenance) asserts:
+##### **7.1.1.3 Both reconciliations hold exactly**
+Join the edges to the merged records on `merge_trace_id` and check the two identities [flink-collector.md §2.4](flink-collector.md#24-optional-fan-in-provenance) asserts:
 
 ```bash
 avro --topic orders.flink_batched --property print.headers=true \
@@ -264,9 +278,10 @@ done < /tmp/batched.txt
 
 > **What this demo cannot show.** Every trace touches `orders.placed` exactly once, so `contributing_records` is always `1` and `event_count` always equals `distinct_traces`. The weighted-edge column is exercised in shape, not in value; a source where one trace contributes several records to a window is what makes the two reconciliations differ.
 
-#### **State provenance — three things to point at**
+#### **7.1.2 State Provenance — Three things to point at**
 
-**1. The version chain, inline.** One entity, three versions, each naming its predecessor — no join, no second topic:
+##### **7.1.2.1 The version chain, inline**
+One entity, three versions, each naming its predecessor — no join, no second topic:
 
 ```bash
 avro --topic isotope_state_provenance > /tmp/state.json
@@ -283,7 +298,8 @@ orders.fulfilled  01a07303085d7a6c8306afcc99abfb66  parents=01a07302bdde75c784f3
 
 The `DemoEvent` payload is forwarded verbatim across all three hops, so the **bytes never change** — and these are still three distinct versions, because `source_name` is part of the preimage ([state-provenance.md §2.1](state-provenance.md#21-version-identity)).
 
-**2. The whole topic is internally consistent.** Every parent resolves to a version of the same entity, one root per entity, nothing overflowed:
+##### **7.1.2.2 The whole topic is internally consistent**
+Every parent resolves to a version of the same entity, one root per entity, nothing overflowed:
 
 ```bash
 jq -s 'INDEX(.version_id.string) as $v
@@ -309,7 +325,8 @@ jq -s 'INDEX(.version_id.string) as $v
 
 31 traced orders × 3 stages. Point out that the parent set is a **column of the record it describes**, so `versions` and `links` cannot drift the way `event_count` and the merge edge list could — that drift is not expressible here.
 
-**3. No hops anywhere.** Ask the same consumer to print headers, and the records have none at all:
+##### **7.1.2.3 No hops anywhere**
+Ask the same consumer to print headers, and the records have none at all:
 
 ```bash
 avro --topic isotope_state_provenance --max-messages 3 --property print.headers=true \
@@ -324,7 +341,7 @@ NO_HEADERS	{"version_id":{"string":"01a07303085d7a6c8306afcc
 
 Not "no hop count" — **no isotope at all**. A row being revised is not a record taking a hop, so this collector declines the question rather than answering it wrong. Message lineage stays with the isotope on the `orders.*` topics; state lineage is a parallel record keyed by version. The two coexist without either lying.
 
-#### **The punchline — one order, three registers**
+#### **7.1.3 The punchline — one order, three registers**
 The strongest single moment of the demo. `entity_key` in the state topic **is** the isotope trace ID, which **is** `contributing_trace_id` in the merge edges, so the same order is addressable in all three lineage models at once.
 
 This continues from the blocks above — it reuses `$E` from the state walkthrough and `/tmp/edges.json` from fan-in beat 3, so run those two first:
@@ -346,9 +363,6 @@ version orders.fulfilled = 01a07303085d7a6c8306afcc99abfb66
 ```
 
 One order, read three ways: **as a message** it is an itinerary carried in-band; **as a fan-in parent** it is an edge recorded out-of-band, because the merge could not carry it; **as an entity** it is a version chain that never mentions hops. Three provenance models, one identity, and **no change to the isotope wire format** for any of them.
-
-#### **Rendering the topics in Control Center**
-`make c3-open`, then Topics → any of `orders.flink_batched`, `isotope_merge_edge_markers`, `isotope_state_provenance` — all three are SR-framed Avro and render natively. If C3 will not come up, it is almost certainly the startup race in [KNOWN_ISSUES.md](../KNOWN_ISSUES.md#control-center-never-becomes-ready-when-it-wins-the-race-against-kafkas-dns).
 
 ## **8.0 Teardown**
 Pick the depth:
