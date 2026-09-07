@@ -160,7 +160,7 @@ The isotope is a **JSON object** that travels in the `x-isotope` Kafka record he
 
   * `x` — `true` if the hop list exceeded `MAX_HOPS = 32` and the oldest hop was evicted.
 
-* **Seven scalar headers** (UTF-8 strings) carry the most-recent-hop view, allowing Flink SQL to read them directly via `CAST(headers['x-isotope-…'] AS STRING)` without parsing the JSON hop array or requiring a UDF on either CCAF or CP Flink. See [scripts/flink/README.md](../scripts/flink/README.md) for the complete scalar-header table.
+* **Seven scalar headers** (UTF-8 strings) carry the most-recent-hop view, allowing Flink SQL to read them directly via `CAST(headers['x-isotope-…'] AS STRING)` without parsing the JSON hop array or requiring a UDF on either CCAF or CP Flink. See [scripts/flink/README.md](scripts/flink/README.md) for the complete scalar-header table.
 
 <details>
 
