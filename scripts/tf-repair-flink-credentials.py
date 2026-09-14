@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Repair `confluent_flink_statement` credentials that a key rotation invalidated.
 
-Every `confluent_flink_statement` in terraform/setup-confluent-flink.tf carries a
+Every `confluent_flink_statement` in terraform/setup-ccaf.tf carries a
 `credentials` block sourced from module.flink_api_key_rotation. Terraform stores
 the resolved key/secret in state, and it reads a statement back with the key that
 is *in state* — not the one the config would resolve today. The rotation module

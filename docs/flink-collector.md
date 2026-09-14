@@ -50,9 +50,9 @@ Flink collects onto a **new parallel topic**, `orders.flink_enriched`. It reads 
 
 | Piece | CP (minikube) | CCAF |
 |---|---|---|
-| UDF registration | [`01_register_functions.fql`](../scripts/flink/sql/cp/01_register_functions.fql) | `register_isotope_append_hop` in [`setup-confluent-flink.tf`](../terraform/setup-confluent-flink.tf) |
-| Writable sink table | [`07_flink_collector_sink.fql`](../scripts/flink/sql/cp/07_flink_collector_sink.fql) | `flink_collector_sink` + two `ALTER`s in [`setup-confluent-flink.tf`](../terraform/setup-confluent-flink.tf) |
-| Collector INSERT | [`75_flink_collector.fql`](../scripts/flink/sql/cp/75_flink_collector.fql) | `insert_flink_collector` in [`setup-confluent-flink.tf`](../terraform/setup-confluent-flink.tf) |
+| UDF registration | [`01_register_functions.fql`](../scripts/flink/sql/cp/01_register_functions.fql) | `register_isotope_append_hop` in [`setup-ccaf.tf`](../terraform/setup-ccaf.tf) |
+| Writable sink table | [`07_flink_collector_sink.fql`](../scripts/flink/sql/cp/07_flink_collector_sink.fql) | `flink_collector_sink` + two `ALTER`s in [`setup-ccaf.tf`](../terraform/setup-ccaf.tf) |
+| Collector INSERT | [`75_flink_collector.fql`](../scripts/flink/sql/cp/75_flink_collector.fql) | `insert_flink_collector` in [`setup-ccaf.tf`](../terraform/setup-ccaf.tf) |
 | Teardown | [`99_teardown.fql`](../scripts/flink/sql/cp/99_teardown.fql) | `terraform destroy` |
 
 `IsotopeReportsJob` registers `ISOTOPE_APPEND_HOP` from the classpath and runs the collector INSERT alongside the seven report INSERTs in the same `StatementSet`.

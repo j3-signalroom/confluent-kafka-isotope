@@ -62,7 +62,7 @@ The collector is a 1:1 projection with no window, so its output appears within s
 | `confluent_flink_statement` × 3 (optional) | (see [terraform/setup-ccaf-ai.tf](../terraform/setup-ccaf-ai.tf)) | Optional AI trace-RCA report — `CREATE MODEL trace_rca` + 1 Protobuf sink + 1 `INSERT … ML_PREDICT`. **Gated on `var.enable_trace_rca` (default `false`)**, so a normal apply skips them entirely. Set `rca_model_api_key` (and `rca_model_provider`/`_version`/`_endpoint` for a non-OpenAI provider) to enable. See root README §3.3. |
 | `confluent_flink_statement` × 5 (optional) | (see [terraform/setup-ccaf-merge-provenance.tf](../terraform/setup-ccaf-merge-provenance.tf)) | Optional fan-in (merge) provenance — 2 sink `CREATE TABLE` + 2 header `ALTER TABLE` + 1 statement set holding the merge INSERT and its merge-edge INSERT. **Gated on `var.enable_merge_provenance` (default `false`)**. The 4 `CREATE`/`DROP FUNCTION` statements registering `ISOTOPE_MERGE_TRACE` / `ISOTOPE_MERGE_TRACE_ID` are *not* gated — registration is inert until a statement calls it. See [docs/flink-collector.md §2.4](./flink-collector.md#24-optional-fan-in-provenance). |
 
-Two rotating service-account API key pairs (one Kafka, one Schema Registry) are managed by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-confluent-kafka.tf](../terraform/setup-confluent-kafka.tf).
+Two rotating service-account API key pairs (one Kafka, one Schema Registry) are managed by `module.kafka_api_key_rotation` and `module.sr_api_key_rotation` in [terraform/setup-cc-kafka.tf](../terraform/setup-cc-kafka.tf).
 
 ## **4.0 Useful outputs**
 ```bash

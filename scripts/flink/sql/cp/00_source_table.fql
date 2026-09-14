@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS `isotope_consume_edge_markers` (
 
 -- ---------------------------------------------------------------------
 -- isotope_raw — fan-in view that downstream typed views read from.
--- Same shape as the CCAF view in terraform/setup-confluent-flink.tf;
+-- Same shape as the CCAF view in terraform/setup-ccaf.tf;
 -- keeping the name and columns identical means 05_isotope_view.fql,
 -- 06_consume_events_view.fql and every report below them are byte-for-byte
 -- portable between CP and CCAF.

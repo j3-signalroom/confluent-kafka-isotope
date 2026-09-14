@@ -519,7 +519,7 @@ resource "confluent_flink_statement" "isotope_report_latency_1m" {
   }
 
   # No depends_on for the sink topic — see comment in
-  # setup-confluent-kafka.tf where confluent_kafka_topic.isotope_report
+  # setup-cc-kafka.tf where confluent_kafka_topic.isotope_report
   # was intentionally removed. CCAF's CREATE TABLE creates the topic.
   depends_on = [confluent_flink_compute_pool.isotope]
 }

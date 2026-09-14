@@ -244,7 +244,7 @@ flowchart TB
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-confluent-flink.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf<br/>(+3 with trace_rca, +5 with merge_provenance)"]
+            TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-ccaf.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf<br/>(+3 with trace_rca, +5 with merge_provenance)"]
             JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>no state-provenance on CCAF (§3.6)<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
@@ -407,7 +407,7 @@ scripts/
                                         INSERT on both; layout, operations
   flink/sql/cp/                         CP Flink SQL, bundled into the reports JAR and
                                         listed here in apply order. (CCAF's copy is
-                                        inlined in terraform/setup-confluent-flink.tf.)
+                                        inlined in terraform/setup-ccaf.tf.)
     00_source_table.fql                 4 source tables + the isotope_raw union view;
                                         pins table.local-time-zone = UTC for the
                                         SQL-Client path
@@ -444,10 +444,10 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
   variables.tf                          confluent_api_key/secret, cloud, region, day_count,
                                         enable_trace_rca, enable_merge_provenance
   data.tf                               organization lookup + other data sources
-  setup-confluent-environment.tf        environment (ESSENTIALS stream-governance package)
-  setup-confluent-kafka.tf              Kafka cluster + Kafka API key rotation module
+  setup-cc-environment.tf        environment (ESSENTIALS stream-governance package)
+  setup-cc-kafka.tf              Kafka cluster + Kafka API key rotation module
                                         (iac-confluent-api_key_rotation-tf_module)
-  setup-confluent-flink.tf              service account + 6 role bindings, compute pool,
+  setup-ccaf.tf              service account + 6 role bindings, compute pool,
                                         artifact upload, SR API key rotation, and 24 inline
                                         `confluent_flink_statement` resources: 6 ALTER TABLE
                                         + 3 VIEW + 8 sink CREATE TABLE + 3 DROP FUNCTION +
@@ -623,7 +623,7 @@ The Confluent Cloud for Apache Flink (CCAF) parallel of [§3.2 CP + Apache Flink
 
 **The full provision → deploy → traffic → teardown sequence is consolidated in [docs/runbook-ccaf.md](docs/runbook-ccaf.md).** `make cc-flink-reports-up` (~6–8 min first run; idempotent re-applies), drive traffic with `scripts/cc-app-run.sh place|enrich|fulfill|ship` across **multiple** 1-minute windows (a single burst sits in one open window forever, and you wait ~90s after the last record), then `make cc-flink-reports-down` to `terraform destroy` the whole environment.
 
-**Format-by-runtime (not-by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's `WITH` clause in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-confluent-flink.tf](terraform/setup-confluent-flink.tf).
+**Format-by-runtime (not-by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's `WITH` clause in [terraform/setup-ccaf.tf](terraform/setup-ccaf.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-ccaf.tf](terraform/setup-ccaf.tf).
 
 #### **3.3.1 Why `latency_percentiles` is a `ProcessTableFunction` (PTF)**
 Since CCAF does not support [User-Defined AGGregate functions (UDAGG)](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/functions/udfs/#aggregate-functions), I implemented the percentiles report as a `ProcessTableFunction` to keep it portable across runtimes. `LATENCY_PERCENTILES` (class `LatencyPercentilesPTF`) performs its own 1-minute tumbling-window aggregation over a T-Digest sketch using per-window state and event-time timers. **A PTF avoids that UDAGG restriction, so it registers and runs on both runtimes, just like `STUCK_TRACE_PTF`. Both runtimes therefore run the same seven reports:** `latency` (avg/min/max), `topology` (produce-side), `bipartite_topology` (full service↔topic↔service graph), `hop_distribution`, `coverage`, `stuck_trace`, and `latency_percentiles` (p50/p95/p99).
