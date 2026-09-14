@@ -8,7 +8,7 @@
 # aggregate whose output is a business event — without changing the isotope
 # wire format.
 #
-# How it works (docs/flink-collector.md 3.1):
+# How it works (docs/flink-collector.md 2.4):
 #
 #   orders.flink_batched         the MERGED event. Carries a FRESH trace,
 #                                because forwarding one of its 1,000 parents'
@@ -23,9 +23,10 @@
 # via ISOTOPE_MERGE_TRACE / ISOTOPE_MERGE_TRACE_ID. That derivation is what
 # joins them; see MergeTrace's javadoc for why it cannot be a random mint.
 #
-# Off by default. On, it adds two topics and one statement, and the edge topic
-# writes one record per contributing TRACE per window — a material fraction of that
-# stage's write volume. CP's equivalent switch is
+# Off by default. On, it adds two topics and five statements (two sink CREATE
+# TABLEs, two header ALTERs, one statement set), and the edge topic writes one
+# record per contributing TRACE per window — a material fraction of that stage's
+# write volume. CP's equivalent switch is
 # MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up.
 #
 # Kept in its own statement set rather than folded into insert_isotope_reports

@@ -106,7 +106,7 @@ public final class IsotopeReportsJob {
     }
 
     public static void main(String[] args) throws Exception {
-        // Opt-in fan-in provenance (docs/flink-collector.md 3.1). Off by default:
+        // Opt-in fan-in provenance (docs/flink-collector.md 2.4). Off by default:
         // it adds a second collector stage and an edge topic that writes one
         // record per contributing trace per window, which is not something every
         // deployment should pay for. CCAF's equivalent switch is the Terraform
@@ -176,8 +176,9 @@ public final class IsotopeReportsJob {
         // the collector (75_flink_collector.fql), which is not a report but
         // shares the same source scan, plus the two merge-provenance INSERTs
         // when that feature is on. CCAF's equivalent is EXECUTE STATEMENT
-        // SET; it currently submits these as separate statements instead, so
-        // each carries its own compute-pool floor.
+        // SET: the reports and collector share one set there, while the merge
+        // INSERTs get a set of their own so an optional feature cannot fail
+        // the always-on reports. Here they share this job's failure domain.
         StatementSet reports = tableEnv.createStatementSet();
         for (String file : insertFiles) {
             List<String> stmts = statements(readResource("sql/" + file));

@@ -1,5 +1,5 @@
 -- =====================================================================
--- Flink as a MERGE collector — OPTIONAL (see docs/flink-collector.md 3.1).
+-- Flink as a MERGE collector — OPTIONAL (see docs/flink-collector.md 2.4).
 --
 -- The counterpart to 75_flink_collector.fql. That statement is a 1:1
 -- projection and continues the inbound trace; this one is a windowed
