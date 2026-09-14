@@ -15,7 +15,7 @@
   - [**3.4 [OPTIONAL] Prometheus Metrics Reporting with Grafana Visualization**](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)
   - [**3.5 [OPTIONAL] Fan-in (Merge) Provenance**](#35-optional-fan-in-merge-provenance)
   - [**3.6 [OPTIONAL] State-Level Provenance**](#36-optional-state-level-provenance)
-- [**Resources**](#resources)
+- [**Companion Articles**](#companion-articles)
 <!-- tocstop -->
 
 ---
@@ -696,6 +696,6 @@ make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=tr
 
 > **Full details** — the identity model, why one operator instead of two statements, the CCAF assessment, and the limits (unbounded parent sets, no recursive ancestry in Flink SQL, compaction bounding replay) — are in **[docs/state-provenance.md](docs/state-provenance.md)**.
 
-## **Resources**
+## **Companion Articles**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors with assistance from AI](https://medium.com/@jeffrey.j.jennings/kafkas-quiet-observability-superpower-kafka-interceptors-with-assistance-from-ai-d3f83fc1b27e)
