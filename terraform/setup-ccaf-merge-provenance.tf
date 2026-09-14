@@ -2,7 +2,7 @@
 # Optional: fan-in (merge) provenance for the Flink collector (CCAF).
 # =============================================================================
 #
-# The collector in setup-confluent-flink.tf is 1:1 and deliberately so: an
+# The collector in setup-ccaf.tf is 1:1 and deliberately so: an
 # isotope is a path, provenance is a DAG, and the two coincide only while every
 # step has exactly one parent. This file adds the DAG case — a windowed
 # aggregate whose output is a business event — without changing the isotope
@@ -46,7 +46,7 @@ variable "enable_merge_provenance" {
 # Topics are NOT pre-created as confluent_kafka_topic resources — CCAF's Topic
 # Catalog would auto-import them as (key BYTES, val BYTES) and silently no-op
 # this typed CREATE TABLE. Letting CREATE TABLE own both ends is the same
-# discipline setup-confluent-kafka.tf documents for the report sinks.
+# discipline setup-cc-kafka.tf documents for the report sinks.
 # ---------------------------------------------------------------------------
 resource "confluent_flink_statement" "merge_batched_sink" {
   count = var.enable_merge_provenance ? 1 : 0
@@ -88,7 +88,7 @@ resource "confluent_flink_statement" "merge_batched_sink" {
 # Two ALTERs, not one — MODIFY requires the column to exist, so it is ADDed as
 # VIRTUAL first and then re-declared without VIRTUAL to persist it. Persisted is
 # what makes it writable. Identical to the flink_collector_add_headers /
-# flink_collector_writable_headers pair in setup-confluent-flink.tf; see the
+# flink_collector_writable_headers pair in setup-ccaf.tf; see the
 # comments there for why MAP<STRING, STRING> rather than the native
 # MAP<BYTES, BYTES>.
 resource "confluent_flink_statement" "merge_batched_add_headers" {

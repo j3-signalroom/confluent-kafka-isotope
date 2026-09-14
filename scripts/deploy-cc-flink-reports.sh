@@ -272,7 +272,7 @@ if [ "${create_action}" = true ]; then
     #     "stopped" or "properties_sensitive" attribute must be updated ...
     # even though `terraform plan` reports a perfectly ordinary in-place update.
     # Those changes are really destroy-and-recreate, so ask for that explicitly.
-    # This is what makes editing report SQL in setup-confluent-flink.tf work at
+    # This is what makes editing report SQL in setup-ccaf.tf work at
     # all — without it, every SQL edit fails the apply.
     # -----------------------------------------------------------------------
     replace_args=()

@@ -1,6 +1,6 @@
 data "confluent_organization" "current" {}
 
-# Schema Registry for the environment created in setup-confluent-environment.tf.
+# Schema Registry for the environment created in setup-cc-environment.tf.
 data "confluent_schema_registry_cluster" "isotope" {
   environment {
     id = confluent_environment.isotope.id
@@ -24,7 +24,7 @@ locals {
 
   # Canonical isotope event topics. The demo CLI writes DemoEvent (SR-Protobuf)
   # to orders.placed / orders.enriched / orders.fulfilled; the source view
-  # inlined in setup-confluent-flink.tf UNIONs them.
+  # inlined in setup-ccaf.tf UNIONs them.
   # isotope_consume_edge_markers carries consume-edge markers (no
   # value, scalar isotope headers + a x-isotope-consumer-service header) written
   # by IsotopeContext.recordConsume.

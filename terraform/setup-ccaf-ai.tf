@@ -118,7 +118,7 @@ locals {
 # NOT enough to run CREATE MODEL — without this the statement fails to provision
 # with "Permission denied to CREATE on Model". ResourceOwner covers
 # create/drop/describe plus invoking the model from ML_PREDICT, matching how
-# topic/group/transactional-id access is granted in setup-confluent-flink.tf.
+# topic/group/transactional-id access is granted in setup-ccaf.tf.
 # Gated on the same flag as the rest of the file, so a normal apply grants
 # nothing extra.
 resource "confluent_role_binding" "flink_sql_runner_as_resource_owner_model_access" {
@@ -297,7 +297,7 @@ resource "confluent_flink_statement" "insert_trace_rca" {
     confluent_flink_statement.trace_rca_model,
     confluent_flink_statement.isotope_report_trace_rca_1m,
     # The stuck-trace INSERT this reads from now runs inside the consolidated
-    # statement set (setup-confluent-flink.tf), not as its own resource.
+    # statement set (setup-ccaf.tf), not as its own resource.
     confluent_flink_statement.insert_isotope_reports,
   ]
 }

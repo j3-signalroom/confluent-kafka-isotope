@@ -62,7 +62,7 @@ SR_URL="$(terraform -chdir="${__cc_env_tf_dir}" output -raw schema_registry_url 
 KAFKA_KEY="$(terraform -chdir="${__cc_env_tf_dir}" output -raw kafka_api_key 2>/dev/null)"
 KAFKA_SECRET="$(terraform -chdir="${__cc_env_tf_dir}" output -raw kafka_api_secret 2>/dev/null)"
 
-# Schema Registry credentials — managed by terraform/setup-confluent-kafka.tf's
+# Schema Registry credentials — managed by terraform/setup-cc-kafka.tf's
 # `sr_api_key_rotation` module. Honor SR_KEY/SR_SECRET if already exported
 # (back-compat for users who minted an SR key in the Cloud Console before
 # the Terraform module owned this); otherwise pull from `terraform output`.

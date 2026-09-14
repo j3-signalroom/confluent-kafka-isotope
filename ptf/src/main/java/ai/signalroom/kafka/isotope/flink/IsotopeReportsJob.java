@@ -1,9 +1,5 @@
 package ai.signalroom.kafka.isotope.flink;
 
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.StatementSet;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -12,6 +8,10 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.StatementSet;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
 /**
  * Entry point for the isotope reports as a <b>Confluent Manager for Apache Flink
@@ -132,7 +132,7 @@ public final class IsotopeReportsJob {
         // DST is worse: during the fall-back overlap the local string is
         // ambiguous and the parse silently picks one of two instants. Pinning
         // UTC removes both. CCAF's twin is sql.local-time-zone in
-        // terraform/setup-confluent-flink.tf.
+        // terraform/setup-ccaf.tf.
         tableEnv.getConfig().setLocalTimeZone(ZoneId.of("UTC"));
 
         // Register the two JAR-backed PTFs from their on-classpath classes (this
