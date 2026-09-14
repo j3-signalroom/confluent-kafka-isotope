@@ -444,10 +444,10 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
   variables.tf                          confluent_api_key/secret, cloud, region, day_count,
                                         enable_trace_rca, enable_merge_provenance
   data.tf                               organization lookup + other data sources
-  setup-cc-environment.tf        environment (ESSENTIALS stream-governance package)
-  setup-cc-kafka.tf              Kafka cluster + Kafka API key rotation module
+  setup-cc-environment.tf               environment (ESSENTIALS stream-governance package)
+  setup-cc-kafka.tf                     Kafka cluster + Kafka API key rotation module
                                         (iac-confluent-api_key_rotation-tf_module)
-  setup-ccaf.tf              service account + 6 role bindings, compute pool,
+  setup-ccaf.tf                         service account + 6 role bindings, compute pool,
                                         artifact upload, SR API key rotation, and 24 inline
                                         `confluent_flink_statement` resources: 6 ALTER TABLE
                                         + 3 VIEW + 8 sink CREATE TABLE + 3 DROP FUNCTION +
