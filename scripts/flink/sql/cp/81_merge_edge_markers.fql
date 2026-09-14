@@ -1,8 +1,8 @@
 -- =====================================================================
--- Merge-edge markers — OPTIONAL (see docs/flink-collector.md 3.1).
+-- Merge-edge markers — OPTIONAL (see docs/flink-collector.md 2.4).
 --
 -- The other half of 80_merge_collector.fql. That statement emits one
--- merged record per window; this one emits one edge per record that
+-- merged record per window; this one emits one edge per trace that
 -- contributed to it, so the many-to-one derivation the isotope format
 -- cannot carry in-band is recorded out-of-band instead.
 --
@@ -21,10 +21,9 @@
 --     IsotopeReportsJob; CREATE FUNCTION on the SQL-Client path)
 --
 -- Call form notes:
---   - No GROUP BY. The window TVF already stamps every row with its
---     window bounds, so this is a plain projection over the same window
---     80_merge_collector.fql aggregates — which is exactly the fan-out
---     an edge list wants.
+--   - A window aggregate over the same window 80_merge_collector.fql
+--     aggregates, grouped down to one row per contributing trace — not a
+--     bare projection. See the comment above GROUP BY for why.
 --   - The five ISOTOPE_MERGE_TRACE_ID arguments MUST match the first
 --     five passed to ISOTOPE_MERGE_TRACE in 80_merge_collector.fql,
 --     including the WHERE clause that selects the input rows. If the
@@ -35,9 +34,8 @@
 --     the PTF, which the cp-flink 2.1.2 Expander round-trip rejects.
 --     See 60_stuck_trace_report.fql for that failure in detail.
 --   - Cost, stated plainly: one record written per contributing trace per
---     window entering the
---     merge stage. This roughly doubles that stage's write volume, and
---     that is inherent to an edge list rather than a property of this
+--     window, a material fraction of the merge stage's write volume. That
+--     is inherent to an edge list rather than a property of this
 --     implementation.
 -- =====================================================================
 

@@ -1,5 +1,5 @@
 -- ==========================================================================
--- Merge-provenance sinks — OPTIONAL (see docs/flink-collector.md 3.1).
+-- Merge-provenance sinks — OPTIONAL (see docs/flink-collector.md 2.4).
 --
 -- These two tables exist only when the reports application is started with
 -- --merge-provenance (IsotopeReportsJob). Off, nothing here is created and
@@ -75,8 +75,8 @@ CREATE TABLE IF NOT EXISTS `orders.flink_batched` (
 -- full parent set of any merged record.
 --
 -- The volume cost is honest and worth stating: this writes one record per
--- record ENTERING the merge, so it roughly doubles that stage's write volume.
--- That is inherent to a DAG edge list, not to this implementation.
+-- contributing trace per window, a material fraction of that stage's write
+-- volume. That is inherent to a DAG edge list, not to this implementation.
 --
 -- `operator` is backticked throughout — it is a reserved word in Flink SQL.
 -- --------------------------------------------------------------------------

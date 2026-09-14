@@ -42,10 +42,10 @@ MINIO_S3_ENDPOINT="${MINIO_S3_ENDPOINT:-http://minio.confluent.svc:9000}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin123}"
 
-# Optional fan-in provenance (docs/flink-collector.md 3.1). Off by default: it
+# Optional fan-in provenance (docs/flink-collector.md 2.4). Off by default: it
 # adds a merge collector, a merged-event topic and a merge-edge topic that
-# writes one record per record ENTERING the merge, roughly doubling that
-# stage's write volume. On, IsotopeReportsJob applies the extra DDL and adds
+# writes one record per contributing trace per window, a material fraction of
+# that stage's write volume. On, IsotopeReportsJob applies the extra DDL and adds
 # two more INSERTs to the same StatementSet.
 #   MERGE_PROVENANCE=true scripts/deploy-cmf-flink-reports.sh up
 # CCAF's equivalent switch is the Terraform variable var.enable_merge_provenance.
@@ -90,7 +90,7 @@ SINK_TOPICS=(
     orders.flink_enriched
 )
 
-# Merge-provenance topics (docs/flink-collector.md 3.1). Created only when the
+# Merge-provenance topics (docs/flink-collector.md 2.4). Created only when the
 # feature is on, for the same reason the collector sink is pre-created above:
 # OSS Flink's kafka connector declares a table over a topic that must already
 # exist, so a missing one crash-loops the job with "not present in metadata
