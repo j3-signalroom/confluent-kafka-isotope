@@ -1,6 +1,6 @@
 # State-Level Provenance over Upsert Sources
 
-> **Implemented and wired into the demo** as [root README §3.6](../README.md#36-optional-state-level-provenance) — `make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true`. Off by default, **CP only** ([§5.0](#50-cp-vs-ccaf-where-the-divergence-actually-lands) explains why CCAF cannot run the statement verbatim). Code: [`StateProvenancePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTF.java), [`StateVersion`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateVersion.java), [`09_state_provenance_sinks.fql`](../scripts/flink/sql/cp/09_state_provenance_sinks.fql), [`85_state_provenance.fql`](../scripts/flink/sql/cp/85_state_provenance.fql).
+> **Implemented and wired into the demo** as [root README §3.5.3](../README.md#353-optional-state-level-provenance-upsert-and-cdc-sources) — `make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true`. Off by default, **CP only** ([§5.0](#50-cp-vs-ccaf-where-the-divergence-actually-lands) explains why CCAF cannot run the statement verbatim). Code: [`StateProvenancePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTF.java), [`StateVersion`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateVersion.java), [`09_state_provenance_sinks.fql`](../scripts/flink/sql/cp/09_state_provenance_sinks.fql), [`85_state_provenance.fql`](../scripts/flink/sql/cp/85_state_provenance.fql).
 
 **Table of Contents**
 <!-- toc -->
