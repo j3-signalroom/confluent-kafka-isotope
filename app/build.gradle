@@ -8,7 +8,7 @@ repositories {
     // kafka-protobuf-serializer + its transitive Confluent deps live here.
     maven { url 'https://packages.confluent.io/maven/' }
     // The isotope tracing library (j3-signalroom/kafka-isotope) is published to
-    // Maven Central as of 0.18.0, so it resolves from mavenCentral() above — no
+    // Maven Central as of 0.19.0, so it resolves from mavenCentral() above — no
     // GitHub Packages repo or authentication required.
 }
 
@@ -32,8 +32,8 @@ dependencies {
     // kafka-isotope-metrics is the optional Prometheus exporter (App starts it
     // via PrometheusIsotopeMetrics.start()). Micrometer, Jackson and SLF4J arrive
     // transitively through these, so the demo no longer declares them directly.
-    implementation 'ai.signalroom:kafka-isotope-core:0.18.0'
-    implementation 'ai.signalroom:kafka-isotope-metrics:0.18.0'
+    implementation 'ai.signalroom:kafka-isotope-core:0.19.0'
+    implementation 'ai.signalroom:kafka-isotope-metrics:0.19.0'
 
     implementation libs.kafka.clients
     // The runnable App demo (send / sink) and the integration tests both
@@ -47,7 +47,7 @@ dependencies {
     testRuntimeOnly   libs.junit.platform.launcher
 
     // IsotopeTestHarness + the ITs reference the core tracing classes directly.
-    integrationTestImplementation 'ai.signalroom:kafka-isotope-core:0.18.0'
+    integrationTestImplementation 'ai.signalroom:kafka-isotope-core:0.19.0'
 }
 
 protobuf {
