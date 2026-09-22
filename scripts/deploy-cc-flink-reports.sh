@@ -323,14 +323,16 @@ if [ "${create_action}" = true ]; then
     terraform graph | dot -Tpng > "../docs/terraform.png"
 
     echo
-    print_info "Next step — drive the 4-stage demo (see root README §3.3):"
-    print_info "    scripts/cc-app-run.sh place 'hello'    # kick the chain off"
-    print_info "    scripts/cc-app-run.sh enrich"
-    print_info "    scripts/cc-app-run.sh fulfill"
-    print_info "    scripts/cc-app-run.sh ship             # terminal consumer (emits marker)"
+    print_info "Next step — drive the 4-stage demo, ONE VERB PER TERMINAL."
+    print_info "B/C/D are long-running (Ctrl-C to stop); start them before A"
+    print_info "(see docs/runbook-ccaf.md §5.0):"
+    print_info "    scripts/cc-app-run.sh enrich           # terminal B — orders.placed   → orders.enriched"
+    print_info "    scripts/cc-app-run.sh fulfill          # terminal C — orders.enriched → orders.fulfilled"
+    print_info "    scripts/cc-app-run.sh ship             # terminal D — terminal consumer (emits marker)"
+    print_info "    scripts/cc-app-run.sh place 'hello'    # terminal A — kick the chain off (exits on its own)"
 
     echo
-    print_info "Produce 30 records spaced 5 seconds apart ≈ 2.5 minutes of event-time → spans 3+ windows:"
+    print_info "With B/C/D running, produce 30 records spaced 5 seconds apart ≈ 2.5 minutes of event-time → spans 3+ windows:"
     print_info "    for i in {1..30}; do scripts/cc-app-run.sh place \"burst-\$i\"; sleep 5; done"
 else
     print_step "terraform destroy"
