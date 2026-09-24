@@ -76,7 +76,7 @@ terraform -chdir=terraform output -raw kafka_api_secret   # sensitive
 ## **5.0 Drive traffic (required to see report rows)**
 The demo app runs **on your host** and talks to Confluent Cloud over SASL_SSL.  You don't export credentials manually: [scripts/cc-app-run.sh](../scripts/cc-app-run.sh)sources [scripts/cc-cli-env.sh](../scripts/cc-cli-env.sh), which pulls the Kafka + Schema-Registry credentials from `terraform output`, builds the JAAS string, and invokes `./gradlew :app:run` with the six `-D` flags. It hard-fails if any of the seven required values is missing.
 
-Run the 4-stage demo, one verb per terminal (same A/B/C/D order as the local demo):
+Run the 4-stage demo, one verb per terminal (same A/B/C/D order as the local demo). B/C/D are long-running (Ctrl-C to stop). Start order doesn't matter: each stage reads its topic from the earliest offset with a fresh consumer group, so it replays everything already there. Starting B/C/D first just lets you watch records flow live.
 
 ```bash
 scripts/cc-app-run.sh place 'hello'    # A — kick the chain off (orders.placed)
@@ -84,6 +84,8 @@ scripts/cc-app-run.sh enrich           # B — orders.placed   → orders.enrich
 scripts/cc-app-run.sh fulfill          # C — orders.enriched → orders.fulfilled
 scripts/cc-app-run.sh ship             # D — terminal consume orders.fulfilled (emits marker)
 ```
+
+To skip the backlog, pass `--latest` (shorthand for `-Disotope.consume.from=latest`), e.g. `scripts/cc-app-run.sh --latest enrich`. Each stage then sees only records produced after it starts, so you **must** start B/C/D before A. It's also the mode to use when reading the latency report: a replayed backlog record's origin→hop latency is `now − origin_ts`, which dwarfs steady-state latency.
 
 `cc-app-run.sh` also accepts the generic `send` / `hop` / `consume` / `sink` passthrough for ad-hoc topics — run it with no args for the full verb list.
 

@@ -51,7 +51,7 @@ make cp-watch            # watch pods come up (Ctrl+C to exit); or: make cp-stat
 
 ## **3.0 Flink**
 ```bash
-make cp-flink-up            # cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → app image
+make cp-flink-up         # cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → app image
 make cmf-status          # (~5 min the first time)
 ```
 

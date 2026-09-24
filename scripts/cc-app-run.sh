@@ -11,6 +11,17 @@
 #   scripts/cc-app-run.sh fulfill           # hop orders.enriched → orders.fulfilled
 #   scripts/cc-app-run.sh ship              # terminal-consume orders.fulfilled
 #
+# Offset reset — enrich/fulfill/ship (and hop/consume/sink) join a fresh,
+# random consumer group on every run, so auto.offset.reset decides where
+# they start:
+#   (default)   earliest — replay everything already on the topic; start
+#               order doesn't matter.
+#   --latest    latest   — skip the backlog and only see records produced
+#               after the stage starts. Start B/C/D BEFORE `place`, or their
+#               records are skipped. Useful for reading steady-state latency.
+#               Shorthand for -Disotope.consume.from=latest.
+#   e.g. scripts/cc-app-run.sh --latest enrich
+#
 # Generic verbs (raw App.java passthrough — for ad-hoc inspection or pipelines
 # that don't fit the orders.* shape):
 #   scripts/cc-app-run.sh send    <topic> <service> <payload>
@@ -40,7 +51,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 if [ $# -eq 0 ]; then
     cat <<EOF
-Usage: $(basename "$0") <verb> [args]
+Usage: $(basename "$0") [--latest] [-Dkey=value ...] <verb> [args]
 
 Pipeline-position verbs (recommended):
   place [PAYLOAD]   send orders.placed as order-intake-service (default payload: hello)
@@ -54,15 +65,20 @@ Generic verbs (raw App.java passthrough):
   consume <topic> <service>
   sink    <topic> [max-records]
 
+Options:
+  --latest          consume from the latest offset instead of earliest (skip the
+                    backlog); start enrich/fulfill/ship BEFORE place in this mode
+
 Test:
   verify-inband [SAMPLE]   assert the Flink collector appended a hop in-band
                            (default SAMPLE: 20 records per topic)
 
-Example (full 4-terminal demo, in pipeline order):
+Example (full 4-terminal demo, in pipeline order; any start order works
+with the default earliest offset):
   scripts/cc-app-run.sh place 'hello' # terminal A — kick the chain off
-  scripts/cc-app-run.sh enrich    &   # terminal B
-  scripts/cc-app-run.sh fulfill   &   # terminal C
-  scripts/cc-app-run.sh ship      &   # terminal D — terminal consumer (emits marker)
+  scripts/cc-app-run.sh enrich        # terminal B
+  scripts/cc-app-run.sh fulfill       # terminal C
+  scripts/cc-app-run.sh ship          # terminal D — terminal consumer (emits marker)
 EOF
     exit 2
 fi
@@ -219,11 +235,13 @@ fi
 # enabled on the CCAF path, e.g.:
 #   scripts/cc-app-run.sh -Dmetrics.prometheus.enabled=true \
 #     -Dmetrics.prometheus.port=9410 enrich
+# `--latest` is shorthand for -Disotope.consume.from=latest (see header).
 # Everything else is joined with spaces into the single `--args` string.
 EXTRA_D=()
 APP_ARGV=()
 for arg in "$@"; do
     case "$arg" in
+        --latest) EXTRA_D+=("-Disotope.consume.from=latest") ;;
         -D*) EXTRA_D+=("$arg") ;;
         *)   APP_ARGV+=("$arg") ;;
     esac
