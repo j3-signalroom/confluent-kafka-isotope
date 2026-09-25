@@ -11,10 +11,10 @@
       "taskmanager.numberOfTaskSlots": "8",
       "execution.checkpointing.interval": "30s",
       "kafka.bootstrap.servers": "kafka:9071",
-      "s3.endpoint": "${MINIO_S3_ENDPOINT}",
+      "s3.endpoint": "${RUSTFS_S3_ENDPOINT}",
       "s3.path.style.access": "true",
-      "s3.access-key": "${MINIO_ACCESS_KEY}",
-      "s3.secret-key": "${MINIO_SECRET_KEY}"
+      "s3.access-key": "${RUSTFS_ACCESS_KEY}",
+      "s3.secret-key": "${RUSTFS_SECRET_KEY}"
     },
     "serviceAccount": "flink",
     "jobManager": { "resource": { "memory": "2048m", "cpu": 0.5 } },

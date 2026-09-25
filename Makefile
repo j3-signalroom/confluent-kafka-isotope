@@ -56,7 +56,7 @@ CERT_MANAGER_VER    ?= v1.18.2
 # environment catalog — both needed to run the reports as CMF Statements.
 CMF_VER             ?= 2.4.0
 CMF_ENV_NAME        ?= dev-local
-# Helm values enabling CMF artifacts (MinIO-backed) + environment catalog.
+# Helm values enabling CMF artifacts (RustFS-backed) + environment catalog.
 CMF_VALUES          ?= k8s/base/cmf-values.yaml
 # CMF's embedded trial license is date-locked and expires. To run past expiry,
 # create a secret holding your Confluent license (key MUST be license.txt):
@@ -69,11 +69,11 @@ CMF_LICENSE_SECRET  ?=
 # CMF-managed compute pool, visible in CMF + Control Center's Flink tab).
 # The two PTF reports require CMF 2.4.0+ (SQL UDFs / cmf:// artifacts / writable
 # environment catalog) plus S3-compatible blob storage for the artifact JAR.
-MINIO_MANIFEST      ?= k8s/base/minio.yaml
-MINIO_ACCESS_KEY    ?= minioadmin
-MINIO_SECRET_KEY    ?= minioadmin123
-# In-cluster S3 endpoint MinIO exposes (used by CMF and the compute-pool clusters).
-MINIO_S3_ENDPOINT   ?= http://minio.confluent.svc:9000
+RUSTFS_MANIFEST     ?= k8s/base/rustfs.yaml
+RUSTFS_ACCESS_KEY   ?= rustfsadmin
+RUSTFS_SECRET_KEY   ?= rustfsadmin123
+# In-cluster S3 endpoint RustFS exposes (used by CMF and the compute-pool clusters).
+RUSTFS_S3_ENDPOINT  ?= http://rustfs.confluent.svc:9000
 CMF_ARTIFACT_BUCKET ?= cmf-artifacts
 # s3://<bucket>/<prefix> — CMF's cmf.artifacts.basePath.
 CMF_ARTIFACT_PATH   ?= s3://$(CMF_ARTIFACT_BUCKET)/cmf
@@ -524,18 +524,18 @@ metrics-delete: metrics-down ## Tear down the entire metrics showcase (pods, con
 	@echo "✔ Metrics showcase removed."
 
 # ------------------------------------------------------------------------------
-# MinIO — S3-compatible blob store backing CMF artifact (cmf:// JAR) storage.
+# RustFS — S3-compatible blob store backing CMF artifact (cmf:// JAR) storage.
 # ------------------------------------------------------------------------------
-.PHONY: minio-up
-minio-up: namespace ## Deploy MinIO (S3-compatible store for CMF artifacts) and create the bucket
-	@echo "→ Deploying MinIO from $(MINIO_MANIFEST)..."
-	@test -f $(MINIO_MANIFEST) || (echo "✘ $(MINIO_MANIFEST) not found." && exit 1)
-	kubectl apply -f $(MINIO_MANIFEST)
-	@echo "→ Waiting for MinIO to be ready..."
-	@kubectl rollout status deployment/minio -n $(NAMESPACE) --timeout=180s
+.PHONY: rustfs-up
+rustfs-up: namespace ## Deploy RustFS (S3-compatible store for CMF artifacts) and create the bucket
+	@echo "→ Deploying RustFS from $(RUSTFS_MANIFEST)..."
+	@test -f $(RUSTFS_MANIFEST) || (echo "✘ $(RUSTFS_MANIFEST) not found." && exit 1)
+	kubectl apply -f $(RUSTFS_MANIFEST)
+	@echo "→ Waiting for RustFS to be ready..."
+	@kubectl rollout status deployment/rustfs -n $(NAMESPACE) --timeout=180s
 	@echo "→ Waiting for the bucket-create job to complete..."
-	@kubectl wait --for=condition=complete job/minio-make-bucket -n $(NAMESPACE) --timeout=120s
-	@echo "✔ MinIO ready at $(MINIO_S3_ENDPOINT) (bucket: $(CMF_ARTIFACT_BUCKET))."
+	@kubectl wait --for=condition=complete job/rustfs-make-bucket -n $(NAMESPACE) --timeout=120s
+	@echo "✔ RustFS ready at $(RUSTFS_S3_ENDPOINT) (bucket: $(CMF_ARTIFACT_BUCKET))."
 
 .PHONY: flink-image-build
 flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S3 plugin) and load it into minikube
@@ -546,14 +546,14 @@ flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S
 	minikube image load $(POOL_IMAGE)
 	@echo "✔ $(POOL_IMAGE) built and loaded."
 
-# MinIO — S3-compatible blob store backing CMF artifact (cmf:// JAR) storage.
+# RustFS — S3-compatible blob store backing CMF artifact (cmf:// JAR) storage.
 # ------------------------------------------------------------------------------
-.PHONY: minio-down
-minio-down: ## Delete MinIO and its data (safe to run even if not deployed)
-	@echo "→ Deleting MinIO..."
-	@kubectl delete -f $(MINIO_MANIFEST) --ignore-not-found
-	@kubectl delete pvc minio-data -n $(NAMESPACE) --ignore-not-found
-	@echo "✔ MinIO removed."
+.PHONY: rustfs-down
+rustfs-down: ## Delete RustFS and its data (safe to run even if not deployed)
+	@echo "→ Deleting RustFS..."
+	@kubectl delete -f $(RUSTFS_MANIFEST) --ignore-not-found
+	@kubectl delete pvc rustfs-data -n $(NAMESPACE) --ignore-not-found
+	@echo "✔ RustFS removed."
 
 # ------------------------------------------------------------------------------
 # Phase 6: Apache Flink
@@ -675,7 +675,7 @@ cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Appl
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
 		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' APP_MANIFEST='$(APP_MANIFEST)' APP_JAR='$(APP_JAR)' \
 		POOL_IMAGE='$(POOL_IMAGE)' APP_FLINK_VERSION='$(APP_FLINK_VERSION)' \
-		MINIO_S3_ENDPOINT='$(MINIO_S3_ENDPOINT)' MINIO_ACCESS_KEY='$(MINIO_ACCESS_KEY)' MINIO_SECRET_KEY='$(MINIO_SECRET_KEY)' \
+		RUSTFS_S3_ENDPOINT='$(RUSTFS_S3_ENDPOINT)' RUSTFS_ACCESS_KEY='$(RUSTFS_ACCESS_KEY)' RUSTFS_SECRET_KEY='$(RUSTFS_SECRET_KEY)' \
 		MERGE_PROVENANCE='$(ENABLE_MERGE_PROVENANCE)' \
 		STATE_PROVENANCE='$(ENABLE_STATE_PROVENANCE)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh up
@@ -949,7 +949,7 @@ cp-core-up: operator-install cp-deploy ## Phases 3-5: install CFK Operator → d
 	@echo "  Once all pods are Running, run 'make c3-open' to access Control Center."
 
 .PHONY: cp-flink-up
-cp-flink-up: flink-cert-manager flink-operator-install minio-up cmf-install cmf-env-create flink-rbac flink-image-build ## cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → build app image (reports deploy via 'make cp-flink-reports-up')
+cp-flink-up: flink-cert-manager flink-operator-install rustfs-up cmf-install cmf-env-create flink-rbac flink-image-build ## cert-manager → operator → RustFS → CMF 2.4 → env → RBAC → build app image (reports deploy via 'make cp-flink-reports-up')
 	@echo ""
 	@echo "✔ Flink + CMF 2.4 are deploying (reports run as a CMF Application)."
 	@echo "  The reports themselves deploy separately:"
@@ -963,14 +963,14 @@ cp-down: cp-delete operator-uninstall ## Tear down CP and Operator (keeps miniku
 	@echo "✔ Confluent Platform and Operator removed."
 
 .PHONY: cp-flink-down
-cp-flink-down: ## Tear down the reports application, CMF, MinIO, operator, and cert-manager
+cp-flink-down: ## Tear down the reports application, CMF, RustFS, operator, and cert-manager
 	-@$(MAKE) cp-flink-reports-down    	# delete the CMF Application + artifact while CMF is still up
 	-@$(MAKE) flink-delete         		# remove any leftover raw FlinkDeployment (legacy)
 	$(MAKE) cmf-uninstall
-	$(MAKE) minio-down
+	$(MAKE) rustfs-down
 	$(MAKE) flink-operator-uninstall
 	$(MAKE) cert-manager-uninstall
-	@echo "✔ Reports application, CMF, MinIO, operator, and cert-manager removed."
+	@echo "✔ Reports application, CMF, RustFS, operator, and cert-manager removed."
 
 .PHONY: cert-manager-uninstall
 cert-manager-uninstall: ## Uninstall cert-manager (safe to run even if not installed)

@@ -127,11 +127,11 @@ All five register on both runtimes; only the `CREATE FUNCTION … USING JAR …`
 
 ### **6.1 CP Flink on minikube**
 ```bash
-make cp-flink-up               # cert-manager → CFK Flink Operator → MinIO → CMF 2.4 → env → app image
+make cp-flink-up               # cert-manager → CFK Flink Operator → RustFS → CMF 2.4 → env → app image
 make kafka-pf-up            # localhost:30092 → Kafka, localhost:8081 → SR
 make cp-flink-reports-up    # build app JAR → upload as cmf:// artifact → deploy the CMF Application
 make cp-flink-reports-down  # delete the CMF Application + artifact + sink topics
-make cp-flink-down             # tear down the application, CMF, MinIO, operator, cert-manager
+make cp-flink-down             # tear down the application, CMF, RustFS, operator, cert-manager
 ```
 
 The 7 reports run as a single Flink 2.1 CMF **Application** (`isotope-reports`, entry point `IsotopeReportsJob`) — visible in CMF and Control Center's Flink tab.
@@ -156,4 +156,4 @@ make cc-flink-reports-down CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
                            # terraform destroy: deletes the environment and everything in it
 ```
 
-See the [root README §3.3 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#33-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit
+See the [root README §3.3 "Flink SQL reports on Confluent Cloud for Apache Flink (CCAF)"](../../README.md#33-flink-sql-reports-on-confluent-cloud-for-apache-flink-ccaf) for the full CCAF walkthrough, including the multi-window sustained-traffic pattern required to see tumbling-window aggregates emit.
