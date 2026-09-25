@@ -11,6 +11,10 @@ All known release issues related to this project will be documented in this file
   + [**1.1 Symptom**](#11-symptom)
   + [**1.2 Cause**](#12-cause)
   + [**1.3 Workaround**](#13-workaround)
+- [**2.0 Every image pull fails with `TLS handshake timeout` (`ErrImagePull` / `ImagePullBackOff`)**](#20-every-image-pull-fails-with-tls-handshake-timeout-errimagepull--imagepullbackoff)
+  + [**2.1 Symptom**](#21-symptom)
+  + [**2.2 Cause**](#22-cause)
+  + [**2.3 Workaround**](#23-workaround)
 <!-- tocstop -->
 
 ---
@@ -61,3 +65,53 @@ make c3-open
 ```
 
 `make c3-open` is gated on `make c3-ready`, which waits for the pod to report Ready (up to `C3_READY_TIMEOUT`, default `180s`) and prints this diagnosis instead of opening a browser onto a dead port.
+
+
+## **2.0 Every image pull fails with `TLS handshake timeout` (`ErrImagePull` / `ImagePullBackOff`)**
+**Affects:** minikube on the Docker driver under Docker Desktop for Mac, when Docker Desktop is routing egress through its built-in proxy (typically while a VPN is connected)
+
+### **2.1 Symptom**
+The first pod to start — usually `confluent-operator` during `make cp-up` — never pulls its image, and `make cp-watch` cycles between `ErrImagePull` and `ImagePullBackOff`:
+
+```
+NAME                                  READY   STATUS             RESTARTS   AGE
+confluent-operator-6dbff485d6-kwq6n   0/1     ImagePullBackOff   0          2m37s
+```
+
+`kubectl describe pod` shows the pull timing out against Docker Hub itself, not a missing tag:
+
+```
+Failed to pull image "docker.io/confluentinc/confluent-operator:0.1718.99": Error response from daemon:
+  Get "https://registry-1.docker.io/v2/": net/http: TLS handshake timeout
+```
+
+Yet `docker pull` on the Mac works fine. Every other image in the stack (Kafka, Schema Registry, Control Center, cp-flink, RustFS, aws-cli) fails the same way.
+
+### **2.2 Cause**
+Docker Desktop is configured with an internal HTTP proxy (`docker info` shows `HTTPS Proxy: http.docker.internal:3128`). Only the **Docker Desktop daemon** uses it — that is why host-side pulls succeed. Containers, including the minikube node container and the Docker daemon running *inside* it, egress directly, and with a VPN tunnel (`utun*`) up on the host that direct path stalls every TLS handshake. DNS resolves and TCP 443 connects, so it looks like a registry outage rather than a local routing problem.
+
+Quick confirmation — direct egress from the node times out, the same request through the proxy returns `401` (Docker Hub's normal unauthenticated answer):
+
+```bash
+minikube ssh -- "curl -s -o /dev/null -w '%{http_code}\n' --max-time 10 https://registry-1.docker.io/v2/"
+# 000
+minikube ssh -- "curl -s -o /dev/null -w '%{http_code}\n' --max-time 10 -x http://http.docker.internal:3128 https://registry-1.docker.io/v2/"
+# 401
+```
+
+### **2.3 Workaround**
+Point the Docker daemon inside minikube at the same proxy, keeping cluster-internal traffic off it, and restart that daemon. Pods in `ImagePullBackOff` recover on their next retry:
+
+```bash
+minikube ssh -- "sudo mkdir -p /etc/systemd/system/docker.service.d && printf '[Service]\nEnvironment=\"HTTP_PROXY=http://http.docker.internal:3128\"\nEnvironment=\"HTTPS_PROXY=http://http.docker.internal:3128\"\nEnvironment=\"NO_PROXY=localhost,127.0.0.1,10.96.0.0/12,10.244.0.0/16,192.168.49.0/24,.svc,.cluster.local,hubproxy.docker.internal\"\n' | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf && sudo systemctl daemon-reload && sudo systemctl restart docker"
+```
+
+The drop-in survives `minikube stop` / `start` but not `minikube delete`. When recreating the cluster, pass the proxy at start time instead:
+
+```bash
+minikube start --docker-env HTTP_PROXY=http://http.docker.internal:3128 \
+  --docker-env HTTPS_PROXY=http://http.docker.internal:3128 \
+  --docker-env NO_PROXY=localhost,127.0.0.1,10.96.0.0/12,10.244.0.0/16,192.168.49.0/24,.svc,.cluster.local
+```
+
+Disconnecting the VPN or restarting Docker Desktop may restore direct egress and make the proxy unnecessary.

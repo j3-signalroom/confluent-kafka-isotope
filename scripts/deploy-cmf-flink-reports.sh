@@ -15,7 +15,7 @@
 #
 # Flow (up):
 #   1. pre-create source + sink Kafka topics
-#   2. upload the shadow jar to CMF as a cmf:// artifact (MinIO-backed)
+#   2. upload the shadow jar to CMF as a cmf:// artifact (RustFS-backed)
 #   3. render + POST the FlinkApplication (image=$POOL_IMAGE, jarURI=cmf://…)
 #   4. wait for the application job to reach RUNNING
 #
@@ -26,7 +26,7 @@
 #   3. delete the sink topics
 #
 # Usage: scripts/deploy-cmf-flink-reports.sh {up|down}
-# Prereqs: make minio-up, cmf-install (2.4.x), cmf-env-create, flink-image-build,
+# Prereqs: make rustfs-up, cmf-install (2.4.x), cmf-env-create, flink-image-build,
 #          and the app jar built (./gradlew :ptf:shadowJar).
 set -euo pipefail
 
@@ -38,9 +38,9 @@ APP_MANIFEST="${APP_MANIFEST:-k8s/base/cmf-flink-application.json}"
 APP_JAR="${APP_JAR:-ptf/build/libs/isotope-flink-udf.jar}"
 POOL_IMAGE="${POOL_IMAGE:-isotope-cp-flink-sql:local}"
 APP_FLINK_VERSION="${APP_FLINK_VERSION:-v2_1}"
-MINIO_S3_ENDPOINT="${MINIO_S3_ENDPOINT:-http://minio.confluent.svc:9000}"
-MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
-MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin123}"
+RUSTFS_S3_ENDPOINT="${RUSTFS_S3_ENDPOINT:-http://rustfs.confluent.svc:9000}"
+RUSTFS_ACCESS_KEY="${RUSTFS_ACCESS_KEY:-rustfsadmin}"
+RUSTFS_SECRET_KEY="${RUSTFS_SECRET_KEY:-rustfsadmin123}"
 
 # Optional fan-in provenance (docs/flink-collector.md 2.4). Off by default: it
 # adds a merge collector, a merged-event topic and a merge-edge topic that
@@ -194,7 +194,7 @@ if [ "${ACTION}" = "up" ]; then
     echo "→ Deploying FlinkApplication '${APP_NAME}' (image=${POOL_IMAGE}, ${APP_FLINK_VERSION}, merge-provenance=${MERGE_PROVENANCE}, state-provenance=${STATE_PROVENANCE})..."
     APP_NAME="${APP_NAME}" POOL_IMAGE="${POOL_IMAGE}" APP_FLINK_VERSION="${APP_FLINK_VERSION}" \
         CMF_ENV_NAME="${CMF_ENV}" APP_ARTIFACT_NAME="${ARTIFACT_NAME}" APP_ARTIFACT_VERSION="${VERSION}" \
-        MINIO_S3_ENDPOINT="${MINIO_S3_ENDPOINT}" MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY}" MINIO_SECRET_KEY="${MINIO_SECRET_KEY}" \
+        RUSTFS_S3_ENDPOINT="${RUSTFS_S3_ENDPOINT}" RUSTFS_ACCESS_KEY="${RUSTFS_ACCESS_KEY}" RUSTFS_SECRET_KEY="${RUSTFS_SECRET_KEY}" \
         APP_JOB_ARGS="${APP_JOB_ARGS}" \
         envsubst < "${APP_MANIFEST}" > /tmp/cmf-app.json
     # Recreate for idempotency (spec/jar version may change between runs).

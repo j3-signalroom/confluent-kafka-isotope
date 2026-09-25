@@ -12,7 +12,7 @@
 #   * flink-sql-connector-kafka         — read source topics / write sink topics
 #   * flink-sql-avro-confluent-registry — the avro-confluent sink format (SR-framed)
 #   * s3-fs-hadoop plugin (enabled)     — lets the cluster pull the cmf:// PTF
-#                                         artifact JAR from MinIO at CREATE FUNCTION time
+#                                         artifact JAR from RustFS at CREATE FUNCTION time
 #
 # The PTF/UDF JAR itself is NOT baked in — it is uploaded to CMF as a cmf://
 # artifact and referenced by CREATE FUNCTION ... USING JAR.

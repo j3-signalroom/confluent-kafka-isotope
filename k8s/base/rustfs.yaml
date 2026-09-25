@@ -1,12 +1,17 @@
-# MinIO — S3-compatible object store for CMF artifact (JAR) storage.
+# RustFS — S3-compatible object store for CMF artifact (JAR) storage.
 #
 # WHY THIS EXISTS
 # Confluent Manager for Apache Flink (CMF) 2.4.0+ stores uploaded Flink
 # artifacts (the PTF/UDF shadow JAR) in blob storage and references them from
 # `CREATE FUNCTION ... USING JAR 'cmf://<artifact-id>'`. CMF supports S3, GCS,
 # Azure Blob, or any S3-compatible store. On minikube there is no cloud bucket,
-# so we run MinIO (S3-compatible) in-cluster and point CMF's
+# so we run RustFS (S3-compatible, Apache-2.0) in-cluster and point CMF's
 # `cmf.artifacts.basePath` at an `s3://` path backed by it.
+#
+# WHY RUSTFS (not MinIO)
+# The MinIO Community Edition GitHub repo was archived (read-only) in Feb 2026
+# and no longer ships community images. RustFS is a drop-in S3 API replacement
+# with the same port layout (9000 S3 / 9001 console).
 #
 # Two consumers use these credentials:
 #   1. CMF itself — for artifact upload/download/delete (helm `cmf.artifacts.configuration`).
@@ -19,7 +24,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: minio-data
+  name: rustfs-data
   namespace: confluent
 spec:
   accessModes: ["ReadWriteOnce"]
@@ -28,37 +33,50 @@ spec:
       storage: 2Gi
   # minikube ships a default 'standard' StorageClass (hostpath provisioner);
   # leaving storageClassName unset uses it. A PVC (not emptyDir) so an uploaded
-  # artifact survives a MinIO pod restart — otherwise CMF's cmf:// reference
+  # artifact survives a RustFS pod restart — otherwise CMF's cmf:// reference
   # would dangle.
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: minio
+  name: rustfs
   namespace: confluent
   labels:
-    app: minio
+    app: rustfs
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: minio
+      app: rustfs
   strategy:
     type: Recreate          # single RWO PVC — never run two pods at once
   template:
     metadata:
       labels:
-        app: minio
+        app: rustfs
     spec:
+      # The RustFS image runs as the non-root user 10001:10001; fsGroup makes the
+      # PVC writable by it.
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
       containers:
-        - name: minio
-          image: minio/minio:RELEASE.2025-04-08T15-41-24Z
-          args: ["server", "/data", "--console-address", ":9001"]
+        - name: rustfs
+          image: rustfs/rustfs:1.0.0
           env:
-            - name: MINIO_ROOT_USER
-              value: "minioadmin"
-            - name: MINIO_ROOT_PASSWORD
-              value: "minioadmin123"
+            - name: RUSTFS_VOLUMES
+              value: "/data"
+            - name: RUSTFS_ADDRESS
+              value: "0.0.0.0:9000"
+            - name: RUSTFS_CONSOLE_ADDRESS
+              value: "0.0.0.0:9001"
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: "true"
+            - name: RUSTFS_ACCESS_KEY
+              value: "rustfsadmin"
+            - name: RUSTFS_SECRET_KEY
+              value: "rustfsadmin123"
           ports:
             - name: s3
               containerPort: 9000
@@ -66,7 +84,7 @@ spec:
               containerPort: 9001
           readinessProbe:
             httpGet:
-              path: /minio/health/ready
+              path: /health
               port: 9000
             initialDelaySeconds: 5
             periodSeconds: 5
@@ -82,33 +100,34 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: minio-data
+            claimName: rustfs-data
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: minio
+  name: rustfs
   namespace: confluent
   labels:
-    app: minio
+    app: rustfs
 spec:
   selector:
-    app: minio
+    app: rustfs
   ports:
-    - name: s3            # S3 API — CMF + Flink talk to http://minio.confluent.svc:9000
+    - name: s3            # S3 API — CMF + Flink talk to http://rustfs.confluent.svc:9000
       port: 9000
       targetPort: 9000
     - name: console       # web console (optional; reach via port-forward)
       port: 9001
       targetPort: 9001
 ---
-# One-shot bucket creation. Waits for MinIO to answer, sets an `mc` alias, and
-# creates the `cmf-artifacts` bucket (idempotent — `--ignore-existing`). Runs to
-# Completion; `make minio-up` waits on this Job's completion.
+# One-shot bucket creation. Waits for RustFS to answer, then creates the
+# `cmf-artifacts` bucket (idempotent — skipped if `head-bucket` succeeds). Uses
+# the AWS CLI rather than MinIO's `mc`, so nothing depends on MinIO images.
+# Runs to Completion; `make rustfs-up` waits on this Job's completion.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: minio-make-bucket
+  name: rustfs-make-bucket
   namespace: confluent
 spec:
   backoffLimit: 10
@@ -116,14 +135,24 @@ spec:
     spec:
       restartPolicy: OnFailure
       containers:
-        - name: mc
-          image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+        - name: aws
+          image: amazon/aws-cli:2.37.1
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: "rustfsadmin"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "rustfsadmin123"
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
+            - name: AWS_ENDPOINT_URL
+              value: "http://rustfs.confluent.svc:9000"
           command:
             - sh
             - -c
             - |
-              until mc alias set local http://minio.confluent.svc:9000 minioadmin minioadmin123; do
-                echo "waiting for minio..."; sleep 3;
+              until aws s3api list-buckets >/dev/null 2>&1; do
+                echo "waiting for rustfs..."; sleep 3;
               done
-              mc mb --ignore-existing local/cmf-artifacts
+              aws s3api head-bucket --bucket cmf-artifacts 2>/dev/null \
+                || aws s3api create-bucket --bucket cmf-artifacts
               echo "bucket cmf-artifacts ready"

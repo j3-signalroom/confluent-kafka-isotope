@@ -51,11 +51,11 @@ make cp-watch            # watch pods come up (Ctrl+C to exit); or: make cp-stat
 
 ## **3.0 Flink**
 ```bash
-make cp-flink-up         # cert-manager → operator → MinIO → CMF 2.4 → env → RBAC → app image
+make cp-flink-up         # cert-manager → operator → RustFS → CMF 2.4 → env → RBAC → app image
 make cmf-status          # (~5 min the first time)
 ```
 
-This installs cert-manager, the Confluent Flink Kubernetes Operator, **MinIO** (S3-compatible store for CMF artifacts), **CMF 2.4** (with artifact management + the writable environment catalog enabled), creates the `dev-local` Flink environment, applies the Flink RBAC, and builds the custom `cp-flink` 2.1 image (`isotope-cp-flink-sql:local`) that bakes in the Kafka + Avro SQL connectors and the S3 filesystem plugin.
+This installs cert-manager, the Confluent Flink Kubernetes Operator, **RustFS** (S3-compatible store for CMF artifacts), **CMF 2.4** (with artifact management + the writable environment catalog enabled), creates the `dev-local` Flink environment, applies the Flink RBAC, and builds the custom `cp-flink` 2.1 image (`isotope-cp-flink-sql:local`) that bakes in the Kafka + Avro SQL connectors and the S3 filesystem plugin.
 
 > **The reports run as a CMF _Application_, not SQL statements.** CMF's SQL-statement runtime (`io.confluent.flink.FlinkCompiledPlanExecutor`) ships only in the `cp-flink-sql` image, which exists only at **Flink 1.19** — and two reports are `ProcessTableFunction`s, a **Flink 2.x** feature. So all seven reports deploy as a single Flink 2.1 CMF **Application** (entry point `IsotopeReportsJob`), which runs the same `.fql` and surfaces in CMF / Control Center as a managed application. No raw session cluster is created — if you want one for ad-hoc SQL, deploy it separately with `make flink-deploy` (see [§7.0 Observe](#70-observe)).
 
@@ -80,7 +80,7 @@ Prereq for everything the host-run gradle app does — `App.java`'s defaults alr
 ```bash
 make cp-flink-reports-up    # builds the app shadow JAR (:ptf:shadowJar) → pre-creates
                             # 4 source + 7 sink topics → uploads the JAR as a cmf://
-                            # artifact (MinIO) → deploys the FlinkApplication → waits RUNNING
+                            # artifact (RustFS) → deploys the FlinkApplication → waits RUNNING
 ```
 
 All seven reports run in **one** Flink 2.1 CMF Application (`isotope-reports`): five pure Flink SQL plus two JAR-backed `ProcessTableFunction`s (`LatencyPercentilesPTF`, `StuckTracePTF`), executed together as a single `StatementSet` by `IsotopeReportsJob`. Sink topics use Apache Flink's `avro-confluent` format — SR-framed Avro, auto-registered on first write — so Control Center renders the rows natively. The application appears in CMF's applications API and Control Center's Flink tab. Drop everything (application + artifact + sink topics) with `make cp-flink-reports-down`.
@@ -395,6 +395,7 @@ Flink ([§3.0 Flink](#30-flink)) and the reports ([§5.0 Deploy the 7 Flink repo
 - **No report rows.** Almost always the watermark — see [§6.0 Drive traffic (required to see report rows)](#60-drive-traffic-required-to-see-report-rows); traffic must span multiple 1-minute windows and you must wait ~90s after the last record.
 - **App can't reach Kafka.** `make kafka-pf-up` isn't running, or the forward died — re-run it and confirm `localhost:30092` / `localhost:8081` are live.
 - **`make flink-sql` says no session cluster / `SHOW TABLES;` returns an empty set.** Ad-hoc SQL needs the `flink-basic` session cluster — run `make flink-deploy` first, see [§7.0 Observe](#70-observe). Confirm with `kubectl get flinkdeployment -n confluent`: `isotope-reports` alone means only the reports Application is up. Note that the report tables of the running Application are never visible to the SQL Client regardless — the catalogs are separate.
-- **`controlcenter-0` sits at 2/3 and `make c3-open` gets a connection refused.** C3 lost the startup race against Kafka's DNS and cannot recover on its own — cause and workaround in [KNOWN_ISSUES.md](../KNOWN_ISSUES.md#control-center-never-becomes-ready-when-it-wins-the-race-against-kafkas-dns).
+- **`controlcenter-0` sits at 2/3 and `make c3-open` gets a connection refused.** C3 lost the startup race against Kafka's DNS and cannot recover on its own — cause and workaround in [KNOWN_ISSUES.md](../KNOWN_ISSUES.md#10-control-center-never-becomes-ready-when-it-wins-the-race-against-kafkas-dns).
+- **Pods stuck in `ErrImagePull` / `ImagePullBackOff` with `TLS handshake timeout`.** minikube can't reach Docker Hub directly (usually a host VPN with Docker Desktop's proxy in play) — cause and workaround in [KNOWN_ISSUES.md](../KNOWN_ISSUES.md#20-every-image-pull-fails-with-tls-handshake-timeout-errimagepull--imagepullbackoff).
 - **Control Center's Flink tab is blank.** CMF proxy connectivity — `make cmf-proxy-inject` (and `make cmf-proxy-logs` to debug).
 - **`make cp-flink-up` times out waiting for the CMF pod / CMF `CrashLoopBackOff`.** Check `kubectl logs -n confluent -l app.kubernetes.io/name=confluent-manager-for-apache-flink`. If you see `Trial license ... expired` / `LicenseInitiator ... Constructor threw exception`, the image's embedded trial license has expired — supply your own via `CMF_LICENSE_SECRET` — see the CMF license note in [§3.0 Flink](#30-flink). Wiping the CMF `PersistentVolumeClaim` does **not** reset it; the expiry is baked into the image.
