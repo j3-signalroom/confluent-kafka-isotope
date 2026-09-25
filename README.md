@@ -555,7 +555,7 @@ minikube runs as a **VM with containerd** as the container runtime, so Docker is
 | Linux x86_64 | `kvm2` (KVM via libvirt) | `qemu` |
 | Linux arm64 | `qemu` | — |
 
-On Linux, both drivers need hardware virtualization (`/dev/kvm`; on a cloud VM that means nested virtualization). `sudo make install-prereqs` adds your user to the `kvm` group (plus `libvirt` for kvm2), so log out and back in afterwards. Run `make minikube-driver-check` to verify the driver setup. **Coming from the old Docker-driver cluster?** minikube can't change the driver or runtime in place, so run `make minikube-delete` once before `make minikube-start`. **Node can't pull images but the host can?** Set `MINIKUBE_HTTP_PROXY` to an HTTP proxy on the host in a git-ignored `local.mk` (see `local.mk.example`), and see [KNOWN_ISSUES.md 2.0](KNOWN_ISSUES.md#20-every-image-pull-fails-with-tls-handshake-timeout-errimagepull--imagepullbackoff).
+On Linux, both drivers need hardware virtualization (`/dev/kvm`; on a cloud VM that means nested virtualization). `sudo make install-prereqs` adds your user to the `kvm` group (plus `libvirt` for kvm2), so log out and back in afterwards. Run `make minikube-driver-check` to verify the driver setup. **Node can't pull images but the host can?** Set `MINIKUBE_HTTP_PROXY` to an HTTP proxy on the host in a git-ignored `local.mk` (see `local.mk.example`), and see [KNOWN_ISSUES.md 2.0](KNOWN_ISSUES.md#20-every-image-pull-fails-with-tls-handshake-timeout-errimagepull--imagepullbackoff).
 
 Bring up the local Confluent Platform stack and port-forward Kafka + SR:
 
