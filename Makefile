@@ -343,8 +343,8 @@ minikube-driver-check: ## Verify the minikube VM driver (MINIKUBE_DRIVER) and it
 
 .PHONY: minikube-start
 minikube-start: minikube-driver-check host-proxy-start ## Start minikube (VM driver + containerd) with resources required for Confluent Platform + Flink
-	@# minikube cannot switch the driver or container runtime of an existing cluster
-	@# (e.g. one created by the old Docker-driver setup), so fail fast with the fix.
+	@# minikube cannot switch the driver or container runtime of an existing cluster,
+	@# so fail fast with the fix.
 	@MK_HOME="$${MINIKUBE_HOME:-$$HOME}"; \
 	case "$$MK_HOME" in */.minikube) ;; *) MK_HOME="$$MK_HOME/.minikube" ;; esac; \
 	PROFILE_CFG="$$MK_HOME/profiles/minikube/config.json"; \
@@ -377,12 +377,12 @@ minikube-start: minikube-driver-check host-proxy-start ## Start minikube (VM dri
 		--driver=$(MINIKUBE_DRIVER) \
 		--container-runtime=$(MINIKUBE_RUNTIME) \
 		$$MINIKUBE_FORCE \
-		$(foreach v,$(PROXY_ENV_VARS),$(if $(MINIKUBE_HTTP_PROXY),--docker-env $(v))) \
 		--cpus=$(MINIKUBE_CPUS) \
 		--memory=$(MINIKUBE_MEM) \
 		--disk-size=$(MINIKUBE_DISK)
-	@# --docker-env is only recorded when the cluster is created, and the node's
-	@# /etc is tmpfs, so (re)write the containerd + BuildKit drop-ins on every start.
+	@# minikube's --docker-env only reaches the (unused) dockerd unit, never containerd,
+	@# and the node's /etc is tmpfs, so (re)write the containerd + BuildKit drop-ins on
+	@# every start.
 	@$(if $(MINIKUBE_HTTP_PROXY),$(MAKE) --no-print-directory minikube-proxy-apply,true)
 
 .PHONY: minikube-proxy-apply
