@@ -63,3 +63,6 @@ __pycache__/
 .claude/
 
 scratch.pad
+
+# Per-machine Makefile overrides (see local.mk.example)
+local.mk

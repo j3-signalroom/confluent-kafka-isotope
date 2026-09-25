@@ -8,8 +8,10 @@
 # Orchestrates the full lifecycle of a local Confluent Platform environment
 # running on minikube, from prerequisite installation through Flink job
 # deployment.  Phases include:
-#   1. Prerequisite tooling (Docker, kubectl, minikube, Helm, Gradle, OpenJDK 17)
-#   2. minikube cluster management (start, stop, delete)
+#   1. Prerequisite tooling (minikube VM driver, kubectl, minikube, Helm, Gradle,
+#      OpenJDK 17)
+#   2. minikube cluster management (start, stop, delete) — a VM node running
+#      containerd; Docker is not required
 #   3. Confluent for Kubernetes (CFK) operator
 #   4. Confluent Platform components in KRaft mode (Kafka, Schema Registry,
 #      Connect, ksqlDB, REST Proxy, Control Center)
@@ -19,6 +21,12 @@
 #   7. Confluent Manager for Apache Flink (CMF) 2.3
 #   8. Flink JAR build (Gradle shadow JAR) and REST API job submission
 # ==============================================================================
+
+# Per-machine overrides (git-ignored), loaded before every default below so it
+# can set any '?=' variable, e.g. MINIKUBE_HTTP_PROXY. Copy local.mk.example to
+# local.mk to start. Command-line and environment values still take precedence
+# over '?=' assignments in local.mk.
+-include $(dir $(realpath $(firstword $(MAKEFILE_LIST))))local.mk
 
 
 CONFLUENT_MANIFEST  ?= k8s/base/confluent-platform-c3++.yaml
@@ -91,9 +99,9 @@ APP_MANIFEST        ?= k8s/base/cmf-flink-application.json
 APP_JAR             ?= ptf/build/libs/isotope-flink-udf.jar
 # The application's Flink image: cp-flink 2.1 + the Kafka/Avro SQL connectors
 # and S3 fs plugin baked in (CMF clusterSpec has no podTemplate). Built by
-# 'make flink-image-build' from k8s/base/flink-sql-isotope.Dockerfile.
-POOL_IMAGE          ?= isotope-cp-flink-sql:local
-FLINK_SQL_DOCKERFILE ?= k8s/base/flink-sql-isotope.Dockerfile
+# 'make flink-image-build' from k8s/base/flink-sql-isotope.Containerfile.
+POOL_IMAGE              ?= isotope-cp-flink-sql:local
+FLINK_SQL_CONTAINERFILE ?= k8s/base/flink-sql-isotope.Containerfile
 
 # Optional fan-in (merge) provenance — see docs/flink-collector.md 2.4. Off by
 # default on both runtimes; on, it adds a merge collector plus a merge-edge
@@ -138,6 +146,32 @@ SHELL               := /bin/bash
 UNAME_S            := $(shell uname -s)
 IS_DARWIN          := $(filter Darwin,$(UNAME_S))
 IS_LINUX           := $(filter Linux,$(UNAME_S))
+UNAME_M            := $(shell uname -m)
+
+# minikube runs as a VM with containerd as the container runtime — no Docker
+# daemon on the host or in the node. Supported drivers:
+#   macOS: vfkit (default) — Apple's native Virtualization framework
+#   Linux: kvm2 (default on x86_64) or qemu (default on arm64, where kvm2 is
+#          not available); both need hardware virtualization (/dev/kvm)
+# Override with e.g. 'make minikube-start MINIKUBE_DRIVER=qemu'. The driver and
+# runtime cannot be changed on an existing cluster — 'make minikube-delete' first.
+MINIKUBE_DRIVER    ?= $(if $(IS_DARWIN),vfkit,$(if $(filter x86_64 amd64,$(UNAME_M)),kvm2,qemu))
+MINIKUBE_RUNTIME   ?= containerd
+
+# Optional HTTP(S) proxy for the minikube node's outbound traffic: image pulls
+# (containerd) and image builds (BuildKit, including the Containerfile's curl
+# fetch stage). Use it when the host reaches the internet but traffic forwarded
+# from the VM does not (KNOWN_ISSUES.md 2.0). The URL must be reachable from
+# inside the VM, e.g. http://192.168.64.1:3128 for a proxy on the Mac under
+# vfkit. Empty (the default) = no proxy. MINIKUBE_NO_PROXY keeps cluster-internal
+# and node/LAN traffic off the proxy (pod, service, VM and host-only subnets).
+MINIKUBE_HTTP_PROXY ?=
+MINIKUBE_NO_PROXY   ?= localhost,127.0.0.1,10.96.0.0/12,10.244.0.0/16,192.168.0.0/16,10.0.2.0/24,.svc,.cluster.local
+PROXY_ENV_VARS       = HTTP_PROXY=$(MINIKUBE_HTTP_PROXY) HTTPS_PROXY=$(MINIKUBE_HTTP_PROXY) NO_PROXY=$(MINIKUBE_NO_PROXY)
+# Homebrew service that provides MINIKUBE_HTTP_PROXY on this host. When the proxy
+# is set and this formula is installed, minikube-start starts it and
+# minikube-stop / minikube-delete stop it. Set it empty to manage the proxy yourself.
+MINIKUBE_PROXY_BREW_SERVICE ?= tinyproxy
 
 # Cross-platform "open in browser" command
 # On Linux, only attempt xdg-open if a display is available (skips on headless servers)
@@ -167,11 +201,11 @@ help: ## Show this help message
 # first build if one is not already on PATH.
 # ------------------------------------------------------------------------------
 .PHONY: install-prereqs
-install-prereqs: ## Install docker, kubectl, minikube, helm, gettext, gradle, and OpenJDK 17 via Homebrew (macOS) or apt-get (Linux)
+install-prereqs: ## Install the minikube VM driver (vfkit/kvm2/qemu), kubectl, minikube, helm, gettext, gradle, and OpenJDK 17 via Homebrew (macOS) or apt-get (Linux)
 	@echo "→ Installing prerequisites..."
 	@if [ "$(IS_DARWIN)" = "Darwin" ]; then \
-		(test -d /Applications/Docker.app || test -f /usr/local/bin/kubectl.docker) || brew install --cask docker; \
-		brew install kubernetes-cli minikube helm gettext gradle openjdk@17; \
+		[ "$(MINIKUBE_DRIVER)" = "vfkit" ] || { echo "✘ MINIKUBE_DRIVER='$(MINIKUBE_DRIVER)' is not supported on macOS — use vfkit."; exit 1; }; \
+		brew install kubernetes-cli minikube vfkit helm gettext gradle openjdk@17; \
 		echo "✔ Prerequisites installed."; \
 		CURRENT_JAVA=$$(java -version 2>&1 | head -1 | sed 's/.*"\([0-9]*\)\..*/\1/' || echo ""); \
 		if [ "$$CURRENT_JAVA" != "17" ]; then \
@@ -194,7 +228,27 @@ install-prereqs: ## Install docker, kubectl, minikube, helm, gettext, gradle, an
 	elif [ "$(IS_LINUX)" = "Linux" ]; then \
 		command -v apt-get >/dev/null 2>&1 || { echo "✘ apt-get not found. Install prerequisites manually for your Linux distribution."; exit 1; }; \
 		apt-get update; \
-		apt-get install -y ca-certificates curl gnupg lsb-release docker.io gettext gradle xdg-utils openjdk-17-jdk; \
+		case "$(UNAME_M)" in \
+			x86_64|amd64)  QEMU_PKGS="qemu-system-x86 qemu-utils ovmf" ;; \
+			aarch64|arm64) QEMU_PKGS="qemu-system-arm qemu-utils qemu-efi-aarch64" ;; \
+			*)             echo "✘ Unsupported architecture: $(UNAME_M)"; exit 1 ;; \
+		esac; \
+		case "$(MINIKUBE_DRIVER)" in \
+			kvm2)       DRIVER_PKGS="$$QEMU_PKGS libvirt-daemon-system libvirt-clients"; DRIVER_GROUPS="kvm,libvirt" ;; \
+			qemu|qemu2) DRIVER_PKGS="$$QEMU_PKGS"; DRIVER_GROUPS="kvm" ;; \
+			*)          echo "✘ MINIKUBE_DRIVER='$(MINIKUBE_DRIVER)' is not supported on Linux — use kvm2 or qemu."; exit 1 ;; \
+		esac; \
+		apt-get install -y ca-certificates curl gnupg lsb-release gettext gradle xdg-utils openjdk-17-jdk $$DRIVER_PKGS; \
+		if [ "$(MINIKUBE_DRIVER)" = "kvm2" ]; then \
+			systemctl enable --now libvirtd 2>/dev/null || service libvirtd start 2>/dev/null || true; \
+		fi; \
+		if [ -n "$${SUDO_USER:-}" ]; then \
+			usermod -aG "$$DRIVER_GROUPS" "$$SUDO_USER"; \
+			echo "→ Added $$SUDO_USER to group(s) $$DRIVER_GROUPS — log out and back in for it to take effect."; \
+		else \
+			echo "⚠ Add your (non-root) user to group(s) $$DRIVER_GROUPS: sudo usermod -aG $$DRIVER_GROUPS <user>, then log out and back in."; \
+		fi; \
+		[ -e /dev/kvm ] || echo "⚠ /dev/kvm not found — enable hardware virtualization (VT-x/AMD-V in firmware, or nested virtualization on a cloud VM) before 'make minikube-start'."; \
 		JDK_RELEASE=/usr/lib/jvm/java-17-openjdk-$$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')/release; \
 		if [ -f "$$JDK_RELEASE" ] && ! grep -q IMAGE_TYPE "$$JDK_RELEASE"; then \
 			echo 'IMAGE_TYPE="JDK"' >> "$$JDK_RELEASE"; \
@@ -217,10 +271,8 @@ install-prereqs: ## Install docker, kubectl, minikube, helm, gettext, gradle, an
 	fi
 	
 .PHONY: check-prereqs
-check-prereqs: ## Verify required tools are available
+check-prereqs: minikube-driver-check ## Verify required tools are available
 	@echo "→ Checking prerequisites..."
-	@command -v docker    >/dev/null 2>&1 || (echo "✘ docker not found"    && exit 1)
-	@docker info >/dev/null 2>&1 || echo "⚠ docker is installed but not running — 'make minikube-start' will attempt to start it"
 	@command -v kubectl   >/dev/null 2>&1 || (echo "✘ kubectl not found"   && exit 1)
 	@command -v minikube  >/dev/null 2>&1 || (echo "✘ minikube not found"  && exit 1)
 	@command -v helm      >/dev/null 2>&1 || (echo "✘ helm not found"      && exit 1)
@@ -242,16 +294,20 @@ check-prereqs: ## Verify required tools are available
 	@echo "✔ All prerequisites found."
 
 .PHONY: uninstall-prereqs
-uninstall-prereqs: ## Uninstall all tools installed by install-prereqs (docker, kubectl, minikube, helm, gradle, openjdk)
+uninstall-prereqs: ## Uninstall all tools installed by install-prereqs (VM driver, kubectl, minikube, helm, gradle, openjdk)
 	@echo "→ Uninstalling prerequisites..."
 	@if [ "$(IS_DARWIN)" = "Darwin" ]; then \
-		brew uninstall --cask docker 2>/dev/null || true; \
-		brew uninstall kubernetes-cli minikube helm gettext gradle 2>/dev/null || true; \
-		echo "✔ Prerequisites removed. You may need to manually delete Docker Desktop data from ~/Library/Application Support/Docker."; \
+		brew uninstall kubernetes-cli minikube vfkit helm gettext gradle 2>/dev/null || true; \
+		echo "✔ Prerequisites removed. Docker Desktop is no longer used by this project — if an older version of this Makefile installed it, remove it manually if you no longer need it."; \
 	elif [ "$(IS_LINUX)" = "Linux" ]; then \
 		command -v apt-get >/dev/null 2>&1 || { echo "✘ apt-get not found. Remove prerequisites manually."; exit 1; }; \
 		rm -f /usr/local/bin/kubectl /usr/local/bin/minikube; \
-		apt-get remove -y gradle openjdk-17-jdk docker.io gettext 2>/dev/null || true; \
+		case "$(MINIKUBE_DRIVER)" in \
+			kvm2)       DRIVER_PKGS="libvirt-daemon-system libvirt-clients" ;; \
+			*)          DRIVER_PKGS="" ;; \
+		esac; \
+		apt-get remove -y gradle openjdk-17-jdk gettext $$DRIVER_PKGS 2>/dev/null || true; \
+		echo "→ Left QEMU packages installed (other VMs may use them); remove with 'apt-get remove qemu-system-* qemu-utils' if unneeded."; \
 		apt-get autoremove -y 2>/dev/null || true; \
 		helm_bin=$$(which helm 2>/dev/null); \
 		if [ -n "$$helm_bin" ]; then rm -f "$$helm_bin"; echo "→ Removed helm."; fi; \
@@ -263,53 +319,86 @@ uninstall-prereqs: ## Uninstall all tools installed by install-prereqs (docker, 
 # ------------------------------------------------------------------------------
 # Phase 2: minikube cluster
 # ------------------------------------------------------------------------------
+.PHONY: minikube-driver-check
+minikube-driver-check: ## Verify the minikube VM driver (MINIKUBE_DRIVER) and its host dependencies are usable
+	@echo "→ Checking minikube driver '$(MINIKUBE_DRIVER)' (container runtime: $(MINIKUBE_RUNTIME))..."
+	@case "$(UNAME_S)/$(MINIKUBE_DRIVER)" in \
+		Darwin/vfkit) \
+			command -v vfkit >/dev/null 2>&1 || { echo "✘ vfkit not found — run 'make install-prereqs' (or 'brew install vfkit')."; exit 1; } ;; \
+		Linux/kvm2|Linux/qemu|Linux/qemu2) \
+			[ -e /dev/kvm ] || { echo "✘ /dev/kvm not found — enable hardware virtualization (VT-x/AMD-V in firmware, or nested virtualization on a cloud VM)."; exit 1; }; \
+			{ [ -r /dev/kvm ] && [ -w /dev/kvm ]; } || { echo "✘ No read/write access to /dev/kvm — 'sudo usermod -aG kvm $$USER', then log out and back in."; exit 1; }; \
+			if [ "$(MINIKUBE_DRIVER)" = "kvm2" ]; then \
+				command -v virsh >/dev/null 2>&1 || { echo "✘ libvirt not found — run 'sudo make install-prereqs'."; exit 1; }; \
+				virsh -c qemu:///system version >/dev/null 2>&1 || { echo "✘ Cannot connect to libvirt (qemu:///system) — 'sudo systemctl enable --now libvirtd' and 'sudo usermod -aG libvirt $$USER', then log out and back in."; exit 1; }; \
+			else \
+				QEMU_BIN="qemu-system-$$(echo $(UNAME_M) | sed 's/arm64/aarch64/;s/amd64/x86_64/')"; \
+				command -v "$$QEMU_BIN" >/dev/null 2>&1 || { echo "✘ $$QEMU_BIN not found — run 'sudo make install-prereqs MINIKUBE_DRIVER=qemu'."; exit 1; }; \
+				command -v qemu-img     >/dev/null 2>&1 || { echo "✘ qemu-img not found — run 'sudo make install-prereqs MINIKUBE_DRIVER=qemu'."; exit 1; }; \
+			fi ;; \
+		*) \
+			echo "✘ MINIKUBE_DRIVER='$(MINIKUBE_DRIVER)' is not supported on $(UNAME_S) — use vfkit on macOS, or kvm2/qemu on Linux."; exit 1 ;; \
+	esac
+	@echo "✔ minikube driver '$(MINIKUBE_DRIVER)' is ready."
+
 .PHONY: minikube-start
-minikube-start: ## Start minikube with resources required for Confluent Platform + Flink
-	@echo "→ Checking Docker is running..."
-	@if ! docker info >/dev/null 2>&1; then \
-		echo "⚠ Docker is not running. Attempting to start it..."; \
-		if [ "$(IS_DARWIN)" = "Darwin" ]; then \
-			open -a Docker; \
-			echo "→ Waiting for Docker Desktop to start (up to 60s)..."; \
-			for i in $$(seq 1 30); do \
-				docker info >/dev/null 2>&1 && break; \
-				sleep 2; \
-			done; \
-		elif [ "$(IS_LINUX)" = "Linux" ]; then \
-			systemctl start docker 2>/dev/null || service docker start 2>/dev/null || true; \
-			echo "→ Waiting for Docker daemon to start (up to 30s)..."; \
-			for i in $$(seq 1 15); do \
-				docker info >/dev/null 2>&1 && break; \
-				sleep 2; \
-			done; \
+minikube-start: minikube-driver-check host-proxy-start ## Start minikube (VM driver + containerd) with resources required for Confluent Platform + Flink
+	@# minikube cannot switch the driver or container runtime of an existing cluster
+	@# (e.g. one created by the old Docker-driver setup), so fail fast with the fix.
+	@MK_HOME="$${MINIKUBE_HOME:-$$HOME}"; \
+	case "$$MK_HOME" in */.minikube) ;; *) MK_HOME="$$MK_HOME/.minikube" ;; esac; \
+	PROFILE_CFG="$$MK_HOME/profiles/minikube/config.json"; \
+	if [ -f "$$PROFILE_CFG" ]; then \
+		CUR_DRIVER=$$(grep -o '"Driver": *"[^"]*"' "$$PROFILE_CFG" | head -1 | sed 's/.*"\([^"]*\)"$$/\1/' || true); \
+		CUR_RUNTIME=$$(grep -o '"ContainerRuntime": *"[^"]*"' "$$PROFILE_CFG" | head -1 | sed 's/.*"\([^"]*\)"$$/\1/' || true); \
+		WANT_DRIVER="$(MINIKUBE_DRIVER)"; \
+		if [ "$$WANT_DRIVER" = "qemu" ]; then WANT_DRIVER="qemu2"; fi; \
+		if [ -n "$$CUR_DRIVER" ] && { [ "$$CUR_DRIVER" != "$$WANT_DRIVER" ] || [ "$$CUR_RUNTIME" != "$(MINIKUBE_RUNTIME)" ]; }; then \
+			echo "✘ The existing minikube cluster uses driver=$$CUR_DRIVER, runtime=$$CUR_RUNTIME; this Makefile wants driver=$(MINIKUBE_DRIVER), runtime=$(MINIKUBE_RUNTIME)."; \
+			echo "  minikube cannot change either in place. Run 'make minikube-delete' (destroys the cluster and its data), then 'make minikube-start'."; \
+			exit 1; \
 		fi; \
-		if ! docker info >/dev/null 2>&1; then \
-			echo "✘ Docker failed to start. Please start Docker manually and retry."; exit 1; \
-		fi; \
-		echo "✔ Docker is running."; \
-	else \
-		echo "✔ Docker is already running."; \
 	fi
-	@echo "→ Starting minikube (cpus=$(MINIKUBE_CPUS), memory=$(MINIKUBE_MEM), disk=$(MINIKUBE_DISK))..."
-	@MINIKUBE_FORCE=""
-	@if [ "$$EUID" = "0" ]; then \
-		echo "⚠ minikube Docker driver should not be used as root."; \
+	@echo "→ Starting minikube (driver=$(MINIKUBE_DRIVER), runtime=$(MINIKUBE_RUNTIME), cpus=$(MINIKUBE_CPUS), memory=$(MINIKUBE_MEM), disk=$(MINIKUBE_DISK))..."
+	@MINIKUBE_FORCE=""; \
+	if [ "$$EUID" = "0" ]; then \
+		echo "⚠ The minikube $(MINIKUBE_DRIVER) driver should not be used as root."; \
 		if [ -t 1 ]; then \
 			read -p "Continue with --force anyway? [y/N]: " answer; \
 			case "$$answer" in \
 				y|Y|yes|YES|Yes) MINIKUBE_FORCE="--force" ;; \
-			*) echo "Aborting. Run as a non-root user or use 'minikube start --driver=none' instead."; exit 1 ;; \
+				*) echo "Aborting. Run 'make minikube-start' as a non-root user."; exit 1 ;; \
 			esac; \
 		else \
-			echo "Non-interactive shell detected; cannot prompt. Run as a non-root user or use 'minikube start --driver=none' instead."; exit 1; \
+			echo "Non-interactive shell detected; cannot prompt. Run 'make minikube-start' as a non-root user."; exit 1; \
 		fi; \
 	fi; \
 	minikube start \
-		--driver=docker \
+		--driver=$(MINIKUBE_DRIVER) \
+		--container-runtime=$(MINIKUBE_RUNTIME) \
 		$$MINIKUBE_FORCE \
+		$(foreach v,$(PROXY_ENV_VARS),$(if $(MINIKUBE_HTTP_PROXY),--docker-env $(v))) \
 		--cpus=$(MINIKUBE_CPUS) \
 		--memory=$(MINIKUBE_MEM) \
 		--disk-size=$(MINIKUBE_DISK)
+	@# --docker-env is only recorded when the cluster is created, and the node's
+	@# /etc is tmpfs, so (re)write the containerd + BuildKit drop-ins on every start.
+	@$(if $(MINIKUBE_HTTP_PROXY),$(MAKE) --no-print-directory minikube-proxy-apply,true)
+
+.PHONY: minikube-proxy-apply
+minikube-proxy-apply: host-proxy-start ## Point the running node's containerd + BuildKit at MINIKUBE_HTTP_PROXY (minikube-start re-applies it on each start)
+	@test -n "$(MINIKUBE_HTTP_PROXY)" || { echo "✘ MINIKUBE_HTTP_PROXY is not set, e.g. 'make minikube-proxy-apply MINIKUBE_HTTP_PROXY=http://192.168.64.1:3128'."; exit 1; }
+	@echo "→ Pointing containerd + BuildKit in the minikube node at $(MINIKUBE_HTTP_PROXY) (NO_PROXY=$(MINIKUBE_NO_PROXY))..."
+	@minikube ssh -- "for svc in containerd buildkit; do \
+		sudo mkdir -p /etc/systemd/system/\$$svc.service.d && \
+		printf '[Service]\nEnvironment=\"HTTP_PROXY=$(MINIKUBE_HTTP_PROXY)\"\nEnvironment=\"HTTPS_PROXY=$(MINIKUBE_HTTP_PROXY)\"\nEnvironment=\"NO_PROXY=$(MINIKUBE_NO_PROXY)\"\n' \
+			| sudo tee /etc/systemd/system/\$$svc.service.d/http-proxy.conf >/dev/null; \
+	done && sudo systemctl daemon-reload && sudo systemctl restart containerd && sudo systemctl try-restart buildkit"
+	@CODE=$$(minikube ssh -- "curl -s -o /dev/null -w '%{http_code}' --max-time 10 -x $(MINIKUBE_HTTP_PROXY) https://registry-1.docker.io/v2/" 2>/dev/null | tr -d '\r' || true); \
+	case "$$CODE" in \
+		200|401) echo "✔ Node reaches Docker Hub through the proxy (HTTP $$CODE)." ;; \
+		*)       echo "⚠ Node could not reach Docker Hub through $(MINIKUBE_HTTP_PROXY) (got '$$CODE'). Check the proxy is running, listens on an address the VM can reach, and allows the VM's subnet." ;; \
+	esac
 
 .PHONY: minikube-status
 minikube-status: ## Check minikube and cluster node status
@@ -317,12 +406,40 @@ minikube-status: ## Check minikube and cluster node status
 	kubectl get nodes
 
 .PHONY: minikube-stop
-minikube-stop: ## Stop the minikube cluster
+minikube-stop: ## Stop the minikube cluster (and the host proxy service, if managed)
 	minikube stop
+	@$(MAKE) --no-print-directory host-proxy-stop
 
 .PHONY: minikube-delete
-minikube-delete: ## Completely delete the minikube cluster
+minikube-delete: ## Completely delete the minikube cluster (and stop the host proxy service, if managed)
 	minikube delete
+	@$(MAKE) --no-print-directory host-proxy-stop
+
+# The host proxy is managed only when MINIKUBE_HTTP_PROXY is set, MINIKUBE_PROXY_BREW_SERVICE
+# is non-empty, and Homebrew has that formula installed; otherwise these are no-ops.
+.PHONY: host-proxy-start
+host-proxy-start: ## Start the Homebrew proxy service behind MINIKUBE_HTTP_PROXY (no-op unless set)
+	@if [ -n "$(MINIKUBE_HTTP_PROXY)" ] && [ -n "$(MINIKUBE_PROXY_BREW_SERVICE)" ] \
+		&& command -v brew >/dev/null 2>&1 && brew list --formula $(MINIKUBE_PROXY_BREW_SERVICE) >/dev/null 2>&1; then \
+		PROXY_PORT=$$(echo "$(MINIKUBE_HTTP_PROXY)" | sed -E 's#^[a-z]+://##; s#/.*$$##; s#^.*:##'); \
+		echo "→ Starting host proxy '$(MINIKUBE_PROXY_BREW_SERVICE)' (port $$PROXY_PORT)..."; \
+		brew services start $(MINIKUBE_PROXY_BREW_SERVICE) >/dev/null 2>&1 || true; \
+		for i in $$(seq 1 10); do nc -z 127.0.0.1 "$$PROXY_PORT" >/dev/null 2>&1 && break; sleep 1; done; \
+		if nc -z 127.0.0.1 "$$PROXY_PORT" >/dev/null 2>&1; then \
+			echo "✔ Host proxy is listening on port $$PROXY_PORT."; \
+		else \
+			echo "✘ '$(MINIKUBE_PROXY_BREW_SERVICE)' is not listening on port $$PROXY_PORT — check 'brew services info $(MINIKUBE_PROXY_BREW_SERVICE)' and its Port setting."; exit 1; \
+		fi; \
+	fi
+
+.PHONY: host-proxy-stop
+host-proxy-stop: ## Stop the Homebrew proxy service behind MINIKUBE_HTTP_PROXY (no-op unless set)
+	@if [ -n "$(MINIKUBE_HTTP_PROXY)" ] && [ -n "$(MINIKUBE_PROXY_BREW_SERVICE)" ] \
+		&& command -v brew >/dev/null 2>&1 && brew list --formula $(MINIKUBE_PROXY_BREW_SERVICE) >/dev/null 2>&1; then \
+		echo "→ Stopping host proxy '$(MINIKUBE_PROXY_BREW_SERVICE)'..."; \
+		brew services stop $(MINIKUBE_PROXY_BREW_SERVICE) >/dev/null 2>&1 || true; \
+		echo "✔ Host proxy stopped."; \
+	fi
 
 # ------------------------------------------------------------------------------
 # Phase 3: Confluent Operator (CFK)
@@ -538,13 +655,18 @@ rustfs-up: namespace ## Deploy RustFS (S3-compatible store for CMF artifacts) an
 	@echo "✔ RustFS ready at $(RUSTFS_S3_ENDPOINT) (bucket: $(CMF_ARTIFACT_BUCKET))."
 
 .PHONY: flink-image-build
-flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S3 plugin) and load it into minikube
-	@echo "→ Building $(POOL_IMAGE) FROM $(FLINK_IMAGE)..."
-	@test -f $(FLINK_SQL_DOCKERFILE) || (echo "✘ $(FLINK_SQL_DOCKERFILE) not found." && exit 1)
-	docker build --build-arg FLINK_IMAGE=$(FLINK_IMAGE) -t $(POOL_IMAGE) -f $(FLINK_SQL_DOCKERFILE) k8s/base
-	@echo "→ Loading $(POOL_IMAGE) into minikube (so the Kubelet needs no registry pull)..."
-	minikube image load $(POOL_IMAGE)
-	@echo "✔ $(POOL_IMAGE) built and loaded."
+flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S3 plugin) inside the minikube node
+	@echo "→ Building $(POOL_IMAGE) FROM $(FLINK_IMAGE) inside minikube (BuildKit → containerd, so the Kubelet needs no registry pull)..."
+	@test -f $(FLINK_SQL_CONTAINERFILE) || (echo "✘ $(FLINK_SQL_CONTAINERFILE) not found." && exit 1)
+	@# minikube resolves -f relative to the build context, so pass the Containerfile's
+	@# directory as the context and its bare file name as -f.
+	minikube image build \
+		-t $(POOL_IMAGE) \
+		--build-opt=build-arg=FLINK_IMAGE=$(FLINK_IMAGE) \
+		$(foreach v,$(if $(MINIKUBE_HTTP_PROXY),$(PROXY_ENV_VARS)),--build-opt=build-arg=$(v)) \
+		-f $(notdir $(FLINK_SQL_CONTAINERFILE)) \
+		$(dir $(FLINK_SQL_CONTAINERFILE))
+	@echo "✔ $(POOL_IMAGE) built into the minikube node's containerd image store."
 
 # RustFS — S3-compatible blob store backing CMF artifact (cmf:// JAR) storage.
 # ------------------------------------------------------------------------------

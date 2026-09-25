@@ -1,0 +1,23 @@
+# ==============================================================================
+# Per-machine Makefile overrides. Copy to local.mk (git-ignored) and uncomment
+# what you need; the Makefile loads it before its own defaults.
+#
+# Use '?=' so an environment variable or command-line value can still override
+# it for one run (e.g. 'MINIKUBE_HTTP_PROXY= make minikube-start' to go direct).
+# ==============================================================================
+
+# Route the minikube node's image pulls and builds through an HTTP proxy on the
+# host, for when the host reaches the internet but traffic forwarded from the VM
+# doesn't (KNOWN_ISSUES.md 2.0). 192.168.64.1 is the Mac as seen from the vfkit
+# VM; 3128 matches the tinyproxy setup described there.
+# MINIKUBE_HTTP_PROXY ?= http://192.168.64.1:3128
+
+# Homebrew service that minikube-start / minikube-stop / minikube-delete start
+# and stop alongside the VM while MINIKUBE_HTTP_PROXY is set. Empty = hands off.
+# MINIKUBE_PROXY_BREW_SERVICE ?= tinyproxy
+
+# minikube sizing and driver.
+# MINIKUBE_CPUS   ?= 6
+# MINIKUBE_MEM    ?= 20480
+# MINIKUBE_DISK   ?= 50g
+# MINIKUBE_DRIVER ?= vfkit

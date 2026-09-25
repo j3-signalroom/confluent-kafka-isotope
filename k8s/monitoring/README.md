@@ -78,7 +78,6 @@ kubectl delete -k k8s/monitoring
 ```
 
 ## **3.0 Troubleshooting**
-- **Targets DOWN / `connection refused`.** The stage isn't running on that port, or `host.minikube.internal` doesn't resolve. It resolves out of the box on the Docker and Hyperkit drivers; if not, run `minikube ssh -- getent hosts host.minikube.internal` to check, and confirm the stage binds the port with `curl -s localhost:9410/metrics | grep isotope_` on the host.
+- **Targets DOWN / `connection refused`.** The stage isn't running on that port, or `host.minikube.internal` doesn't resolve. minikube maps it to the host on the VM drivers this repo uses (`vfkit`, `kvm2`, `qemu`); if it doesn't resolve, run `minikube ssh -- getent hosts host.minikube.internal` to check, and confirm the stage binds the port with `curl -s localhost:9410/metrics | grep isotope_` on the host.
 - **No data, targets UP.** The meters are lazily registered on first emission — drive some traffic (step 2). Until a stage produces/consumes, `/metrics` has no `isotope_*` series.
 - **Huge latency/age values.** Backlog replay, not steady-state — use `-Disotope.consume.from=latest` ([docs/metrics.md](../../docs/metrics.md#20-enabling-the-exporter)).
-  

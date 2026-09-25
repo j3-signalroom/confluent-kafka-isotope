@@ -21,7 +21,7 @@ shadow = "9.4.1"
 #
 # The Flink-side report sinks DO NOT use Protobuf — they use Avro+SR via
 # Apache Flink's `flink-sql-avro-confluent-registry` (baked into
-# /opt/flink/lib by the reports app image, k8s/base/flink-sql-isotope.Dockerfile).
+# /opt/flink/lib by the reports app image, k8s/base/flink-sql-isotope.Containerfile).
 # So this protoc pin is only relevant to :app, not :ptf.
 confluent       = "8.2.0"
 protoc          = "4.32.1"
