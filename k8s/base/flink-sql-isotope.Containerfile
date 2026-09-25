@@ -17,10 +17,12 @@
 # The PTF/UDF JAR itself is NOT baked in — it is uploaded to CMF as a cmf://
 # artifact and referenced by CREATE FUNCTION ... USING JAR.
 #
-# Build (see `make flink-image-build`), then `minikube image load` it so the
-# Kubelet uses it without a registry pull:
-#   docker build --build-arg FLINK_IMAGE=<cp-flink tag> \
-#     -t isotope-cp-flink-sql:local -f k8s/base/flink-sql-isotope.Dockerfile k8s/base
+# Built inside the minikube node (BuildKit → containerd), so the Kubelet uses it
+# without a registry pull and no host Docker daemon is needed. See
+# `make flink-image-build`:
+#   minikube image build -t isotope-cp-flink-sql:local \
+#     --build-opt=opt=build-arg:FLINK_IMAGE=<cp-flink tag> \
+#     -f flink-sql-isotope.Containerfile k8s/base/
 ARG FLINK_IMAGE=confluentinc/cp-flink:2.1.2-cp1-java21
 
 # --- fetch stage: download the connector JARs (stock image has no curl) --------

@@ -68,7 +68,24 @@ make c3-open
 
 
 ## **2.0 Every image pull fails with `TLS handshake timeout` (`ErrImagePull` / `ImagePullBackOff`)**
-**Affects:** minikube on the Docker driver under Docker Desktop for Mac, when Docker Desktop is routing egress through its built-in proxy (typically while a VPN is connected)
+**Affects:** minikube on the **legacy Docker driver** under Docker Desktop for Mac, when Docker Desktop is routing egress through its built-in proxy (typically while a VPN is connected)
+
+> The Makefile now runs minikube as a VM (`vfkit` on macOS, `kvm2`/`qemu` on Linux) with containerd, and it never goes through Docker Desktop, so this issue only affects clusters created before that change. The permanent fix is to move to the VM driver: `make minikube-delete && make minikube-start`. The same symptom can also appear on the VM driver: the Mac itself reaches Docker Hub, but traffic forwarded from the VM gets no reply data back. All sites fail from inside the node, while ping and the TCP connect still succeed. The likely cause is a third-party network extension or content filter on the host (check System Settings → Network → Filters & Proxies, and `systemextensionsctl list`). If you can't remove it, run any HTTP proxy that supports `CONNECT` on the Mac (for example tinyproxy or squid), listening on an address the VM can reach and allowing its subnet. For example, with tinyproxy:
+
+```bash
+brew install tinyproxy
+# In $(brew --prefix)/etc/tinyproxy/tinyproxy.conf: set 'Port 3128' and add 'Allow 192.168.64.0/24'
+```
+
+Then set `MINIKUBE_HTTP_PROXY` for this machine in a git-ignored `local.mk` (start from `local.mk.example`):
+
+```make
+MINIKUBE_HTTP_PROXY ?= http://192.168.64.1:3128   # the Mac as seen from the vfkit VM
+```
+
+From then on, every target uses the proxy. `make minikube-start` starts the tinyproxy Homebrew service, passes `--docker-env`, and points containerd + BuildKit in the node at the proxy. `make minikube-stop` and `make minikube-delete` stop the service again (set `MINIKUBE_PROXY_BREW_SERVICE` empty to manage it yourself). For a node that's already running, use `make minikube-proxy-apply`. To go direct for a single run, use `MINIKUBE_HTTP_PROXY= make …`.
+
+The proxy then opens the outbound connections as a host process, which works. The option also covers `make flink-image-build` (base-image pulls and the Containerfile's `curl` fetch stage). `MINIKUBE_NO_PROXY` keeps cluster-internal traffic off the proxy.
 
 ### **2.1 Symptom**
 The first pod to start — usually `confluent-operator` during `make cp-up` — never pulls its image, and `make cp-watch` cycles between `ErrImagePull` and `ImagePullBackOff`:
