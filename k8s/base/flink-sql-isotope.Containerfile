@@ -21,7 +21,7 @@
 # without a registry pull and no host Docker daemon is needed. See
 # `make flink-image-build`:
 #   minikube image build -t isotope-cp-flink-sql:local \
-#     --build-opt=build-arg=FLINK_IMAGE=<cp-flink tag> \
+#     --build-opt=opt=build-arg:FLINK_IMAGE=<cp-flink tag> \
 #     -f flink-sql-isotope.Containerfile k8s/base/
 ARG FLINK_IMAGE=confluentinc/cp-flink:2.1.2-cp1-java21
 

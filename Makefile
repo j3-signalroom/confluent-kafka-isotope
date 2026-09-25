@@ -660,12 +660,18 @@ flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S
 	@test -f $(FLINK_SQL_CONTAINERFILE) || (echo "✘ $(FLINK_SQL_CONTAINERFILE) not found." && exit 1)
 	@# minikube resolves -f relative to the build context, so pass the Containerfile's
 	@# directory as the context and its bare file name as -f.
+	@# On the containerd runtime each --build-opt is handed to buildctl verbatim as
+	@# --<opt>, so build args must be spelled opt=build-arg:K=V (→ --opt=build-arg:K=V);
+	@# the Docker-era build-arg=K=V becomes an unknown --build-arg flag.
 	minikube image build \
 		-t $(POOL_IMAGE) \
-		--build-opt=build-arg=FLINK_IMAGE=$(FLINK_IMAGE) \
-		$(foreach v,$(if $(MINIKUBE_HTTP_PROXY),$(PROXY_ENV_VARS)),--build-opt=build-arg=$(v)) \
+		--build-opt=opt=build-arg:FLINK_IMAGE=$(FLINK_IMAGE) \
+		$(foreach v,$(if $(MINIKUBE_HTTP_PROXY),$(PROXY_ENV_VARS)),--build-opt=opt=build-arg:$(v)) \
 		-f $(notdir $(FLINK_SQL_CONTAINERFILE)) \
 		$(dir $(FLINK_SQL_CONTAINERFILE))
+	@# minikube image build exits 0 even when buildctl fails, so confirm the image landed.
+	@minikube ssh -- sudo ctr -n k8s.io images ls -q | grep -q '$(POOL_IMAGE)' \
+		|| (echo "✘ $(POOL_IMAGE) is not in the node's containerd store — the build failed (see output above)." && exit 1)
 	@echo "✔ $(POOL_IMAGE) built into the minikube node's containerd image store."
 
 # RustFS — S3-compatible blob store backing CMF artifact (cmf:// JAR) storage.
