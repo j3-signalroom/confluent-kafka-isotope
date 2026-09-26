@@ -37,7 +37,7 @@ make install-prereqs     # VM driver (vfkit | kvm2/qemu), kubectl, minikube, hel
 make check-prereqs       # verify they're on PATH
 ```
 
-Default minikube sizing (override via env): `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480`, `MINIKUBE_DISK=50g`. The node architecture is auto-detected so the right `cp-flink` image (amd64/arm64) is selected.
+Default minikube sizing: `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480` (MiB), `MINIKUBE_DISK=50g`. Override via env, `make` args, or `local.mk`. Sizing is fixed when the cluster is created, so run `make minikube-delete` before changing it. The node architecture is auto-detected so the right `cp-flink` image (amd64/arm64) is selected.
 
 minikube runs as a **VM with containerd** as the container runtime, so Docker isn't required. The VM driver is picked per OS and can be overridden with `MINIKUBE_DRIVER=`:
 

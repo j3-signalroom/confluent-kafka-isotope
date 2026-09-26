@@ -545,7 +545,7 @@ make install-prereqs     # VM driver (vfkit | kvm2/qemu), kubectl, minikube, hel
 make check-prereqs       # verify they're on PATH
 ```
 
-Default minikube sizing (override via env): `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480`, `MINIKUBE_DISK=50g`.
+Default minikube sizing: `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480` (MiB), `MINIKUBE_DISK=50g`. Override via env, `make` args, or `local.mk`. Sizing is fixed when the cluster is created, so run `make minikube-delete` before changing it.
 
 minikube runs as a **VM with containerd** as the container runtime, so Docker isn't required. The VM driver is picked per OS and can be overridden with `MINIKUBE_DRIVER=`:
 
@@ -555,7 +555,7 @@ minikube runs as a **VM with containerd** as the container runtime, so Docker is
 | Linux x86_64 | `kvm2` (KVM via libvirt) | `qemu` |
 | Linux arm64 | `qemu` | — |
 
-On Linux, both drivers need hardware virtualization (`/dev/kvm`; on a cloud VM that means nested virtualization). `sudo make install-prereqs` adds your user to the `kvm` group (plus `libvirt` for kvm2), so log out and back in afterwards. Run `make minikube-driver-check` to verify the driver setup. **Node can't pull images but the host can?** Set `MINIKUBE_HTTP_PROXY` to an HTTP proxy on the host in a git-ignored `local.mk` (see `local.mk.example`), and see [KNOWN_ISSUES.md 2.0](KNOWN_ISSUES.md#20-every-image-pull-fails-with-tls-handshake-timeout-errimagepull--imagepullbackoff).
+On Linux, both drivers need hardware virtualization (`/dev/kvm`; on a cloud VM that means nested virtualization). `sudo make install-prereqs` adds your user to the `kvm` group (plus `libvirt` for kvm2), so log out and back in afterwards. Run `make minikube-driver-check` to verify the driver setup. **Node can't pull images but the host can?** Set `MINIKUBE_HTTP_PROXY` to an HTTP proxy on the host in a git-ignored `local.mk` (see `local.mk.example`), and see [KNOWN_ISSUES.md §2.0](KNOWN_ISSUES.md#20-every-image-pull-fails-with-tls-handshake-timeout-errimagepull--imagepullbackoff).
 
 Bring up the local Confluent Platform stack and port-forward Kafka + SR:
 
@@ -606,13 +606,7 @@ You get an environment on your machine, with all the components you’d expect i
 - **Apache Flink 2.1.2** via the Confluent Flink Kubernetes Operator 1.140.1
 - **Confluent Manager for Apache Flink (CMF) 2.4.0** for Flink environment management
 
-To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with apt-get)**.  The full stack — **minikube + Confluent Platform + Flink + CMF** — is resource-intensive and designed to mirror an adequate development environment. Therefore, the following defaults are recommended:
-
-| Resource | Default |
-| -------- | ------- |
-| CPUs     | 6       |
-| Memory   | 20 GB   |
-| Disk     | 50 GB   |
+To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with apt-get)**.  The full stack — **minikube + Confluent Platform + Flink + CMF** — is resource-intensive and designed to mirror an adequate development environment. Therefore, the following defaults for minikube are recommended: `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480` (MiB), `MINIKUBE_DISK=50g`.
 
 > These settings ensure stable performance across all components. You can tune them as needed, but lower resource levels may cause pod restarts or degraded performance.
 
