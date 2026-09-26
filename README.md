@@ -60,29 +60,30 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 ![tier-ladder-diagram](docs/image_generators/tier-ladder-diagram.png)
 
 <details>
-<summary>Easy — single-record, single-trace</summary>
+<summary>Harder (7 questions) — forensic replay, compliance, cross-system joins</summary>
 
-- _Did my record get tagged?_
-- _What’s the origin of this trace?_
-- _How many hops has this record taken?_
-- _Where did this trace go?_
-- _Did the trace ID survive a consume-then-produce hop?_
-- _Which pipeline does this trace belong to?_
+- _For a specific business event two weeks ago, what path did its trace take?_
+- _Did this customer’s order traverse all the services it should have?_
+- _Can we reconstruct the full per-trace journey for an audit?_
+- _For Sarbanes-OXley Act (SOX): prove that every transaction was either completed or logged as stuck._
+- _Which input records produced this merged output?_
+- _Why was this trace stuck — not just that it was?_
+- _Which versions produced the current value of this row?_
 </details>
 
 <details>
-<summary>Easy to Medium — single per-minute aggregates</summary>
+<summary>Hard (6 questions) — tail behavior, drift detection, correlated analysis</summary>
 
-- _End-to-end latency from_ `order-intake-service` _through to_ `shipping-notification-service` _over the last minute?_
-- _What is the actual service graph?_
-- _How many distinct traces hit each topic per minute?_
-- _Is the hop-count distribution as expected, or are there long tails suggesting retry storms?_
-- _Are any traces hitting the 32-hop ceiling and getting eviction-marked?_
-- _How many traces is each pipeline carrying, minute by minute?_
+- _What are the p50/p95/p99 latencies across the whole pipeline?_
+- _Which one-minute window had the worst tail latency yesterday, and which traces drove it?_
+- _Is the deployed topology what we documented, or has it drifted?_
+- _Has the stuck-trace rate spiked since a recent deploy?_
+- _Do stuck traces correlate with a specific producer, partition, or time of day?_
+- _Does the same isotope mechanism work identically on OSS Apache Flink (Confluent Platform) and Confluent Cloud for Apache Flink (CCAF)?_
 </details>
 
 <details>
-<summary>Medium — cross-window deltas, anomalies, multi-report joins</summary>
+<summary>Medium (7 questions) — cross-window deltas, anomalies, multi-report joins</summary>
 
 - _Did latency get worse after the 2 pm deploy?_
 - _What percentage of traces that entered at_ `orders.placed` _made it all the way through_ `orders.fulfilled` _to the shipping consumer?_
@@ -94,25 +95,25 @@ This end-to-end observability of the isotope tracing pipeline creates a **ladder
 </details>
 
 <details>
-<summary>Hard — tail behavior, drift detection, correlated analysis</summary>
+<summary>Easy to Medium (6 questions) — single per-minute aggregates</summary>
 
-- _What are the p50/p95/p99 latencies across the whole pipeline?_
-- _Which one-minute window had the worst tail latency yesterday, and which traces drove it?_
-- _Is the deployed topology what we documented, or has it drifted?_
-- _Has the stuck-trace rate spiked since a recent deploy?_
-- _Do stuck traces correlate with a specific producer, partition, or time of day?_
-- _Does the same isotope mechanism work identically on OSS Apache Flink (Confluent Platform) and Confluent Cloud for Apache Flink (CCAF)?_
+- _End-to-end latency from_ `order-intake-service` _through to_ `shipping-notification-service` _over the last minute?_
+- _What is the actual service graph?_
+- _How many distinct traces hit each topic per minute?_
+- _Is the hop-count distribution as expected, or are there long tails suggesting retry storms?_
+- _Are any traces hitting the 32-hop ceiling and getting eviction-marked?_
+- _How many traces is each pipeline carrying, minute by minute?_
 </details>
 
 <details>
-<summary>Harder — forensic replay, compliance, cross-system joins</summary>
+<summary>Easy (6 questions) — single-record, single-trace</summary>
 
-- _For a specific business event two weeks ago, what path did its trace take?_
-- _Did this customer’s order traverse all the services it should have?_
-- _Can we reconstruct the full per-trace journey for an audit?_
-- _For Sarbanes-OXley Act (SOX): prove that every transaction was either completed or logged as stuck._
-- _Which input records produced this merged output?_
-- _Why was this trace stuck — not just that it was?_
+- _Did my record get tagged?_
+- _What’s the origin of this trace?_
+- _How many hops has this record taken?_
+- _Where did this trace go?_
+- _Did the trace ID survive a consume-then-produce hop?_
+- _Which pipeline does this trace belong to?_
 </details>
 
 ---
@@ -545,7 +546,7 @@ make install-prereqs     # VM driver (vfkit | kvm2/qemu), kubectl, minikube, hel
 make check-prereqs       # verify they're on PATH
 ```
 
-Default minikube sizing: `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480` (MiB), `MINIKUBE_DISK=50g`. Override via env, `make` args, or `local.mk`. Sizing is fixed when the cluster is created, so run `make minikube-delete` before changing it.
+Default minikube sizing: `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480` (MiB), and `MINIKUBE_DISK=50g`. Override via env, `make` args, or `local.mk`. Sizing is fixed when the cluster is created, so run `make minikube-delete` before changing it.
 
 minikube runs as a **VM with containerd** as the container runtime, so Docker isn't required. The VM driver is picked per OS and can be overridden with `MINIKUBE_DRIVER=`:
 
@@ -610,7 +611,7 @@ To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with ap
 
 > These settings ensure stable performance across all components. You can tune them as needed, but lower resource levels may cause pod restarts or degraded performance.
 
-Seven reports — five pure Flink SQL plus two JAR-backed PTFs — and the collector INSERT run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, eight sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. One StatementSet means one failure domain: a fault in any INSERT stops them all, so a missing sink topic takes the reports down with it (which is why `deploy-cmf-flink-reports.sh` pre-creates every sink — unlike CCAF, OSS Flink's Kafka connector declares a table over a topic that must already exist rather than creating it). No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-minikube one.
+Seven reports — five pure Flink SQL plus two JAR-backed PTFs — and the collector INSERT run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, and eight sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. One StatementSet means one failure domain: a fault in any INSERT stops them all, so a missing sink topic takes the reports down with it (which is why `deploy-cmf-flink-reports.sh` pre-creates every sink — unlike CCAF, OSS Flink's Kafka connector declares a table over a topic that must already exist rather than creating it). No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-minikube one.
 
 **The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make cp-flink-up` then `make cp-flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
 
