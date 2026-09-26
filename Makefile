@@ -29,7 +29,7 @@
 -include $(dir $(realpath $(firstword $(MAKEFILE_LIST))))local.mk
 
 
-CONFLUENT_MANIFEST  ?= k8s/base/confluent-platform-c3++.yaml
+CONFLUENT_MANIFEST  ?= k8s/base/cp-c3-next-gen.yaml
 NAMESPACE           ?= confluent
 MINIKUBE_CPUS       ?= 6
 MINIKUBE_MEM        ?= 20480
