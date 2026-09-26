@@ -6,7 +6,7 @@ plugins {
 repositories {
     mavenCentral()
     // kafka-protobuf-serializer + its transitive Confluent deps live here.
-    maven { url 'https://packages.confluent.io/maven/' }
+    maven { url = 'https://packages.confluent.io/maven/' }
     // The isotope tracing library (j3-signalroom/kafka-isotope) is published to
     // Maven Central as of 0.19.0, so it resolves from mavenCentral() above — no
     // GitHub Packages repo or authentication required.

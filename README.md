@@ -9,10 +9,10 @@
 - [**3.0 Getting Started**](#30-getting-started)
   + [**3.1 Integration Tests with Confluent Platform on minikube**](#31-integration-tests-with-confluent-platform-on-minikube)
   + [**3.2 Seven Scalar Headers Flink SQL Reports with Apache Flink on minikube**](#32-seven-scalar-headers-flink-sql-reports-with-apache-flink-on-minikube)
-  + [**3.3 Seven Scalar Headers Flink SQL Reports with Confluent Cloud for Apache Flink**](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink)
-    - [**3.3.1 Why `latency_percentiles` is a `ProcessTableFunction` (PTF)**](#331-why-latency_percentiles-is-a-processtablefunction-ptf)
-    - [**3.3.2 [OPTIONAL] Eighth Report — AI Root-Cause Analysis (RCA)**](#332-optional-eighth-report--ai-root-cause-analysis-rca)
-  - [**3.4 [OPTIONAL] Prometheus Metrics Reporting with Grafana Visualization**](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)
+  - [**3.3 Seven Scalar Headers Flink SQL Reports with Confluent Cloud for Apache Flink**](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink)
+    + [**3.3.1 Why `latency_percentiles` is a `ProcessTableFunction` (PTF)**](#331-why-latency_percentiles-is-a-processtablefunction-ptf)
+    + [**3.3.2 [OPTIONAL] Eighth Report — AI Root-Cause Analysis (RCA)**](#332-optional-eighth-report--ai-root-cause-analysis-rca)
+  + [**3.4 [OPTIONAL] Prometheus Metrics Reporting with Grafana Visualization**](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)
   - [**3.5 Apache Flink Provenance**](#35-apache-flink-provenance)
     + [**3.5.1 [ALWAYS ON] 1:1 Collector Provenance: Flink as a Hop**](#351-always-on-11-collector-provenance-flink-as-a-hop)
     + [**3.5.2 [OPTIONAL] Fan-in Provenance: Windowed Merges**](#352-optional-fan-in-provenance-windowed-merges)
@@ -368,7 +368,7 @@ ptf/                                    Flink reports application + PTF shadow J
   src/test/java/.../                    TDigestsTest, IsotopeAppendHopTest, MergeTraceTest,
                                         StateVersionTest
 k8s/base/                               CFK / CMF manifests (applied by `make cp-up` / `cp-flink-up`)
-  confluent-platform-c3++.yaml          Kafka / SR / Connect / ksqlDB / Control Center
+  cp-c3-next-gen.yaml                   Kafka / SR / Connect / ksqlDB / Control Center
   rustfs.yaml                           in-cluster S3-compatible store backing CMF's
                                         cmf:// artifact (JAR) storage
   cmf-values.yaml                       Helm values for CMF 2.4 — artifact storage

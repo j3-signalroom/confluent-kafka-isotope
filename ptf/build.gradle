@@ -101,6 +101,12 @@ shadowJar {
     manifest {
         attributes 'Main-Class': 'ai.signalroom.kafka.isotope.flink.IsotopeReportsJob'
     }
+    // mergeServiceFiles() can only merge what reaches it: shadowJar's default
+    // EXCLUDE duplicates strategy would drop a second copy of a service file
+    // before the transformer sees it, so let service files through as INCLUDE.
+    filesMatching('META-INF/services/**') {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    }
     mergeServiceFiles()
     // kafka-isotope-core pulls in Jackson for the isotope JSON. Flink ships its
     // own (shaded) Jackson; relocating ours keeps the two from meeting.
