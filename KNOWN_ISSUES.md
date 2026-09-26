@@ -91,7 +91,7 @@ Yet the same registry answers fine from the host itself. Every other image in th
 ### **2.2 Cause**
 Something on the host drops the reply traffic for connections forwarded from the VM, while connections the host opens itself work. Every site fails from inside the node, yet ping and the TCP connect still succeed, so it looks like a registry outage rather than a local routing problem. The usual culprit is a third-party network extension or content filter; check System Settings → Network → Filters & Proxies, and `systemextensionsctl list`.
 
-Quick confirmation — direct egress from the node times out, while the same request through an HTTP proxy on the host (see 2.3) returns `401`, Docker Hub's normal unauthenticated answer:
+Quick confirmation — direct egress from the node times out, while the same request through an HTTP proxy on the host (see [§2.3](#23-workaround)) returns `401`, Docker Hub's normal unauthenticated answer:
 
 ```bash
 minikube ssh -- "curl -s -o /dev/null -w '%{http_code}\n' --max-time 10 https://registry-1.docker.io/v2/"
