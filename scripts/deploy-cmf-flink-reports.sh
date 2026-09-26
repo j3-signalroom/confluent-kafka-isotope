@@ -115,6 +115,12 @@ create_topic() { kubectl exec -n "${NAMESPACE}" "${KAFKA_POD}" -- kafka-topics -
     --create --if-not-exists --topic "$1" --partitions 1 --replication-factor 1 >/dev/null; }
 delete_topic() { kubectl exec -n "${NAMESPACE}" "${KAFKA_POD}" -- kafka-topics --bootstrap-server localhost:9071 \
     --delete --if-exists --topic "$1" >/dev/null 2>&1 || true; }
+# Pin a topic to infinite, non-compacted retention. Applied via kafka-configs
+# rather than `--create --config` because --if-not-exists silently keeps the old
+# config on a topic that already exists.
+retain_forever() { kubectl exec -n "${NAMESPACE}" "${KAFKA_POD}" -- kafka-configs --bootstrap-server localhost:9071 \
+    --alter --entity-type topics --entity-name "$1" \
+    --add-config retention.ms=-1,retention.bytes=-1,cleanup.policy=delete >/dev/null; }
 
 PF_PID=""
 cmf_pf_start() {
@@ -176,6 +182,11 @@ if [ "${ACTION}" = "up" ]; then
     [ -f "${APP_JAR}" ] || { echo "✘ ${APP_JAR} not found. Run './gradlew :ptf:shadowJar'." >&2; exit 1; }
     echo "→ Pre-creating ${#EVENT_TOPICS[@]} source + ${#SINK_TOPICS[@]} sink topics on ${KAFKA_POD}..."
     for t in "${EVENT_TOPICS[@]}" "${SINK_TOPICS[@]}"; do echo "  ↳ ${t}"; create_topic "${t}"; done
+    # The provenance topic IS the lineage record (docs/state-provenance.md 6.0):
+    # the broker's default delete retention would expire the graph after ~7 days.
+    if [ "${STATE_PROVENANCE}" = "true" ]; then
+        for t in "${STATE_TOPICS[@]}"; do echo "  ↳ ${t}: retention.ms=-1"; retain_forever "${t}"; done
+    fi
 
     cmf_pf_start
 
