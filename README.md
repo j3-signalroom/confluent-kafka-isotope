@@ -606,7 +606,7 @@ You get an environment on your machine, with all the components you’d expect i
 - **Apache Flink 2.1.2** via the Confluent Flink Kubernetes Operator 1.140.1
 - **Confluent Manager for Apache Flink (CMF) 2.4.0** for Flink environment management
 
-To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with apt-get)**.  The full stack — **minikube + Confluent Platform + Flink + CMF** — is resource-intensive and designed to mirror an adequate development environment. Therefore, the following defaults for minikube are recommended: `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480` (MiB), `MINIKUBE_DISK=50g`.
+To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with apt-get)**.  The full stack — **minikube + Confluent Platform + Flink + CMF** — is resource-intensive and designed to mirror an adequate development environment. Therefore, the following defaults for minikube are recommended: `MINIKUBE_CPUS=6`, `MINIKUBE_MEM=20480` (MiB), and `MINIKUBE_DISK=50g`.
 
 > These settings ensure stable performance across all components. You can tune them as needed, but lower resource levels may cause pod restarts or degraded performance.
 
