@@ -1,0 +1,84 @@
+# Maven Central paths of the JARs the opt-in Iceberg lake adds to /opt/flink/lib
+# (docs/lake.md), fetched one per line by flink-sql-isotope.Containerfile.
+#
+# WHY A PINNED LIST (not iceberg-aws-bundle + hadoop-client-runtime)
+# The two convenience bundles carried every AWS service client plus Netty, and
+# Hadoop's whole shaded dependency tree (Jackson 2.12, Jetty 9.4, JLine 3.9) —
+# 1 critical and ~24 high CVEs in libraries the lake never calls. This list is
+# only what it does call, and scans clean (Trivy, CRITICAL/HIGH):
+#
+#   * AWS SDK v2 — the transitive closure of `s3` + `url-connection-client`,
+#     minus netty-nio-client and apache5-client (Iceberg 1.11 supports only
+#     the `apache` v4 and `urlconnection` clients; 90_lake_catalog.fql selects
+#     urlconnection, the JDK's own HTTP stack, so no third-party HTTP library
+#     ships at all) and minus slf4j (Flink provides it). Plus `kms` (and its
+#     aws-json-protocol) and `sts`: Iceberg's AwsProperties holds KMS enum
+#     defaults in static fields and STS model types the verifier loads, so
+#     the catalog cannot be created without them even though nothing here
+#     calls KMS or STS. Glue and DynamoDB appear only in signatures the JVM
+#     never resolves. Found by running the lake's catalog path against this
+#     exact set, not by reading dependency trees.
+#   * Hadoop — Iceberg's Flink catalog factory builds a Hadoop Configuration
+#     even for a REST catalog, and once Hadoop is on the classpath Flink itself
+#     calls UserGroupInformation at startup (to log the Hadoop user); a failed
+#     UGI static init poisons the class, and the catalog then fails on it. And
+#     the factory builds that Configuration through Flink's HadoopUtils, which
+#     instantiates HdfsConfiguration. So: hadoop-common and hadoop-hdfs-client,
+#     plus what Configuration needs to parse its defaults
+#     (Woodstox/StAX2, shaded Guava, collections4, lang3) and what UGI needs to
+#     initialize in non-Kerberos mode (hadoop-auth, commons-configuration2 +
+#     commons-text for metrics2, commons-logging) — at Hadoop 3.5.0's own
+#     pinned versions. hadoop-auth's Kerberos/ZooKeeper dependencies are left
+#     out on purpose: the non-secure path never loads them.
+#
+# To bump: resolve the same two roots at the new version with the same
+# exclusions, rescan, and replace the SDK block wholesale.
+
+# --- AWS SDK v2 ---
+org/reactivestreams/reactive-streams/1.0.4/reactive-streams-1.0.4.jar
+software/amazon/awssdk/annotations/2.55.6/annotations-2.55.6.jar
+software/amazon/awssdk/arns/2.55.6/arns-2.55.6.jar
+software/amazon/awssdk/auth/2.55.6/auth-2.55.6.jar
+software/amazon/awssdk/aws-core/2.55.6/aws-core-2.55.6.jar
+software/amazon/awssdk/aws-json-protocol/2.55.6/aws-json-protocol-2.55.6.jar
+software/amazon/awssdk/aws-query-protocol/2.55.6/aws-query-protocol-2.55.6.jar
+software/amazon/awssdk/aws-xml-protocol/2.55.6/aws-xml-protocol-2.55.6.jar
+software/amazon/awssdk/checksums-spi/2.55.6/checksums-spi-2.55.6.jar
+software/amazon/awssdk/checksums/2.55.6/checksums-2.55.6.jar
+software/amazon/awssdk/crt-core/2.55.6/crt-core-2.55.6.jar
+software/amazon/awssdk/endpoints-spi/2.55.6/endpoints-spi-2.55.6.jar
+software/amazon/awssdk/http-auth-aws-eventstream/2.55.6/http-auth-aws-eventstream-2.55.6.jar
+software/amazon/awssdk/http-auth-aws/2.55.6/http-auth-aws-2.55.6.jar
+software/amazon/awssdk/http-auth-spi/2.55.6/http-auth-spi-2.55.6.jar
+software/amazon/awssdk/http-auth/2.55.6/http-auth-2.55.6.jar
+software/amazon/awssdk/http-client-spi/2.55.6/http-client-spi-2.55.6.jar
+software/amazon/awssdk/identity-spi/2.55.6/identity-spi-2.55.6.jar
+software/amazon/awssdk/json-utils/2.55.6/json-utils-2.55.6.jar
+software/amazon/awssdk/kms/2.55.6/kms-2.55.6.jar
+software/amazon/awssdk/metrics-spi/2.55.6/metrics-spi-2.55.6.jar
+software/amazon/awssdk/profiles/2.55.6/profiles-2.55.6.jar
+software/amazon/awssdk/protocol-core/2.55.6/protocol-core-2.55.6.jar
+software/amazon/awssdk/regions/2.55.6/regions-2.55.6.jar
+software/amazon/awssdk/retries-spi/2.55.6/retries-spi-2.55.6.jar
+software/amazon/awssdk/retries/2.55.6/retries-2.55.6.jar
+software/amazon/awssdk/s3/2.55.6/s3-2.55.6.jar
+software/amazon/awssdk/sdk-core/2.55.6/sdk-core-2.55.6.jar
+software/amazon/awssdk/sts/2.55.6/sts-2.55.6.jar
+software/amazon/awssdk/third-party-jackson-core/2.55.6/third-party-jackson-core-2.55.6.jar
+software/amazon/awssdk/url-connection-client/2.55.6/url-connection-client-2.55.6.jar
+software/amazon/awssdk/utils-lite/2.55.6/utils-lite-2.55.6.jar
+software/amazon/awssdk/utils/2.55.6/utils-2.55.6.jar
+software/amazon/eventstream/eventstream/1.0.1/eventstream-1.0.1.jar
+
+# --- Hadoop ---
+com/fasterxml/woodstox/woodstox-core/5.4.0/woodstox-core-5.4.0.jar
+org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar
+org/apache/commons/commons-lang3/3.18.0/commons-lang3-3.18.0.jar
+org/apache/hadoop/hadoop-common/3.5.0/hadoop-common-3.5.0.jar
+org/apache/hadoop/thirdparty/hadoop-shaded-guava/1.5.0/hadoop-shaded-guava-1.5.0.jar
+org/codehaus/woodstox/stax2-api/4.2.2/stax2-api-4.2.2.jar
+org/apache/hadoop/hadoop-auth/3.5.0/hadoop-auth-3.5.0.jar
+org/apache/commons/commons-configuration2/2.10.1/commons-configuration2-2.10.1.jar
+org/apache/commons/commons-text/1.14.0/commons-text-1.14.0.jar
+commons-logging/commons-logging/1.3.0/commons-logging-1.3.0.jar
+org/apache/hadoop/hadoop-hdfs-client/3.5.0/hadoop-hdfs-client-3.5.0.jar

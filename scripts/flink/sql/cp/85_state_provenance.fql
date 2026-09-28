@@ -30,7 +30,9 @@
 --
 -- PARTITION BY entity_key is what makes the state per-entity: each key
 -- gets its own version chain, and the framework keys the state for us.
--- The uid is stable so state survives a redeploy.
+-- The uid is stable so state survives a redeploy — and changes only when
+-- the state's shape does: v2 added the unpublished-version buffer that
+-- lets the PTF publish in event-time order rather than arrival order.
 -- =====================================================================
 SET 'pipeline.name' = 'isotope_state_provenance';
 
@@ -47,6 +49,6 @@ FROM TABLE(
     STATE_PROVENANCE(
         input   => TABLE `entity_log` PARTITION BY `entity_key`,
         on_time => DESCRIPTOR(`event_time`),
-        uid     => 'state-provenance-v1'
+        uid     => 'state-provenance-v2'
     )
 );

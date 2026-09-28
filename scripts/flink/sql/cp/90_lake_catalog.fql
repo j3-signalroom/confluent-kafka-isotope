@@ -1,0 +1,95 @@
+-- ==========================================================================
+-- Lake catalog + per-hop table — OPTIONAL (see docs/lake.md, issue #362).
+--
+-- Applied only by IsotopeLakeJob, the lake's own CMF Application. The reports
+-- application (IsotopeReportsJob) never reads this file, so with the lake off
+-- the reports deployment is byte-identical to a build without the feature.
+--
+-- WHY A SEPARATE APPLICATION
+--
+-- The reports run as one StatementSet — one failure domain. An Iceberg sink in
+-- that set would let a catalog or object-store fault stop all seven reports.
+-- The lake job reads the same Kafka topics independently instead, so the two
+-- share nothing at runtime.
+--
+-- WHAT LANDS HERE
+--
+-- `lake.isotope.hops` — one row per produced hop, the `isotope` view verbatim
+-- (05_isotope_view.fql). The reports fold these into 1-minute windows and keep
+-- only the aggregate; the lake keeps the rows, so any trace can be pulled back
+-- at any age, and new questions are a SQL query rather than a new Flink job.
+-- ==========================================================================
+
+-- --------------------------------------------------------------------------
+-- A consumer group of the lake's own — and resume from it.
+--
+-- 00_source_table.fql declares every source with the reports' group,
+-- 'isotope-flink-reports', and 'earliest-offset'. Both are wrong here:
+--
+--   * Shared group: both jobs would commit to one group, and its lag would
+--     describe neither.
+--   * earliest-offset: the application is deployed with upgradeMode
+--     'stateless', so every redeploy starts with no checkpoint to restore —
+--     and would copy every hop into `hops` again. The reports can afford
+--     that (a replay recomputes the same windows into a Kafka topic); a lake
+--     table that only ever appends cannot, and `hops` has no content-derived
+--     key to dedup on the way `state_provenance` does.
+--
+-- So the lake resumes from its group's committed offsets, which Flink commits
+-- on every completed checkpoint, falling back to earliest only for a group
+-- that has never committed. OPTIONS hints cannot reach through the `isotope`
+-- view to its tables, so the tables are altered instead.
+-- --------------------------------------------------------------------------
+ALTER TABLE `orders.placed`                SET ('properties.group.id' = 'isotope-lake', 'scan.startup.mode' = 'group-offsets', 'properties.auto.offset.reset' = 'earliest');
+ALTER TABLE `orders.enriched`              SET ('properties.group.id' = 'isotope-lake', 'scan.startup.mode' = 'group-offsets', 'properties.auto.offset.reset' = 'earliest');
+ALTER TABLE `orders.fulfilled`             SET ('properties.group.id' = 'isotope-lake', 'scan.startup.mode' = 'group-offsets', 'properties.auto.offset.reset' = 'earliest');
+ALTER TABLE `isotope_consume_edge_markers` SET ('properties.group.id' = 'isotope-lake', 'scan.startup.mode' = 'group-offsets', 'properties.auto.offset.reset' = 'earliest');
+
+-- --------------------------------------------------------------------------
+-- The Iceberg REST catalog (k8s/base/iceberg-rest.yaml).
+--
+-- Data files go straight to RustFS through Iceberg's own S3FileIO, not the
+-- s3-fs-hadoop plugin CMF uses for artifacts — so the S3 settings are
+-- repeated here rather than inherited from the application's flinkConfiguration.
+-- Path-style access because RustFS serves buckets by path.
+-- --------------------------------------------------------------------------
+CREATE CATALOG `lake` WITH (
+    'type'                 = 'iceberg',
+    'catalog-type'         = 'rest',
+    'uri'                  = 'http://iceberg-rest.confluent.svc:8181',
+    'warehouse'            = 's3://isotope-lake/warehouse',
+    'io-impl'              = 'org.apache.iceberg.aws.s3.S3FileIO',
+    's3.endpoint'          = 'http://rustfs.confluent.svc:9000',
+    's3.path-style-access' = 'true',
+    -- The JDK's own HTTP stack for S3. The image ships no Apache or Netty HTTP
+    -- client for the AWS SDK (k8s/base/lake-jars.txt), and Iceberg's default,
+    -- 'apache', would look for one.
+    'http-client.type'     = 'urlconnection',
+    's3.access-key-id'     = 'rustfsadmin',
+    's3.secret-access-key' = 'rustfsadmin123',
+    'client.region'        = 'us-east-1'
+);
+
+CREATE DATABASE IF NOT EXISTS `lake`.`isotope`;
+
+-- --------------------------------------------------------------------------
+-- hops — one row per produced hop.
+--
+-- Unpartitioned on purpose: at demo volume a partition spec only multiplies
+-- the small files each checkpoint commits. A real deployment would partition
+-- by day(event_time), which Flink DDL cannot express — set it from the
+-- catalog side (Spark/Trino ALTER TABLE ... ADD PARTITION FIELD).
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `lake`.`isotope`.`hops` (
+    `trace_id`       STRING,
+    `origin_ts_ms`   BIGINT,
+    `origin_service` STRING,
+    `pipeline`       STRING,
+    `this_service`   STRING,
+    `this_topic`     STRING,
+    `hop_count`      INT,
+    `event_time`     TIMESTAMP_LTZ(3),
+    `latency_ms`     INT
+) WITH (
+    'format-version' = '2'
+);

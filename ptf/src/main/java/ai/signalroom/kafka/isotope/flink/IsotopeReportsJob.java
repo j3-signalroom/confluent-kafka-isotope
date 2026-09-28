@@ -189,7 +189,7 @@ public final class IsotopeReportsJob {
     }
 
     /** Reads a UTF-8 classpath resource, failing loudly if it is missing. */
-    private static String readResource(String path) {
+    static String readResource(String path) {
         ClassLoader cl = IsotopeReportsJob.class.getClassLoader();
         try (InputStream in = cl.getResourceAsStream(path)) {
             if (in == null) {

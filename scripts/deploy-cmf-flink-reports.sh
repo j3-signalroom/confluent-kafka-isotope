@@ -18,9 +18,11 @@
 #   2. upload the shadow jar to CMF as a cmf:// artifact (RustFS-backed)
 #   3. render + POST the FlinkApplication (image=$POOL_IMAGE, jarURI=cmf://…)
 #   4. wait for the application job to reach RUNNING
+#   5. with LAKE=true, repeat 3–4 for the lake application (same artifact,
+#      entryClass IsotopeLakeJob — see docs/lake.md)
 #
 # Flow (down):
-#   1. delete the application + its cmf:// artifact
+#   1. delete the application(s) + their shared cmf:// artifact
 #   2. purge leftover CMF statements / compute pools (see purge_statements — the
 #      retired statement path leaves records that crashloop on every restart)
 #   3. delete the sink topics
@@ -60,16 +62,29 @@ MERGE_PROVENANCE="${MERGE_PROVENANCE:-false}"
 # CCAF has no equivalent switch; see docs/state-provenance.md section 5.0.
 STATE_PROVENANCE="${STATE_PROVENANCE:-false}"
 
+# Opt-in Iceberg lake (docs/lake.md). Off by default: it runs a SECOND
+# application from the same artifact (entryClass IsotopeLakeJob) that copies
+# per-hop history — and, with STATE_PROVENANCE, the provenance stream — into
+# Iceberg tables behind the REST catalog `make lake-up` deploys. A separate
+# application, not more INSERTs here, so a lake fault cannot stop the reports.
+#   LAKE=true scripts/deploy-cmf-flink-reports.sh up
+LAKE="${LAKE:-false}"
+LAKE_APP_NAME="${LAKE_APP_NAME:-isotope-lake}"
+LAKE_MANIFEST="${LAKE_MANIFEST:-k8s/base/cmf-flink-lake-application.json}"
+
+# Renders a flag list as the JSON array the manifests' "args" expects.
+json_args() { if [ $# -eq 0 ]; then echo '[]'; else echo "[$(printf '"%s",' "$@" | sed 's/,$//')]"; fi; }
+
 # if/then, not `[ ... ] && ...`: under `set -e` a bare test-and-append exits the
 # script the moment a flag is false.
 JOB_ARGS=()
-if [ "${MERGE_PROVENANCE}" = "true" ]; then JOB_ARGS+=('"--merge-provenance"'); fi
-if [ "${STATE_PROVENANCE}" = "true" ]; then JOB_ARGS+=('"--state-provenance"'); fi
-if [ ${#JOB_ARGS[@]} -eq 0 ]; then
-    APP_JOB_ARGS='[]'
-else
-    APP_JOB_ARGS="[$(IFS=,; echo "${JOB_ARGS[*]}")]"
-fi
+if [ "${MERGE_PROVENANCE}" = "true" ]; then JOB_ARGS+=("--merge-provenance"); fi
+if [ "${STATE_PROVENANCE}" = "true" ]; then JOB_ARGS+=("--state-provenance"); fi
+APP_JOB_ARGS=$(json_args ${JOB_ARGS[@]+"${JOB_ARGS[@]}"})
+# The lake copies the provenance topic only when the reports are producing it.
+LAKE_ARGS=()
+if [ "${STATE_PROVENANCE}" = "true" ]; then LAKE_ARGS+=("--state-provenance"); fi
+LAKE_JOB_ARGS=$(json_args ${LAKE_ARGS[@]+"${LAKE_ARGS[@]}"})
 
 CMF_API="http://localhost:18080/cmf/api/v1"
 ENV_API="${CMF_API}/environments/${CMF_ENV}"
@@ -178,8 +193,39 @@ purge_statements() {
         | xargs -r kubectl delete cm -n "${NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
 }
 
+# Renders a FlinkApplication manifest, recreates the application, and waits for
+# its job to reach RUNNING. Recreate rather than update: the spec and the jar
+# version may both change between runs.
+#   deploy_application <name> <manifest> <description>
+deploy_application() {
+    local name="$1" manifest="$2" what="$3" code state=""
+    APP_NAME="${APP_NAME}" LAKE_APP_NAME="${LAKE_APP_NAME}" POOL_IMAGE="${POOL_IMAGE}" APP_FLINK_VERSION="${APP_FLINK_VERSION}" \
+        CMF_ENV_NAME="${CMF_ENV}" APP_ARTIFACT_NAME="${ARTIFACT_NAME}" APP_ARTIFACT_VERSION="${VERSION}" \
+        RUSTFS_S3_ENDPOINT="${RUSTFS_S3_ENDPOINT}" RUSTFS_ACCESS_KEY="${RUSTFS_ACCESS_KEY}" RUSTFS_SECRET_KEY="${RUSTFS_SECRET_KEY}" \
+        APP_JOB_ARGS="${APP_JOB_ARGS}" LAKE_JOB_ARGS="${LAKE_JOB_ARGS}" \
+        envsubst < "${manifest}" > "/tmp/cmf-${name}.json"
+    curl -s -o /dev/null -X DELETE "${ENV_API}/applications/${name}"; sleep 3
+    code=$(curl -s -o "/tmp/cmf-${name}-out.json" -w "%{http_code}" -X POST "${ENV_API}/applications" \
+        -H "Content-Type: application/json" --data @"/tmp/cmf-${name}.json")
+    if [ "${code}" != "200" ] && [ "${code}" != "201" ]; then
+        echo "✘ application '${name}' create failed (HTTP ${code}):"; cat "/tmp/cmf-${name}-out.json"; exit 1
+    fi
+
+    echo "→ Waiting for '${name}' to reach RUNNING (up to ~3m)..."
+    for _ in $(seq 1 30); do
+        state=$(curl -s "${ENV_API}/applications/${name}" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('status',{}).get('jobStatus',{}).get('state',''))" 2>/dev/null)
+        [ "${state}" = "RUNNING" ] && { echo "✔ Application '${name}' job is RUNNING (${what})."; return 0; }
+        sleep 6
+    done
+    echo "⚠ '${name}' not RUNNING yet (last: ${state:-unknown}). Check: kubectl logs -n ${NAMESPACE} -l app=${name}"
+}
+
 if [ "${ACTION}" = "up" ]; then
     [ -f "${APP_JAR}" ] || { echo "✘ ${APP_JAR} not found. Run './gradlew :ptf:shadowJar'." >&2; exit 1; }
+    if [ "${LAKE}" = "true" ] && ! kubectl get deployment iceberg-rest -n "${NAMESPACE}" >/dev/null 2>&1; then
+        echo "✘ LAKE=true but no Iceberg REST catalog in '${NAMESPACE}'. Run 'make lake-up'." >&2; exit 1
+    fi
     echo "→ Pre-creating ${#EVENT_TOPICS[@]} source + ${#SINK_TOPICS[@]} sink topics on ${KAFKA_POD}..."
     for t in "${EVENT_TOPICS[@]}" "${SINK_TOPICS[@]}"; do echo "  ↳ ${t}"; create_topic "${t}"; done
     # The provenance topic IS the lineage record (docs/state-provenance.md 6.0):
@@ -203,31 +249,20 @@ if [ "${ACTION}" = "up" ]; then
     echo "  ✔ artifact '${ARTIFACT_NAME}' version ${VERSION} → cmf://${CMF_ENV}/${ARTIFACT_NAME}?version=${VERSION}"
 
     echo "→ Deploying FlinkApplication '${APP_NAME}' (image=${POOL_IMAGE}, ${APP_FLINK_VERSION}, merge-provenance=${MERGE_PROVENANCE}, state-provenance=${STATE_PROVENANCE})..."
-    APP_NAME="${APP_NAME}" POOL_IMAGE="${POOL_IMAGE}" APP_FLINK_VERSION="${APP_FLINK_VERSION}" \
-        CMF_ENV_NAME="${CMF_ENV}" APP_ARTIFACT_NAME="${ARTIFACT_NAME}" APP_ARTIFACT_VERSION="${VERSION}" \
-        RUSTFS_S3_ENDPOINT="${RUSTFS_S3_ENDPOINT}" RUSTFS_ACCESS_KEY="${RUSTFS_ACCESS_KEY}" RUSTFS_SECRET_KEY="${RUSTFS_SECRET_KEY}" \
-        APP_JOB_ARGS="${APP_JOB_ARGS}" \
-        envsubst < "${APP_MANIFEST}" > /tmp/cmf-app.json
-    # Recreate for idempotency (spec/jar version may change between runs).
-    curl -s -o /dev/null -X DELETE "${ENV_API}/applications/${APP_NAME}"; sleep 3
-    CODE=$(curl -s -o /tmp/cmf-app-out.json -w "%{http_code}" -X POST "${ENV_API}/applications" \
-        -H "Content-Type: application/json" --data @/tmp/cmf-app.json)
-    if [ "${CODE}" != "200" ] && [ "${CODE}" != "201" ]; then
-        echo "✘ application create failed (HTTP ${CODE}):"; cat /tmp/cmf-app-out.json; exit 1
-    fi
+    deploy_application "${APP_NAME}" "${APP_MANIFEST}" "all 7 reports"
 
-    echo "→ Waiting for the application job to reach RUNNING (up to ~3m)..."
-    for _ in $(seq 1 30); do
-        STATE=$(curl -s "${ENV_API}/applications/${APP_NAME}" \
-            | python3 -c "import sys,json;print(json.load(sys.stdin).get('status',{}).get('jobStatus',{}).get('state',''))" 2>/dev/null)
-        [ "${STATE}" = "RUNNING" ] && { echo "✔ Application '${APP_NAME}' job is RUNNING (all 7 reports)."; break; }
-        sleep 6
-    done
-    [ "${STATE:-}" = "RUNNING" ] || echo "⚠ Not RUNNING yet (last: ${STATE:-unknown}). Check: kubectl logs -n ${NAMESPACE} -l app=${APP_NAME}"
+    if [ "${LAKE}" = "true" ]; then
+        echo "→ Deploying FlinkApplication '${LAKE_APP_NAME}' (entryClass IsotopeLakeJob, args=${LAKE_JOB_ARGS})..."
+        deploy_application "${LAKE_APP_NAME}" "${LAKE_MANIFEST}" "Iceberg lake"
+    fi
     echo "  Inspect: Control Center → Flink, or the CMF applications API."
 else
     cmf_pf_start
-    echo "→ Deleting FlinkApplication '${APP_NAME}'..."
+    # The lake application is deleted unconditionally, like the optional
+    # topics below: a `down` without LAKE=true must not strand one an earlier
+    # `up` created — and it must go before the artifact both reference.
+    echo "→ Deleting FlinkApplications '${LAKE_APP_NAME}' and '${APP_NAME}'..."
+    curl -s -o /dev/null -w "  delete lake app: HTTP %{http_code}\n" -X DELETE "${ENV_API}/applications/${LAKE_APP_NAME}"
     curl -s -o /dev/null -w "  delete app: HTTP %{http_code}\n" -X DELETE "${ENV_API}/applications/${APP_NAME}"
     echo "→ Deleting artifact '${ARTIFACT_NAME}'..."
     curl -s -o /dev/null -w "  delete artifact: HTTP %{http_code}\n" -X DELETE "${ENV_API}/artifacts/${ARTIFACT_NAME}"

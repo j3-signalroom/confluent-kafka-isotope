@@ -1,0 +1,160 @@
+# Iceberg REST catalog — the opt-in lake for state provenance and per-hop trace
+# history (docs/lake.md, issue #362).
+#
+# WHY THIS EXISTS
+# `docs/state-provenance.md` 5.0 leaves ancestry "queryable, not traversable":
+# Flink SQL has no recursive CTEs, so walking more than one generation of
+# `parents` belongs in a store fed by the provenance topic. This is that store.
+# The lake application (IsotopeLakeJob) writes Iceberg tables through this
+# catalog; DuckDB on the host reads them back (scripts/lake-query.sh).
+#
+# WHY THE REST FIXTURE (not Polaris / Lakekeeper / Nessie)
+# The lake has one writer and one reader on a single-node demo cluster. The
+# Apache Iceberg REST fixture is the reference REST server — one pod, a JDBC
+# catalog underneath — and needs no auth server, no database pod, and no
+# bootstrap step. The REST protocol is versioned independently of the Iceberg
+# library, so the 1.10.x server serves the 1.11.x Flink runtime without issue.
+#
+# WHERE THE DATA LIVES
+# Table metadata is a SQLite file on a PVC (so the catalog survives a pod
+# restart and keeps pointing at the right metadata files). Table data and
+# metadata files live in the `isotope-lake` bucket on the RustFS instance
+# CMF already uses (k8s/base/rustfs.yaml) — no second object store.
+#
+# Credentials are the demo-grade RustFS ones, same as rustfs.yaml.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: iceberg-rest-data
+  namespace: confluent
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iceberg-rest
+  namespace: confluent
+  labels:
+    app: iceberg-rest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iceberg-rest
+  strategy:
+    type: Recreate          # single RWO PVC holding the SQLite catalog
+  template:
+    metadata:
+      labels:
+        app: iceberg-rest
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: iceberg-rest
+          image: apache/iceberg-rest-fixture:1.10.1
+          env:
+            # The fixture maps CATALOG_* env vars to catalog properties:
+            # strip the prefix, lowercase, `__` → `-`, `_` → `.`.
+            - name: CATALOG_CATALOG__IMPL
+              value: "org.apache.iceberg.jdbc.JdbcCatalog"
+            - name: CATALOG_URI
+              value: "jdbc:sqlite:file:/data/iceberg_catalog.db"
+            - name: CATALOG_JDBC_USER
+              value: "user"
+            - name: CATALOG_JDBC_PASSWORD
+              value: "password"
+            - name: CATALOG_WAREHOUSE
+              value: "s3://isotope-lake/warehouse"
+            - name: CATALOG_IO__IMPL
+              value: "org.apache.iceberg.aws.s3.S3FileIO"
+            - name: CATALOG_S3_ENDPOINT
+              value: "http://rustfs.confluent.svc:9000"
+            # RustFS serves buckets path-style; virtual-host style would try
+            # to resolve isotope-lake.rustfs.confluent.svc.
+            - name: CATALOG_S3_PATH__STYLE__ACCESS
+              value: "true"
+            - name: AWS_ACCESS_KEY_ID
+              value: "rustfsadmin"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "rustfsadmin123"
+            - name: AWS_REGION
+              value: "us-east-1"
+          ports:
+            - name: http
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /v1/config
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              memory: "512Mi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: iceberg-rest-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iceberg-rest
+  namespace: confluent
+  labels:
+    app: iceberg-rest
+spec:
+  selector:
+    app: iceberg-rest
+  ports:
+    - name: http          # Flink talks to http://iceberg-rest.confluent.svc:8181
+      port: 8181
+      targetPort: 8181
+---
+# One-shot bucket creation for the lake, mirroring rustfs-make-bucket. Kept in
+# this manifest rather than rustfs.yaml so the lake stays fully opt-in: without
+# `make lake-up`, RustFS holds only cmf-artifacts, exactly as before.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: iceberg-lake-make-bucket
+  namespace: confluent
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: aws
+          image: amazon/aws-cli:2.37.1
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: "rustfsadmin"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "rustfsadmin123"
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
+            - name: AWS_ENDPOINT_URL
+              value: "http://rustfs.confluent.svc:9000"
+          command:
+            - sh
+            - -c
+            - |
+              until aws s3api list-buckets >/dev/null 2>&1; do
+                echo "waiting for rustfs..."; sleep 3;
+              done
+              aws s3api head-bucket --bucket isotope-lake 2>/dev/null \
+                || aws s3api create-bucket --bucket isotope-lake
+              echo "bucket isotope-lake ready"

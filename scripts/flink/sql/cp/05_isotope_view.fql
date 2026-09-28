@@ -25,15 +25,26 @@ SELECT
     CAST(CAST(`headers`['x-isotope-hop-count']      AS STRING)    AS INT)    AS hop_count,
     `event_time`,
     -- Latency from origin to this hop, in milliseconds.
-    -- TIMESTAMPDIFF is portable across CCAF and CP Flink and preserves
-    -- millisecond precision when both operands are TIMESTAMP_LTZ(3).
-    TIMESTAMPDIFF(
-        MILLISECOND,
-        TO_TIMESTAMP_LTZ(
-            CAST(CAST(`headers`['x-isotope-origin-ts'] AS STRING) AS BIGINT),
-            3),
-        `event_time`
-    ) AS latency_ms
+    --
+    -- NOT TIMESTAMPDIFF(MILLISECOND, ...): on Flink 2.1 it truncates to whole
+    -- seconds — 177ms comes back as 0, 1s as 1000 — so every sub-second hop
+    -- (which is every hop in the demo) read as 0 latency. Instead the event's
+    -- epoch milliseconds are rebuilt exactly and the origin's subtracted:
+    --
+    --   * TIMESTAMPDIFF(SECOND, epoch, event_time) — whole seconds between two
+    --     INSTANTS, so table.local-time-zone cannot shift it (EXTRACT(EPOCH)
+    --     would: it reads the local wall clock). CAST to BIGINT before the
+    --     * 1000, or INT overflows.
+    --   * EXTRACT(MILLISECOND) — the millisecond-of-second field (0..999),
+    --     which no real zone offset changes.
+    --
+    -- Pinned by IsotopeViewSqlTest under UTC and America/New_York. The outer
+    -- CAST keeps latency_ms an INT, the type every consumer was written for.
+    CAST(
+        CAST(TIMESTAMPDIFF(SECOND, TO_TIMESTAMP_LTZ(0, 3), `event_time`) AS BIGINT) * 1000
+        + EXTRACT(MILLISECOND FROM `event_time`)
+        - CAST(CAST(`headers`['x-isotope-origin-ts'] AS STRING) AS BIGINT)
+    AS INT) AS latency_ms
 FROM isotope_raw
 WHERE `headers`['x-isotope-trace-id']        IS NOT NULL
   -- Exclude consume-edge markers (records on

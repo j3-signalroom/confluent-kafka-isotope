@@ -52,6 +52,11 @@ t-digest             = { module = "com.tdunning:t-digest",                 versi
 flink-table-api-java-bridge = { module = "org.apache.flink:flink-table-api-java-bridge", version.ref = "flink" }
 flink-streaming-java        = { module = "org.apache.flink:flink-streaming-java",        version.ref = "flink" }
 flink-clients               = { module = "org.apache.flink:flink-clients",               version.ref = "flink" }
+# Test-only: the planner and runtime, so :ptf tests can execute real Flink SQL
+# (the isotope view's expressions, the PTFs' timer ordering) on a local
+# MiniCluster instead of trusting a deploy to find out.
+flink-table-planner-loader  = { module = "org.apache.flink:flink-table-planner-loader",  version.ref = "flink" }
+flink-table-runtime         = { module = "org.apache.flink:flink-table-runtime",         version.ref = "flink" }
 
 # Protobuf topic-value format (used by :app for DemoEvent on iso-* topics).
 kafka-protobuf-serializer = { module = "io.confluent:kafka-protobuf-serializer", version.ref = "confluent" }

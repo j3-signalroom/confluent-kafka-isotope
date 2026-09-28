@@ -1,0 +1,43 @@
+-- ==========================================================================
+-- Lake table for state provenance — OPTIONAL (see docs/lake.md).
+--
+-- Applied by IsotopeLakeJob only when it runs with --state-provenance, which
+-- the deploy script passes when both ENABLE_LAKE and ENABLE_STATE_PROVENANCE
+-- are on. Depends on 09_state_provenance_sinks.fql for the Kafka-side table
+-- and on 90_lake_catalog.fql for the catalog.
+--
+-- WHY THIS IS THE LAKE'S STRONGEST FIT
+--
+-- docs/state-provenance.md 5.0 leaves ancestry "queryable, not traversable":
+-- Flink SQL has no recursive CTEs, so walking more than one generation of
+-- `parents` needs a store fed by the provenance topic. This table is that
+-- store — scripts/lake-query.sh walks it with WITH RECURSIVE.
+--
+-- The provenance stream is append-only and every version_id is content-
+-- addressed (StateVersion), so this is a pure-append Iceberg table: no
+-- equality deletes, no merge-on-read, and a replay that re-emits a version
+-- re-emits the same ID, so a dedup on version_id is always safe.
+-- ==========================================================================
+
+-- The lake's own consumer group, resumed on redeploy, for the reasons given in
+-- 90_lake_catalog.fql. `cp-flink-reports-down` deletes this topic, and Kafka
+-- drops a group's committed offsets along with a deleted topic, so after the
+-- next `up` the lake reads the recreated topic from earliest. The reports
+-- re-derive the same versions from the same log, and a version_id is content-
+-- addressed, so those rows are duplicates the query side drops, not new versions.
+ALTER TABLE `isotope_state_provenance` SET ('properties.group.id' = 'isotope-lake', 'scan.startup.mode' = 'group-offsets', 'properties.auto.offset.reset' = 'earliest');
+
+-- Columns mirror the Kafka topic exactly (09_state_provenance_sinks.fql).
+-- `parents` stays an ARRAY — an Iceberg list<string> — so the parent set keeps
+-- travelling with the version it describes, as it does on the topic.
+CREATE TABLE IF NOT EXISTS `lake`.`isotope`.`state_provenance` (
+    `version_id`      STRING,
+    `entity_key`      STRING,
+    `source_name`     STRING,
+    `op`              STRING,
+    `parents`         ARRAY<STRING>,
+    `parent_overflow` INT,
+    `emitted_at`      BIGINT
+) WITH (
+    'format-version' = '2'
+);
