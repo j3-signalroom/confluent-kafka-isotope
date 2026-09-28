@@ -1,0 +1,26 @@
+-- =====================================================================
+-- Lake: state-provenance version chains — OPTIONAL (see docs/lake.md).
+--
+-- Reads the provenance TOPIC, not the PTF. The reports application owns
+-- STATE_PROVENANCE and its keyed state; recomputing it here would mean two
+-- jobs deriving the same versions from the same log — identical IDs, since
+-- they are content-addressed, but twice the state for nothing. The topic is
+-- pinned to infinite retention (deploy-cmf-flink-reports.sh), so the lake
+-- can always rebuild from its first record.
+--
+-- Depends on:
+--   - `isotope_state_provenance` (09_state_provenance_sinks.fql)
+--   - `lake`.`isotope`.`state_provenance` (91_lake_state_provenance_sink.fql)
+-- =====================================================================
+SET 'pipeline.name' = 'isotope_lake_state_provenance';
+
+INSERT INTO `lake`.`isotope`.`state_provenance`
+SELECT
+    `version_id`,
+    `entity_key`,
+    `source_name`,
+    `op`,
+    `parents`,
+    `parent_overflow`,
+    `emitted_at`
+FROM `isotope_state_provenance`;

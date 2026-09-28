@@ -17,7 +17,10 @@ import org.apache.flink.types.Row;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * State-level provenance collector — a version chain per entity, with each
@@ -57,8 +60,8 @@ import java.util.List;
  * otherwise run, and in exchange nothing downstream ever sees a changelog.
  *
  * <h2>CCAF state constraints</h2>
- * {@link EntityState} deliberately uses plain {@code String}/{@code List}
- * fields. CCAF rejects {@code MapView}/{@code ListView} in PTF state (a plain
+ * {@link EntityState} deliberately uses plain {@code String}/{@code List}/{@code Map}
+ * fields, each with a default. CCAF rejects {@code MapView}/{@code ListView} in PTF state (a plain
  * {@code Map}/{@code List} is the documented replacement) and still rejects a
  * {@code byte[]} map <em>value</em>, where a Base64 {@code String} works. Both
  * fail at {@code CREATE FUNCTION} time rather than at runtime, so a green run
@@ -78,19 +81,51 @@ public class StateProvenancePTF extends ProcessTableFunction<Row> {
     private static final int PARENT_CAP = 512;
 
     /**
-     * Per-entity state. Mutated in place during {@link #eval}; the framework
-     * persists it across invocations. Plain fields only — see the class javadoc
-     * on CCAF's PTF state rules.
+     * Separator inside an {@link EntityState#unpublished} value. NUL cannot
+     * occur in a topic name or in {@code op}, the same reasoning
+     * {@link StateVersion} applies to its preimage.
+     */
+    private static final String SEP = "\u0000";
+
+    /** Encodes a null {@code source_name} inside an unpublished value. */
+    private static final String NULL_SOURCE = "\u0001";
+
+    /**
+     * Per-entity state. Mutated in place during {@link #eval} and
+     * {@link #onTimer}; the framework persists it across invocations. Plain
+     * fields with defaults only — see the class javadoc on CCAF's PTF state rules.
      */
     public static class EntityState {
+        /** The partition key, captured once so {@link #onTimer} (no input row) can emit it. */
+        public String entityKey;
         /** Version ID of the last state published for this entity. */
         public String currentVersionId;
         /** Input versions folded in since that publication. */
-        public List<String> pendingParents;
+        public List<String> pendingParents = new ArrayList<>();
         /** Parents dropped past {@link #PARENT_CAP} since that publication. */
-        public Integer pendingOverflow;
+        public Integer pendingOverflow = 0;
+        /**
+         * Versions seen but not yet published, keyed by version ID; the value is
+         * {@code emitted_at SEP op SEP source_name}. A plain {@code Map} with a
+         * scalar {@code String} value — the shape CCAF accepts (see the class
+         * javadoc). Published in event-time order by {@link #onTimer}.
+         */
+        public Map<String, String> unpublished = new HashMap<>();
     }
 
+    /**
+     * Parks the version until the watermark passes its event time.
+     *
+     * <p>Publishing here — as this function once did — chains versions in
+     * <em>arrival</em> order. {@code entity_log} is a {@code UNION ALL} of one
+     * table per topic, so an entity's records reach this operator in whatever
+     * order the three source readers happen to deliver them, and the chain came
+     * out as {@code enriched <- fulfilled <- placed} as often as the true
+     * {@code placed <- enriched <- fulfilled}. {@code REQUIRE_ON_TIME} gives the
+     * function a time; it does not sort its input. The event-time timer does:
+     * it fires only once the watermark guarantees nothing earlier is still in
+     * flight.
+     */
     public void eval(
             Context ctx,
             @StateHint EntityState state,
@@ -110,16 +145,46 @@ public class StateProvenancePTF extends ProcessTableFunction<Row> {
 
         // Idempotence, not an optimization. The same bytes at the same event
         // time are the same state, so a redelivered record must not append a
-        // second, self-referential version to the chain.
-        if (versionId.equals(state.currentVersionId)) {
+        // second, self-referential version to the chain — whether the first
+        // copy is already published or still waiting for its timer.
+        if (versionId.equals(state.currentVersionId) || state.unpublished.containsKey(versionId)) {
             return;
         }
 
-        if (state.pendingParents == null) {
-            state.pendingParents = new ArrayList<>();
-            state.pendingOverflow = 0;
-        }
+        state.entityKey = entityKey;
+        state.unpublished.put(versionId,
+                eventMs + SEP + op + SEP + (sourceName == null ? NULL_SOURCE : sourceName));
+        // Unnamed timers coalesce per timestamp, so versions sharing an event
+        // time share one firing. A record already behind the watermark gets a
+        // timer in the past, which fires on the next watermark: late versions
+        // are still published, after everything already on the chain.
+        ctx.timeContext(Instant.class).registerOnTime(eventTime);
+    }
 
+    /**
+     * Publishes every parked version at or before the firing time, oldest
+     * first. Version IDs lead with 48 bits of event time, so their hex sorts
+     * chronologically, and ties at one millisecond break on the content digest
+     * — the same order on every run and every runtime.
+     */
+    public void onTimer(OnTimerContext ctx, EntityState state) {
+        final long firedMs = ctx.timeContext(Instant.class).time().toEpochMilli();
+
+        final List<String> due = new ArrayList<>();
+        for (Map.Entry<String, String> e : state.unpublished.entrySet()) {
+            if (Long.parseLong(e.getValue().substring(0, e.getValue().indexOf(SEP))) <= firedMs) {
+                due.add(e.getKey());
+            }
+        }
+        Collections.sort(due);
+
+        for (String versionId : due) {
+            final String[] f = state.unpublished.remove(versionId).split(SEP, 3);
+            publish(state, versionId, Long.parseLong(f[0]), f[1], NULL_SOURCE.equals(f[2]) ? null : f[2]);
+        }
+    }
+
+    private void publish(EntityState state, String versionId, long eventMs, String op, String sourceName) {
         // The state this version supersedes is its parent. A fan-in stage folds
         // several inputs before publishing, which is why this is a set rather
         // than a single column; the demo pipeline is 1:1, so it holds one.
@@ -134,7 +199,7 @@ public class StateProvenancePTF extends ProcessTableFunction<Row> {
 
         collect(Row.of(
                 versionId,
-                entityKey,
+                state.entityKey,
                 sourceName,
                 op,
                 state.pendingParents.toArray(new String[0]),

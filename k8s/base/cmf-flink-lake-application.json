@@ -1,0 +1,30 @@
+{
+  "apiVersion": "cmf.confluent.io/v1",
+  "kind": "FlinkApplication",
+  "metadata": {
+    "name": "${LAKE_APP_NAME}"
+  },
+  "spec": {
+    "image": "${POOL_IMAGE}",
+    "flinkVersion": "${APP_FLINK_VERSION}",
+    "flinkConfiguration": {
+      "taskmanager.numberOfTaskSlots": "2",
+      "kafka.bootstrap.servers": "kafka:9071",
+      "s3.endpoint": "${RUSTFS_S3_ENDPOINT}",
+      "s3.path.style.access": "true",
+      "s3.access-key": "${RUSTFS_ACCESS_KEY}",
+      "s3.secret-key": "${RUSTFS_SECRET_KEY}"
+    },
+    "serviceAccount": "flink",
+    "jobManager": { "resource": { "memory": "1024m", "cpu": 0.25 } },
+    "taskManager": { "resource": { "memory": "2048m", "cpu": 0.5 } },
+    "job": {
+      "entryClass": "ai.signalroom.kafka.isotope.flink.IsotopeLakeJob",
+      "jarURI": "cmf://${CMF_ENV_NAME}/${APP_ARTIFACT_NAME}?version=${APP_ARTIFACT_VERSION}",
+      "args": ${LAKE_JOB_ARGS},
+      "state": "running",
+      "parallelism": 1,
+      "upgradeMode": "stateless"
+    }
+  }
+}

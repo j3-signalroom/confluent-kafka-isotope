@@ -112,6 +112,17 @@ FLINK_SQL_CONTAINERFILE ?= k8s/base/flink-sql-isotope.Containerfile
 # reads directly, so either spelling works through make.
 ENABLE_MERGE_PROVENANCE ?= $(MERGE_PROVENANCE)
 
+# Optional Iceberg lake — see docs/lake.md. CP only, off by default; on, it
+# deploys an Iceberg REST catalog ('make lake-up') and a second CMF Application
+# (IsotopeLakeJob) that copies per-hop history — plus the state-provenance
+# stream when ENABLE_STATE_PROVENANCE=true — into Iceberg on RustFS.
+#   make cp-flink-reports-up ENABLE_LAKE=true [ENABLE_STATE_PROVENANCE=true]
+# Falls back to LAKE, the env var the CP deploy script reads directly.
+ENABLE_LAKE         ?= $(LAKE)
+LAKE_MANIFEST       ?= k8s/base/iceberg-rest.yaml
+LAKE_APP_NAME       ?= isotope-lake
+LAKE_APP_MANIFEST   ?= k8s/base/cmf-flink-lake-application.json
+
 # Optional metrics showcase (Prometheus + Grafana) — see k8s/monitoring/README.md
 MONITORING_MANIFEST ?= k8s/monitoring
 
@@ -663,13 +674,18 @@ flink-image-build: ## Build the custom cp-flink image (Kafka+Avro connectors + S
 	@# On the containerd runtime each --build-opt is handed to buildctl verbatim as
 	@# --<opt>, so build args must be spelled opt=build-arg:K=V (→ --opt=build-arg:K=V);
 	@# the Docker-era build-arg=K=V becomes an unknown --build-arg flag.
+	@# minikube image build exits 0 even when buildctl fails, and a stale image
+	@# from an earlier build keeps the name in containerd — so checking that the
+	@# image exists passes a failed rebuild. Scan the build log for BuildKit's
+	@# failure line instead, then confirm the image landed.
 	minikube image build \
 		-t $(POOL_IMAGE) \
 		--build-opt=opt=build-arg:FLINK_IMAGE=$(FLINK_IMAGE) \
 		$(foreach v,$(if $(MINIKUBE_HTTP_PROXY),$(PROXY_ENV_VARS)),--build-opt=opt=build-arg:$(v)) \
 		-f $(notdir $(FLINK_SQL_CONTAINERFILE)) \
-		$(dir $(FLINK_SQL_CONTAINERFILE))
-	@# minikube image build exits 0 even when buildctl fails, so confirm the image landed.
+		$(dir $(FLINK_SQL_CONTAINERFILE)) 2>&1 | tee /tmp/isotope-flink-image-build.log
+	@! grep -q 'failed to solve' /tmp/isotope-flink-image-build.log \
+		|| (echo "✘ $(POOL_IMAGE) build failed (see output above); any image by that name is a stale earlier build." && exit 1)
 	@minikube ssh -- sudo ctr -n k8s.io images ls -q | grep -q '$(POOL_IMAGE)' \
 		|| (echo "✘ $(POOL_IMAGE) is not in the node's containerd store — the build failed (see output above)." && exit 1)
 	@echo "✔ $(POOL_IMAGE) built into the minikube node's containerd image store."
@@ -682,6 +698,32 @@ rustfs-down: ## Delete RustFS and its data (safe to run even if not deployed)
 	@kubectl delete -f $(RUSTFS_MANIFEST) --ignore-not-found
 	@kubectl delete pvc rustfs-data -n $(NAMESPACE) --ignore-not-found
 	@echo "✔ RustFS removed."
+
+# ------------------------------------------------------------------------------
+# Iceberg lake (optional) — REST catalog over a RustFS bucket. See docs/lake.md.
+# ------------------------------------------------------------------------------
+.PHONY: lake-up
+lake-up: rustfs-up ## Deploy the Iceberg REST catalog and create the isotope-lake bucket on RustFS
+	@echo "→ Deploying the Iceberg REST catalog from $(LAKE_MANIFEST)..."
+	@test -f $(LAKE_MANIFEST) || (echo "✘ $(LAKE_MANIFEST) not found." && exit 1)
+	kubectl apply -f $(LAKE_MANIFEST)
+	@kubectl rollout status deployment/iceberg-rest -n $(NAMESPACE) --timeout=180s
+	@kubectl wait --for=condition=complete job/iceberg-lake-make-bucket -n $(NAMESPACE) --timeout=120s
+	@echo "✔ Iceberg REST catalog ready at http://iceberg-rest.$(NAMESPACE).svc:8181 (warehouse: s3://isotope-lake/warehouse)."
+
+.PHONY: lake-down
+lake-down: ## Delete the Iceberg REST catalog and the lake's data (safe to run even if not deployed)
+	@echo "→ Deleting the Iceberg REST catalog..."
+	@kubectl delete -f $(LAKE_MANIFEST) --ignore-not-found
+	@kubectl delete pvc iceberg-rest-data -n $(NAMESPACE) --ignore-not-found
+	@# The bucket lives on RustFS, which outlives the catalog; without this a
+	@# fresh catalog would sit over orphaned table files from the last one.
+	@kubectl run lake-rm-bucket -n $(NAMESPACE) --rm -i --restart=Never --quiet \
+		--image=amazon/aws-cli:2.37.1 \
+		--env=AWS_ACCESS_KEY_ID=$(RUSTFS_ACCESS_KEY) --env=AWS_SECRET_ACCESS_KEY=$(RUSTFS_SECRET_KEY) \
+		--env=AWS_DEFAULT_REGION=us-east-1 --env=AWS_ENDPOINT_URL=$(RUSTFS_S3_ENDPOINT) \
+		-- s3 rb s3://isotope-lake --force >/dev/null 2>&1 || true
+	@echo "✔ Iceberg lake removed."
 
 # ------------------------------------------------------------------------------
 # Phase 6: Apache Flink
@@ -703,11 +745,15 @@ flink-operator-install: namespace ## Install the Confluent Flink Kubernetes Oper
 	helm repo update
 	# CMF requires the Confluent-packaged operator (confluentinc/flink-kubernetes-operator),
 	# NOT the Apache OSS operator. watchNamespaces scopes it to the confluent namespace.
+	# The chart requests 2 full CPUs for the operator — a third of the minikube
+	# node, idle between reconciles. Requesting 500m (limit left at 2, so it can
+	# still burst) is what leaves room to schedule the optional lake application.
 	helm upgrade --install cp-flink-kubernetes-operator confluentinc/flink-kubernetes-operator \
 		--version "~$(FLINK_OPERATOR_VER)" \
 		--namespace $(NAMESPACE) \
 		--set watchNamespaces="{$(NAMESPACE)}" \
-		--set webhook.create=false
+		--set webhook.create=false \
+		--set operatorPod.resources.requests.cpu=500m
 	@echo "✔ Confluent Flink Kubernetes Operator $(FLINK_OPERATOR_VER) installed."
 
 .PHONY: flink-operator-status
@@ -799,19 +845,21 @@ reports-jar: ## Build the reports application shadow JAR (IsotopeReportsJob + 3 
 	./gradlew :ptf:shadowJar -q
 
 .PHONY: cp-flink-reports-up
-cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication)
+cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication; +lake app with ENABLE_LAKE)
+	@if [ "$(ENABLE_LAKE)" = "true" ]; then $(MAKE) --no-print-directory lake-up; fi
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
 		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' APP_MANIFEST='$(APP_MANIFEST)' APP_JAR='$(APP_JAR)' \
 		POOL_IMAGE='$(POOL_IMAGE)' APP_FLINK_VERSION='$(APP_FLINK_VERSION)' \
 		RUSTFS_S3_ENDPOINT='$(RUSTFS_S3_ENDPOINT)' RUSTFS_ACCESS_KEY='$(RUSTFS_ACCESS_KEY)' RUSTFS_SECRET_KEY='$(RUSTFS_SECRET_KEY)' \
 		MERGE_PROVENANCE='$(ENABLE_MERGE_PROVENANCE)' \
 		STATE_PROVENANCE='$(ENABLE_STATE_PROVENANCE)' \
+		LAKE='$(ENABLE_LAKE)' LAKE_APP_NAME='$(LAKE_APP_NAME)' LAKE_MANIFEST='$(LAKE_APP_MANIFEST)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh up
 
 .PHONY: cp-flink-reports-down
 cp-flink-reports-down: ## Tear down the reports CMF Application + artifact + sink topics (safe to run repeatedly)
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
-		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' \
+		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' LAKE_APP_NAME='$(LAKE_APP_NAME)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh down
 
 # ------------------------------------------------------------------------------
@@ -1095,6 +1143,7 @@ cp-flink-down: ## Tear down the reports application, CMF, RustFS, operator, and 
 	-@$(MAKE) cp-flink-reports-down    	# delete the CMF Application + artifact while CMF is still up
 	-@$(MAKE) flink-delete         		# remove any leftover raw FlinkDeployment (legacy)
 	$(MAKE) cmf-uninstall
+	$(MAKE) lake-down                   # before rustfs-down: it empties the lake bucket through RustFS
 	$(MAKE) rustfs-down
 	$(MAKE) flink-operator-uninstall
 	$(MAKE) cert-manager-uninstall

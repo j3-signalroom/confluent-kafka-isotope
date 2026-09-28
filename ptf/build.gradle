@@ -52,6 +52,13 @@ dependencies {
 
     testImplementation libs.flink.table.api.java
     testImplementation libs.flink.table.common
+    // A local MiniCluster for the SQL-level tests (IsotopeViewSqlTest,
+    // StateProvenancePTFTest): executes the real planner and runtime.
+    testImplementation libs.flink.table.api.java.bridge
+    testImplementation libs.flink.streaming.java
+    testImplementation libs.flink.clients
+    testRuntimeOnly   libs.flink.table.planner.loader
+    testRuntimeOnly   libs.flink.table.runtime
     testImplementation libs.junit.jupiter
     testRuntimeOnly   libs.junit.platform.launcher
 }

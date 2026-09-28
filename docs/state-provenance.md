@@ -98,7 +98,12 @@ Flink's restrictions on updating streams (window TVFs refuse them, time attribut
 The cost is that you are now responsible for the state machine that `upsert-kafka` would have run for you. That is the trade: you take on state management and get changelog-free planning, deterministic identity, and consistent multi-output emission in exchange.
 
 ### **4.2 The PTF**
-[`StateProvenancePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTF.java) follows the idiom [`StuckTracePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StuckTracePTF.java) established — a `@StateHint` POJO, a `SET_SEMANTIC_TABLE` + `REQUIRE_ON_TIME` input, `ctx.timeContext(Instant.class)` for event time. Per entity it holds the current version ID and the parents folded in since the last publication; per input row it derives the new version, suppresses the emission entirely if it equals the current one (a redelivery is not a new state), and collects one row.
+[`StateProvenancePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTF.java) follows the idiom [`StuckTracePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StuckTracePTF.java) established — a `@StateHint` POJO, a `SET_SEMANTIC_TABLE` + `REQUIRE_ON_TIME` input, `ctx.timeContext(Instant.class)` for event time. Per entity it holds the current version ID, the parents folded in since the last publication, and the versions not yet published. Per input row it derives the new version, drops it if it is the current version or already waiting (a redelivery is not a new state), parks it, and registers an event-time timer at its event time. The timer publishes every parked version at or before the watermark, **oldest first**, each naming the one before it as its parent.
+
+**Why the timer.** `REQUIRE_ON_TIME` gives the function each row's event time; it does not sort the rows. `entity_log` is a `UNION ALL` of one table per topic, so an entity's records reach the PTF in whatever order the source readers deliver them. The first version of this function published on arrival, and on the cluster its chains came out as `enriched ← fulfilled ← placed` and every other permutation. Waiting for the watermark means nothing earlier can still be in flight. The version ID leads with 48 bits of event time, so sorting IDs sorts by event time, and ties within one millisecond break on the digest the same way every run. The costs:
+- **Latency:** a version is published only after the watermark passes it, which is the source's 5s bounded out-of-orderness.
+- **Late records:** a record that arrives behind the watermark is still published, on the next watermark, but after versions already on the chain.
+- **Tests:** [`StateProvenancePTFTest`](../ptf/src/test/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTFTest.java) pins the ordering, redelivery and per-entity independence on a local MiniCluster.
 
 Three constraints worth knowing before writing it, all learned the hard way on this project:
 
@@ -116,7 +121,7 @@ FROM TABLE(
     STATE_PROVENANCE(
         input   => TABLE `entity_log` PARTITION BY `entity_key`,
         on_time => DESCRIPTOR(`event_time`),
-        uid     => 'state-provenance-v1'
+        uid     => 'state-provenance-v2'
     )
 );
 ```
@@ -178,7 +183,7 @@ The last row is a coding constraint, not a behavioral difference: write the stat
 
 **Accepted limits:**
 
-- **Ancestry is queryable, not traversable.** Flink SQL has no recursive CTEs, so walking more than one generation belongs in a relational or graph store fed by the provenance topic — the same boundary [flink-collector.md §3.1](flink-collector.md#31-11-statements-only) already sets for merge edges.
+- **Ancestry is queryable, not traversable — in Flink.** Flink SQL has no recursive CTEs, so walking more than one generation belongs in a relational or graph store fed by the provenance topic — the same boundary [flink-collector.md §3.1](flink-collector.md#31-11-statements-only) already sets for merge edges. The opt-in [Iceberg lake](lake.md) is that store: `ENABLE_LAKE=true` copies this topic into `lake.isotope.state_provenance`, and `scripts/lake-query.sh` walks every chain with `WITH RECURSIVE`.
 - **Compaction bounds re-derivation, not lineage.** Compacting the source topic removes superseded messages, but every version already emitted keeps its place in the graph. It lives in `isotope_state_provenance`, with its parents inline. What compaction does remove is the *content* of old versions, since the provenance record holds IDs and no payload. That costs three things: seeing what an old version's value was, recomputing a `version_id` from its bytes to verify it, and rebuilding the provenance from `earliest-offset` after the PTF logic changes. Only the last is operational, and only if you ever need to rebuild the graph rather than read it. If you do, archive the raw source log somewhere that is not compacted, such as an Iceberg table.
 - **The provenance topic's retention is the real bound on lineage.** On a broker with default settings, a topic created without explicit configs uses `cleanup.policy=delete` and about 7 days of retention, so the whole graph would expire. The CP deploy script pins `isotope_state_provenance` to `retention.ms=-1`, `retention.bytes=-1` and `cleanup.policy=delete`, which means infinite retention and no compaction. Compaction would be wrong here as well: it keeps one record per key, and a version chain needs all of them. For history that you can query, and traverse with recursive CTEs, land the topic in Iceberg.
 - **Global aggregates do not fit.** The inline parent set is right for entity-scoped derivation and wrong for a `SUM` over everything. That case wants a count plus a sketch, and loses the ability to name the parents.

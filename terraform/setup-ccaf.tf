@@ -398,13 +398,13 @@ resource "confluent_flink_statement" "isotope_view" {
         CAST(`headers`['x-isotope-this-topic']                     AS STRING) AS this_topic,
         CAST(CAST(`headers`['x-isotope-hop-count']    AS STRING)   AS INT)    AS hop_count,
         `event_time`,
-        TIMESTAMPDIFF(
-            MILLISECOND,
-            TO_TIMESTAMP_LTZ(
-                CAST(CAST(`headers`['x-isotope-origin-ts'] AS STRING) AS BIGINT),
-                3),
-            `event_time`
-        ) AS latency_ms
+        -- Not TIMESTAMPDIFF(MILLISECOND, ...), which truncates to whole seconds
+        -- on Flink 2.1; see scripts/flink/sql/cp/05_isotope_view.fql.
+        CAST(
+            CAST(TIMESTAMPDIFF(SECOND, TO_TIMESTAMP_LTZ(0, 3), `event_time`) AS BIGINT) * 1000
+            + EXTRACT(MILLISECOND FROM `event_time`)
+            - CAST(CAST(`headers`['x-isotope-origin-ts'] AS STRING) AS BIGINT)
+        AS INT) AS latency_ms
     FROM isotope_raw
     WHERE `headers`['x-isotope-trace-id']         IS NOT NULL
       AND `headers`['x-isotope-consumer-service'] IS NULL;
