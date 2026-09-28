@@ -733,7 +733,7 @@ The reports keep 1-minute aggregates, and the raw isotope lives only as long as 
 - **Separate failure domain:** the lake is a second CMF Application (`IsotopeLakeJob`, same JAR), so a catalog or storage fault can't stop the seven reports.
 - **CP only:** state provenance is CP only, and so is the lake.
 
-To enable the lake, use the following `make` commands, then query it from the host with DuckDB (`brew install duckdb`):
+To enable the lake, use the following `make` commands, then query it from the host with [DuckDB](https://duckdb.org/) (`brew install duckdb`):
 
 ```bash
 make cp-flink-reports-up ENABLE_LAKE=true ENABLE_STATE_PROVENANCE=true

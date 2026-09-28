@@ -70,7 +70,7 @@ Teardown: `make cp-flink-reports-down` deletes the lake application whether or n
 > **Scheduling headroom.** The lake adds a JobManager (0.25 CPU) and a TaskManager (0.5 CPU). The Flink operator chart requests 2 full CPUs by default, which left no room on the 6-CPU minikube node — the lake TaskManager sat `Pending` with `Insufficient cpu`. `make flink-operator-install` now requests 500m for the operator (limit still 2).
 
 ## **4.0 Querying it**
-[`scripts/lake-query.sh`](../scripts/lake-query.sh) reads the lake with **DuckDB on the host** (`brew install duckdb`) through two port-forwards — the catalog and RustFS — so querying costs the cluster nothing.
+[`scripts/lake-query.sh`](../scripts/lake-query.sh) reads the lake with **[DuckDB](https://duckdb.org/) on the host** (`brew install duckdb`) through two port-forwards — the catalog and RustFS — so querying costs the cluster nothing.
 
 ```bash
 scripts/lake-query.sh              # chains: every entity's version chain, walked with WITH RECURSIVE
