@@ -23,7 +23,7 @@ Everything else in this project analyzes in-flight data. The seven reports fold 
 | Per-trace history ends at topic retention | Per-trace history is kept in object storage for as long as you want it |
 | State-provenance ancestry is *queryable, not traversable* — Flink SQL has no recursive CTEs ([state-provenance.md §6.0](state-provenance.md#60-limits-and-what-to-verify-first)) | `WITH RECURSIVE` walks every version chain end to end |
 
-The last row is the reason the lake exists. `STATE_PROVENANCE` output was designed for it: append-only, with a content-addressed `version_id`, so it lands as a pure-append Iceberg table — no equality deletes, no merge-on-read, and a redelivered record is the same version rather than a new one.
+The last row is the reason the lake exists. `STATE_PROVENANCE` output was designed for it: append-only, with a content-addressed `version_id`, so it lands as a pure-append [Iceberg table](https://iceberg.apache.org/spec/#iceberg-table-spec) — no equality deletes, no merge-on-read, and a redelivered record is the same version rather than a new one.
 
 ## **2.0 Architecture**
 
