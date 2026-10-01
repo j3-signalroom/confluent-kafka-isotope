@@ -8,7 +8,7 @@
 --
 -- Format jar: `flink-sql-avro-confluent-registry-2.1.2.jar`, baked into
 -- /opt/flink/lib by the reports application image
--- (k8s/base/flink-sql-isotope.Containerfile).
+-- (k8s/base/flink-sql-isotope.containerfile).
 --
 -- Why Avro and not Protobuf:
 --   * cp-flink (the session-cluster image) doesn't ship an SR-integrated

@@ -99,9 +99,9 @@ APP_MANIFEST        ?= k8s/base/cmf-flink-application.json
 APP_JAR             ?= ptf/build/libs/isotope-flink-udf.jar
 # The application's Flink image: cp-flink 2.1 + the Kafka/Avro SQL connectors
 # and S3 fs plugin baked in (CMF clusterSpec has no podTemplate). Built by
-# 'make flink-image-build' from k8s/base/flink-sql-isotope.Containerfile.
+# 'make flink-image-build' from k8s/base/flink-sql-isotope.containerfile.
 POOL_IMAGE              ?= isotope-cp-flink-sql:local
-FLINK_SQL_CONTAINERFILE ?= k8s/base/flink-sql-isotope.Containerfile
+FLINK_SQL_CONTAINERFILE ?= k8s/base/flink-sql-isotope.containerfile
 
 # Optional fan-in (merge) provenance — see docs/flink-collector.md 2.4. Off by
 # default on both runtimes; on, it adds a merge collector plus a merge-edge
