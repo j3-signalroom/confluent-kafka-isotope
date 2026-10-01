@@ -40,7 +40,7 @@
 # `make flink-image-build`:
 #   minikube image build -t isotope-cp-flink-sql:local \
 #     --build-opt=opt=build-arg:FLINK_IMAGE=<cp-flink tag> \
-#     -f flink-sql-isotope.Containerfile k8s/base/
+#     -f flink-sql-isotope.containerfile k8s/base/
 ARG FLINK_IMAGE=confluentinc/cp-flink:2.1.2-cp1-java21
 
 # --- fetch stage: download the connector JARs (stock image has no curl) --------

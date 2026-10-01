@@ -1,5 +1,5 @@
 # Maven Central paths of the JARs the opt-in Iceberg lake adds to /opt/flink/lib
-# (docs/lake.md), fetched one per line by flink-sql-isotope.Containerfile.
+# (docs/lake.md), fetched one per line by flink-sql-isotope.containerfile.
 #
 # WHY A PINNED LIST (not iceberg-aws-bundle + hadoop-client-runtime)
 # The two convenience bundles carried every AWS service client plus Netty, and

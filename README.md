@@ -376,7 +376,7 @@ k8s/base/                               CFK / CMF manifests (applied by `make cp
                                         (points at RustFS) + writable environment catalog
   cmf-flink-application.json            FlinkApplication template (envsubst'd by
                                         deploy-cmf-flink-reports.sh) — the reports job
-  flink-sql-isotope.Containerfile       custom cp-flink image for the CMF compute pool:
+  flink-sql-isotope.containerfile       custom cp-flink image for the CMF compute pool:
                                         bakes in the Kafka + avro-confluent SQL connectors
                                         and the s3-fs-hadoop plugin (`make flink-image-build`)
   flink-cluster-deployment.yaml         optional cp-flink session cluster for ad-hoc
