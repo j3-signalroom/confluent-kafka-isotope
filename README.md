@@ -20,6 +20,8 @@
     + [**3.5.4 [OPTIONAL] Iceberg Lake: Trace History and Traversable Provenance**](#354-optional-iceberg-lake-trace-history-and-traversable-provenance)
 - [**Resources**](#resources)
   + [**Companion Articles**](#companion-articles)
+  + [**Confluent Platform (locally self-hosted)**](#confluent-platform-locally-self-hosted)
+  + [**Confluent Cloud**](#confluent-cloud)
 <!-- tocstop -->
 
 ---
@@ -750,3 +752,13 @@ scripts/lake-query.sh shell      # interactive DuckDB with the lake attached
 ### **Companion Articles**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors with assistance from AI](https://medium.com/@jeffrey.j.jennings/kafkas-quiet-observability-superpower-kafka-interceptors-with-assistance-from-ai-d3f83fc1b27e)
+
+### **Confluent Platform (locally self-hosted)**
+- [Confluent Plaform Overview](https://docs.confluent.io/platform/current/get-started/platform.html)
+- [Deploy and Manage Confluent Platform Using Confluent for Kubernetes](https://docs.confluent.io/operator/current/overview.html#deploy-and-manage-cp-using-co-long)
+- [Stream Processing with Confluent Platform for Apache Flink](https://docs.confluent.io/cp-flink/current/overview.html#stream-processing-with-af-cp-long)
+- [minikube](https://minikube.sigs.k8s.io/docs/)
+
+### **Confluent Cloud**
+- [Confluent Cloud Overview](https://docs.confluent.io/cloud/current/get-started/confluent-cloud-basics.html#ccloud-overview)
+- [Stream Processing Concepts in Confluent Cloud for Apache Flink](https://docs.confluent.io/cloud/current/flink/concepts/overview.html#stream-processing-concepts-in-af-long)
