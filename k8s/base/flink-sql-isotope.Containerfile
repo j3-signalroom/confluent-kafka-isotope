@@ -1,5 +1,5 @@
-# Custom cp-flink image for the CMF SHARED compute pool that runs the isotope
-# report statements.
+# Custom cp-flink image for the CMF SHARED compute pool that runs the isotope report
+# statements.
 #
 # WHY A CUSTOM IMAGE
 # A CMF ComputePool's `spec.clusterSpec` supports only flinkVersion / image /
