@@ -22,6 +22,7 @@
   + [**Companion Articles**](#companion-articles)
   + [**Confluent Platform (locally self-hosted)**](#confluent-platform-locally-self-hosted)
   + [**Confluent Cloud**](#confluent-cloud)
+  + [**Miscellaneous**](#miscellaneous)
 <!-- tocstop -->
 
 ---
@@ -762,3 +763,7 @@ scripts/lake-query.sh shell      # interactive DuckDB with the lake attached
 ### **Confluent Cloud**
 - [Confluent Cloud Overview](https://docs.confluent.io/cloud/current/get-started/confluent-cloud-basics.html#ccloud-overview)
 - [Stream Processing Concepts in Confluent Cloud for Apache Flink](https://docs.confluent.io/cloud/current/flink/concepts/overview.html#stream-processing-concepts-in-af-long)
+
+### **Miscellaneous**
+- [What is Makefile and make? How do we use it?](https://medium.com/@ayogun/what-is-makefile-and-make-how-do-we-use-it-3828f2ee8cb)
+- [Apache Flink Kickstarter II](https://github.com/j3-signalroom/apache_flink-kickstarter-ii)
