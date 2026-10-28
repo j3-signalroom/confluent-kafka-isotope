@@ -63,7 +63,7 @@ make cp-flink-reports-up ENABLE_LAKE=true                                # hops 
 make cp-flink-reports-up ENABLE_LAKE=true ENABLE_STATE_PROVENANCE=true   # hops + version chains
 ```
 
-`ENABLE_LAKE=true` runs `make lake-up` first (catalog + bucket), deploys the reports application as usual, then deploys `isotope-lake`. Drive traffic as in [runbook-minikube.md §6.0](runbook-minikube.md#60-drive-traffic-required-to-see-report-rows); rows appear within one checkpoint (~60s).
+`ENABLE_LAKE=true` runs `make lake-up` first (catalog + bucket), deploys the reports application as usual, then deploys `isotope-lake`. Drive traffic as in [runbook-local.md §6.0](runbook-local.md#60-drive-traffic-required-to-see-report-rows); rows appear within one checkpoint (~60s).
 
 Teardown: `make cp-flink-reports-down` deletes the lake application whether or not `ENABLE_LAKE` is set (so an earlier `up` is never stranded). `make lake-down` deletes the catalog, its PVC and the bucket's contents; `make cp-flink-down` runs it before `rustfs-down`.
 

@@ -494,7 +494,7 @@ docs/                                   extracted long-form docs (linked from th
   state-provenance.md                   state-level provenance (§3.5.3) — content-addressed
                                         versions, why the parent set is inline, and the
                                         CCAF canonicalization gap
-  runbook-minikube.md                   full CP-on-minikube run sequence (§3.2)
+  runbook-local.md                      full CP-on-minikube run sequence (§3.2)
   runbook-cloud.md                      full CCAF / Terraform run sequence (§3.3)
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
   terraform.png                         rendered resource graph (embedded in §3.3)
@@ -617,7 +617,7 @@ To run this project, you’ll need **macOS (with Homebrew)** or **Linux (with ap
 
 Seven reports — five pure Flink SQL plus two JAR-backed PTFs — and the collector INSERT run as a **single Flink 2.1 CMF Application** (`IsotopeReportsJob`, one StatementSet, and eight sinks) submitted through CMF and executed by the Confluent Flink Kubernetes Operator. One StatementSet means one failure domain: a fault in any INSERT stops them all, so a missing sink topic takes the reports down with it (which is why `deploy-cmf-flink-reports.sh` pre-creates every sink — unlike CCAF, OSS Flink's Kafka connector declares a table over a topic that must already exist rather than creating it). No raw session cluster is involved; `k8s/base/flink-cluster-deployment.yaml` (`make flink-deploy` / `make flink-sql`) is a separate, optional path for ad-hoc SQL. Confluent Cloud runs the same seven reports from its own copy of the SQL, inlined in Terraform — see [§3.3 Confluent Cloud for Apache Flink](#33-seven-scalar-headers-flink-sql-reports-with-confluent-cloud-for-apache-flink) for that path; this section is the local-minikube one.
 
-**The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-minikube.md](docs/runbook-minikube.md).** The short version: `make cp-flink-up` then `make cp-flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
+**The full bring-up sequence — cluster → Flink → reports → traffic → teardown — is consolidated in [docs/runbook-local.md](docs/runbook-local.md).** The short version: `make cp-flink-up` then `make cp-flink-reports-up`, then drive traffic across **multiple** 1-minute windows (a single burst sits in one open window forever — the watermark has to cross `window_end` for a tumbling window to emit) and wait ~90s after the last record.
 
 Report sink topics ride **Avro+SR** (`avro-confluent`, auto-registered on first write) so Control Center renders them natively — a deliberate *format-by-domain* split: app events are **Protobuf+SR** (`DemoEvent`), Flink aggregates are **Avro+SR** (cp-flink ships no SR-integrated Protobuf format), and the consume-edge marker topic `isotope_consume_edge_markers` is **null-value / headers-only**. Not a defect — a clean split by domain.
 
