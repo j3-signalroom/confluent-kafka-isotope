@@ -12,7 +12,7 @@
 #
 # Prereqs:
 #   - `make cc-flink-reports-up` has succeeded (terraform state exists)
-#   - terraform binary on PATH (>= 1.15.x to match terraform/versions.tf)
+#   - terraform binary on PATH (>= 1.17.0 to match terraform/versions.tf)
 #   - Both the Kafka and SR API keys are provisioned + rotated by the
 #     Terraform module — this script pulls them via `terraform output`.
 #     You can still pre-export SR_KEY / SR_SECRET to override the values
@@ -46,7 +46,7 @@ __cc_env_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 __cc_env_tf_dir="$(cd "${__cc_env_script_dir}/../terraform" && pwd)"
 
 if ! command -v terraform >/dev/null 2>&1; then
-    echo "✘ terraform not on PATH — install it (>= 1.15.x) or run scripts/cc-cli-env.sh from a shell where it is."
+    echo "✘ terraform not on PATH — install it (>= 1.17.0) or run scripts/cc-cli-env.sh from a shell where it is."
     return 1 2>/dev/null || exit 1
 fi
 
