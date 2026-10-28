@@ -448,7 +448,7 @@ scripts/
     99_teardown.fql                     DROP TABLE / VIEW / FUNCTION
 terraform/                              CCAF infrastructure-as-code (`make cc-flink-reports-up`)
   providers.tf                          Confluent provider — cloud key/secret vars
-  versions.tf                           required Terraform (>= 1.13) + provider versions
+  versions.tf                           required Terraform (>= 1.17.0) + provider versions
   variables.tf                          confluent_api_key/secret, cloud, region, day_count,
                                         enable_trace_rca, enable_merge_provenance
   data.tf                               organization lookup + other data sources

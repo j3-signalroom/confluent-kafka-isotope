@@ -22,7 +22,7 @@ traffic → observe → teardown. Unlike the [Confluent Platform + Flink on mini
 ---
 
 ## **1.0 Prerequisites**
-- [Terraform](https://developer.hashicorp.com/terraform/install) `>= 1.13` installed locally.
+- [Terraform](https://developer.hashicorp.com/terraform/install) `>= 1.17.0` installed locally.
 - A **Cloud-level** Confluent Cloud API key (not cluster-scoped) with permission to create environments, Kafka clusters, Flink compute pools, service accounts, role bindings, Flink artifacts, and statements. Generate via Console → Settings → Cloud API keys.
 
 ## **2.0 Provision + deploy the reports**
