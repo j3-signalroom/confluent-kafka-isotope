@@ -326,7 +326,7 @@ if [ "${create_action}" = true ]; then
     print_info "Next step — drive the 4-stage demo, ONE VERB PER TERMINAL."
     print_info "B/C/D are long-running (Ctrl-C to stop). Start order doesn't matter: each"
     print_info "stage reads from the earliest offset with a fresh consumer group, so it replays"
-    print_info "everything already there. With --latest, start B/C/D before A (see docs/runbook-ccaf.md §5.0):"
+    print_info "everything already there. With --latest, start B/C/D before A (see docs/runbook-cloud.md §5.0):"
     print_info "    scripts/cc-app-run.sh place 'hello'    # terminal A — kick the chain off (exits on its own)"
     print_info "    scripts/cc-app-run.sh enrich           # terminal B — orders.placed   → orders.enriched"
     print_info "    scripts/cc-app-run.sh fulfill          # terminal C — orders.enriched → orders.fulfilled"
