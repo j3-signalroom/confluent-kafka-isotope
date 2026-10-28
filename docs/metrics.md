@@ -105,7 +105,7 @@ sum by (pipeline, this_topic, consumer_service) (increase(isotope_consume_record
 / sum by (pipeline, consumer_service, this_topic) (rate(isotope_consume_age_seconds_count[1m]))
 ```
 
-These are **net-new signals**, not a port of a Flink report. `isotope_consume_records_total` is the *consume half* of the bipartite topology — the topic→consumer edge tallies — and `isotope_consume_latency_seconds_*` is an origin→consume figure no Flink report computes (the Flink `latency_1m` measures origin→**produce**-hop). The **full** `bipartite_topology` report still stays in Flink: stitching produce and consume edges per `trace_id` into one graph is per-trace stateful, which a counter can't do. What you get here is the bounded-cardinality edge *counts* and a time-to-consume distribution — cheap, windowable at read time, and free of the watermark wait.
+These are **net-new signals**, not a port of a Flink report. `isotope_consume_records_total` is the *consume half* of the bipartite topology — the topic→consumer edge tallies — and `isotope_consume_latency_seconds_*` is an origin→consume figure no Flink report computes (the Flink `latency_1m` measures origin→**produce**-hop). The **full** `bipartite_topology` report still stays in Flink, but not because it follows individual traces: it's a `UNION ALL` of per-minute produce-edge and consume-edge tallies, and those edge counts are exactly what these meters reproduce. What a counter can't reproduce is its `distinct_traces` column — `COUNT(DISTINCT trace_id)` per edge per window (see [What stays in Flink](#70-what-stays-in-flink--and-two-deliberate-gaps)). What you get here is the bounded-cardinality edge *counts* and a time-to-consume distribution — cheap, windowable at read time, and free of the watermark wait.
 
 `isotope_consume_age_seconds_*` measures the **same `now − origin_ts` quantity** as `isotope_consume_latency_seconds_*`, but it's the **universal consume-side age signal** — emitted once on *every* consuming stage, where latency only fires on the marker path. That's the point of having both: query `isotope_consume_age_*` to get consume-lag across **all** consumers (including `hop`-style stages that adopt-and-forward without ever writing a marker), and the timer's `_count` doubles as the per-`(consumer_service, topic)` consume rate. At a terminal consumer the age equals that consumer's latency by definition (same `now − origin_ts`); the two diverge in *coverage*, not value — latency is marker-only, age is everywhere.
 
@@ -157,7 +157,7 @@ Every question here is about **one** record or trace. Prometheus aggregates away
 | Did my record get tagged? | 🔴 | The `isotope` header on the record itself — presence = tagged. |
 | What's the origin of this trace? | 🔴 | `origin_service` / `origin_ts` fields in the header. |
 | How many hops has *this* record taken? | 🔴 | The header's hop list length. (The *distribution* across all records is ✅ — see Easy→Medium.) |
-| Where did this trace go? | 🔴 | Per-trace path = Flink `bipartite_topology`, or replay the header trail. |
+| Where did this trace go? | 🔴 | Replay the record's `isotope` header hop list (consume side: filter `isotope_consume_edge_markers` by `trace_id`). Flink `bipartite_topology` aggregates edges per window — it doesn't keep per-trace paths. |
 | Did the trace ID survive a consume-then-produce hop? | 🔴 | App/Flink per-trace; a counter can't follow one `trace_id`. |
 | Which pipeline does this trace belong to? | 🔴 | Header `pipeline` field. (`pipeline` is a meter *label*, but can't isolate one trace.) |
 
@@ -170,7 +170,7 @@ This is the meters' sweet spot: bounded-cardinality scalar aggregation, windowed
 / sum(rate(isotope_consume_latency_seconds_count{consumer_service="shipping-notification-service"}[1m]))
 
 # 🟡 The actual service graph — produce edges + consume edges (the edge *sets*;
-#    the full per-trace stitch is Flink's bipartite_topology)
+#    Flink's bipartite_topology adds distinct_traces per edge)
 sum by (this_service, this_topic)   (increase(isotope_hop_latency_seconds_count[1m]))   # produce side
 sum by (this_topic, consumer_service)(increase(isotope_consume_records_total[1m]))       # consume side
 
