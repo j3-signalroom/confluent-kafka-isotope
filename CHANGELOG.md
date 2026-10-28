@@ -4,17 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.33.00.000] - TBD
-### Added
-- Issues[`#419`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/419)
-- Issues[`#422`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/422)
-- Issues[`#428`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/428)
-- Issues[`#430`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/430)
-
-### Changed
-- Issues[`#424`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/424)
-
-## [0.32.00.000] - 2026-10-08
+## [0.32.00.000] - TBD
 ### Added
 - Issues[`#362`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/362)
 - Issues[`#396`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/396)
@@ -25,12 +15,18 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 - Issues[`#407`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/407)
 - Issues[`#415`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/415)
 - Issues[`#417`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/417)
+- Issues[`#419`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/419)
+- Issues[`#422`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/422)
+- Issues[`#428`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/428)
+- Issues[`#430`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/430)
 
 ### Changed
 - Issues[`#390`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/390)
 - Issues[`#394`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/394)
 - Issues[`#409`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/409)
 - Issues[`#412`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/412)
+- Issues[`#424`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/424)
+- Issues[`#432`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/432)
 
 ## [0.31.00.000] - 2026-09-25
 ### Added
