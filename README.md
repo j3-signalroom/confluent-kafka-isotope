@@ -495,7 +495,7 @@ docs/                                   extracted long-form docs (linked from th
                                         versions, why the parent set is inline, and the
                                         CCAF canonicalization gap
   runbook-minikube.md                   full CP-on-minikube run sequence (§3.2)
-  runbook-ccaf.md                       full CCAF / Terraform run sequence (§3.3)
+  runbook-cloud.md                      full CCAF / Terraform run sequence (§3.3)
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
   terraform.png                         rendered resource graph (embedded in §3.3)
   qrcode_github.com.png                 QR code to this repo
@@ -633,7 +633,7 @@ The Confluent Cloud for Apache Flink (CCAF) parallel of [§3.2 CP + Apache Flink
 - The uploaded PTF JAR
 - 24 `confluent_flink_statement` resources (6 `ALTER TABLE` + 3 `VIEW` + 8 sink `CREATE TABLE` + 3 `CREATE FUNCTION`, plus 1 `EXECUTE STATEMENT SET` holding all 8 `INSERT INTO`s and 3 transient `DROP FUNCTION`)
 
-**The full provision → deploy → traffic → teardown sequence is consolidated in [docs/runbook-ccaf.md](docs/runbook-ccaf.md).** `make cc-flink-reports-up` (~6–8 min first run; idempotent re-applies), drive traffic with `scripts/cc-app-run.sh place|enrich|fulfill|ship` across **multiple** 1-minute windows (a single burst sits in one open window forever, and you wait ~90s after the last record), then `make cc-flink-reports-down` to `terraform destroy` the whole environment.
+**The full provision → deploy → traffic → teardown sequence is consolidated in [docs/runbook-cloud.md](docs/runbook-cloud.md).** `make cc-flink-reports-up` (~6–8 min first run; idempotent re-applies), drive traffic with `scripts/cc-app-run.sh place|enrich|fulfill|ship` across **multiple** 1-minute windows (a single burst sits in one open window forever, and you wait ~90s after the last record), then `make cc-flink-reports-down` to `terraform destroy` the whole environment.
 
 **Format-by-runtime (not-by-domain).** CP's reports land on **Avro+SR** (`'value.format' = 'avro-confluent'` in [scripts/flink/sql/cp/05_report_sinks.fql](scripts/flink/sql/cp/05_report_sinks.fql)). CCAF's reports land on **Protobuf+SR** (`'value.format' = 'proto-registry'` in each sink's `WITH` clause in [terraform/setup-ccaf.tf](terraform/setup-ccaf.tf)). The two runtimes' SQL is otherwise unshared: CP's lives hardcoded in [scripts/flink/sql/cp/](scripts/flink/sql/cp/), CCAF's lives inline as `confluent_flink_statement` resources in [terraform/setup-ccaf.tf](terraform/setup-ccaf.tf).
 
