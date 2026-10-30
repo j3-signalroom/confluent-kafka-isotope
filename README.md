@@ -20,6 +20,7 @@
     + [**3.5.4 [OPTIONAL] Iceberg Lake: Trace History and Traversable Provenance**](#354-optional-iceberg-lake-trace-history-and-traversable-provenance)
 - [**Resources**](#resources)
   + [**Companion Articles**](#companion-articles)
+  + [**Companion Presentation**](#companion-presentation)
   + [**Confluent Platform (locally self-hosted)**](#confluent-platform-locally-self-hosted)
   + [**Confluent Cloud**](#confluent-cloud)
   + [**Miscellaneous**](#miscellaneous)
@@ -753,6 +754,9 @@ scripts/lake-query.sh shell      # interactive DuckDB with the lake attached
 ### **Companion Articles**
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors with assistance from AI](https://medium.com/@jeffrey.j.jennings/kafkas-quiet-observability-superpower-kafka-interceptors-with-assistance-from-ai-d3f83fc1b27e)
+
+### **Companion Presentation**
+- [Confluent Current 26 Presentation: Kafka’s quiet observability superpower — Kafka Interceptors](docs/kafka_quiet_observability_superpower.pdf)
 
 ### **Confluent Platform (locally self-hosted)**
 - [Confluent Plaform Overview](https://docs.confluent.io/platform/current/get-started/platform.html)
