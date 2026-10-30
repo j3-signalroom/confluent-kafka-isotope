@@ -7,7 +7,7 @@ All known release issues related to this project will be documented in this file
 
 **Table of Contents**
 <!-- toc -->
-- [**1.0 Control Center never becomes Ready when it wins the race against Kafka's DNS**](#10-control-center-never-becomes-ready-when-it-wins-the-race-against-kafkas-dns)
+- [**1.0 Confluent Control Center (C3) never becomes Ready when it wins the race against Kafka's DNS**](#10-confluent-control-center-c3-never-becomes-ready-when-it-wins-the-race-against-kafkas-dns)
   + [**1.1 Symptom**](#11-symptom)
   + [**1.2 Cause**](#12-cause)
   + [**1.3 Workaround**](#13-workaround)
@@ -20,7 +20,7 @@ All known release issues related to this project will be documented in this file
 ---
 
 
-## **1.0 Control Center never becomes Ready when it wins the race against Kafka's DNS**
+## **1.0 Confluent Control Center (C3) never becomes Ready when it wins the race against Kafka's DNS**
 **Affects:** `cp-enterprise-control-center-next-gen:2.5.0` on minikube (`make cp-core-up`)
 
 ### **1.1 Symptom**
