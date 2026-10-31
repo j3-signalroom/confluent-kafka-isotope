@@ -21,7 +21,7 @@
 - [**Resources**](#resources)
   + [**Companion Articles**](#companion-articles)
   + [**Companion Presentation**](#companion-presentation)
-  + [**Confluent Platform (locally self-hosted)**](#confluent-platform-locally-self-hosted)
+  + [**Confluent Platform**](#confluent-platform)
   + [**Confluent Cloud**](#confluent-cloud)
   + [**Miscellaneous**](#miscellaneous)
 <!-- tocstop -->
@@ -755,7 +755,7 @@ scripts/lake-query.sh shell      # interactive DuckDB with the lake attached
 ### **Companion Presentation**
 - [Confluent Current 26 Presentation: Kafka’s quiet observability superpower — Kafka Interceptors](docs/kafka_quiet_observability_superpower.pdf)
 
-### **Confluent Platform (locally self-hosted)**
+### **Confluent Platform**
 - [Confluent Plaform Overview](https://docs.confluent.io/platform/current/get-started/platform.html)
 - [Deploy and Manage Confluent Platform Using Confluent for Kubernetes](https://docs.confluent.io/operator/current/overview.html#deploy-and-manage-cp-using-co-long)
 - [Stream Processing with Confluent Platform for Apache Flink](https://docs.confluent.io/cp-flink/current/overview.html#stream-processing-with-af-cp-long)
