@@ -83,7 +83,7 @@ scripts/lake-query.sh shell        # interactive DuckDB, lake attached as `lake`
 The `chains` walk starts at each **leaf** — a version no other version names as a parent — and follows `parents` until a version has none. It deduplicates first: the topic is at-least-once, and a duplicate `version_id` is by construction the same version.
 
 ## **5.0 Limits and deliberate omissions**
-- **CP only.** State provenance is CP only ([state-provenance.md §5.0](state-provenance.md#50-cp-vs-ccaf-where-the-divergence-actually-lands)), so the half of the lake that matters most is too. On CCAF, Tableflow could materialize a flattened hops topic as Iceberg; that is not built.
+- **CP only.** The lake runs as a CMF Application, so it is CP only. State provenance itself runs on both runtimes ([state-provenance.md §5.0](state-provenance.md#50-cp-vs-ccaf-where-the-divergence-actually-lands)), and CCAF writes the same `isotope_state_provenance` topic with the same version IDs. On CCAF, Tableflow could materialize that topic, or a flattened hops topic, as Iceberg; that is not built.
 - **Write-only from Flink.** The Hadoop slice covers what writing needs. Reading an Iceberg table back into Flink would also need Hadoop's MapReduce input classes, which aren't shipped. Reads go through DuckDB (`scripts/lake-query.sh`). Add `hadoop-mapreduce-client-core` to `lake-jars.txt` if a Flink job ever needs to read the lake.
 - **Known CVEs that remain** (Trivy, CRITICAL/HIGH, when this was written):
 

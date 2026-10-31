@@ -14,8 +14,11 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -116,6 +119,63 @@ class StateVersionTest {
             ts = (ts << 8) | (id[i] & 0xFFL);
         }
         assertEquals(T0, ts, "high 48 bits must carry the event-time millis");
+    }
+
+    /** Confluent wire format: magic byte, 4-byte big-endian schema ID, payload. */
+    private static byte[] framed(int schemaId, byte[] payload) {
+        byte[] out = new byte[5 + payload.length];
+        out[0] = 0x00;
+        out[1] = (byte) (schemaId >>> 24);
+        out[2] = (byte) (schemaId >>> 16);
+        out[3] = (byte) (schemaId >>> 8);
+        out[4] = (byte)  schemaId;
+        System.arraycopy(payload, 0, out, 5, payload.length);
+        return out;
+    }
+
+    @Test
+    @DisplayName("the registry's schema ID is not part of identity — CP and CCAF agree")
+    void schemaIdIsNotContent() {
+        // Same record, two registries: CP's SR and Confluent Cloud's assign
+        // different IDs to the same schema. Protobuf's message-index byte (0x00
+        // for the first message) is schema-derived and rides in the payload.
+        byte[] payload = {0x00, 0x0A, 0x03, 'a', 'b', 'c'};
+        assertEquals(
+                StateVersion.versionIdHex("orders.placed", "k1", framed(100001, payload), T0),
+                StateVersion.versionIdHex("orders.placed", "k1", framed(7, payload), T0));
+    }
+
+    @Test
+    @DisplayName("a framed value and its bare payload are the same version")
+    void framingIsStripped() {
+        // What a header-mode producer (schema ID in a Kafka header) writes.
+        byte[] payload = {0x0A, 0x03, 'a', 'b', 'c'};
+        assertEquals(
+                StateVersion.versionIdHex("orders.placed", "k1", framed(42, payload), T0),
+                StateVersion.versionIdHex("orders.placed", "k1", payload, T0));
+        assertArrayEquals(payload, StateVersion.canonicalContent(framed(42, payload)));
+    }
+
+    @Test
+    @DisplayName("the payload after the prefix still addresses the version")
+    void payloadAfterPrefixIsContent() {
+        assertNotEquals(
+                StateVersion.versionIdHex("orders.placed", "k1", framed(42, bytes("v1")), T0),
+                StateVersion.versionIdHex("orders.placed", "k1", framed(42, bytes("v2")), T0));
+    }
+
+    @Test
+    @DisplayName("only the registry shape is stripped — anything else hashes whole")
+    void unframedContentIsUntouched() {
+        // No magic byte, and a leading 0x00 too short to carry a schema ID.
+        byte[] plain = bytes("v");
+        byte[] shortZero = {0x00, 0x01, 0x02, 0x03};
+        assertSame(plain, StateVersion.canonicalContent(plain));
+        assertSame(shortZero, StateVersion.canonicalContent(shortZero));
+        assertNotEquals(
+                StateVersion.versionIdHex("orders.placed", "k1", shortZero, T0),
+                StateVersion.versionIdHex("orders.placed", "k1", new byte[0], T0));
+        assertNull(StateVersion.canonicalContent(null));
     }
 
     @Test
