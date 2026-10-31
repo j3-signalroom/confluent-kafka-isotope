@@ -116,7 +116,7 @@ resource "confluent_flink_statement" "merge_batched_add_headers" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [statement, compute_pool, credentials]
+    ignore_changes = [statement, compute_pool]
   }
 
   depends_on = [confluent_flink_statement.merge_batched_sink]
