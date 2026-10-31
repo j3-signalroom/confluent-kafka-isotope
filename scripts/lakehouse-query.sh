@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Query the opt-in Iceberg lake (docs/lake.md) from the host with DuckDB.
+# Query the opt-in Iceberg lakehouse (docs/lakehouse.md) from the host with DuckDB.
 #
 # WHY DUCKDB ON THE HOST (not Trino/Spark in the cluster)
-# minikube is already at its CPU ceiling with the reports and lake applications
+# minikube is already at its CPU ceiling with the reports and lakehouse applications
 # running. DuckDB is a single binary that speaks the Iceberg REST protocol and
-# S3 directly, so reading the lake costs the cluster two port-forwards and
+# S3 directly, so reading the lakehouse costs the cluster two port-forwards and
 # nothing else.
 #
 # WHAT IT ANSWERS THAT FLINK SQL CANNOT
@@ -12,28 +12,28 @@
 # with WITH RECURSIVE — the multi-generation traversal docs/state-provenance.md
 # 5.0 leaves to "a relational or graph store fed by the provenance topic".
 #
-# Usage: scripts/lake-query.sh [chains|hops [TRACE_ID]|latency|shell]
+# Usage: scripts/lakehouse-query.sh [chains|hops [TRACE_ID]|latency|shell]
 #   chains    (default) each entity's full version chain, newest version first
 #   hops      the 20 most recent hops, or every hop of TRACE_ID
-#   latency   per-topic hop latency percentiles over the lake's whole history
-#   shell     interactive DuckDB with the lake attached as `lake`
+#   latency   per-topic hop latency percentiles over the lakehouse's whole history
+#   shell     interactive DuckDB with the lakehouse attached as `lakehouse`
 #
-# Prereqs: make lake-up, and a lake application that has committed at least one
-# checkpoint (make cp-flink-reports-up ENABLE_LAKE=true, then drive traffic).
+# Prereqs: make lakehouse-up, and a lakehouse application that has committed at least one
+# checkpoint (make cp-flink-reports-up ENABLE_LAKEHOUSE=true, then drive traffic).
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-confluent}"
 RUSTFS_ACCESS_KEY="${RUSTFS_ACCESS_KEY:-rustfsadmin}"
 RUSTFS_SECRET_KEY="${RUSTFS_SECRET_KEY:-rustfsadmin123}"
 # Not 8181/9000: keep clear of anything else forwarded on the host.
-REST_PORT="${LAKE_REST_PORT:-18181}"
-S3_PORT="${LAKE_S3_PORT:-19000}"
+REST_PORT="${LAKEHOUSE_REST_PORT:-18181}"
+S3_PORT="${LAKEHOUSE_S3_PORT:-19000}"
 
 MODE="${1:-chains}"
 command -v duckdb >/dev/null 2>&1 || {
     echo "✘ duckdb not found. Install it: 'brew install duckdb' (macOS) or see https://duckdb.org/docs/installation." >&2; exit 1; }
 kubectl get deployment iceberg-rest -n "${NAMESPACE}" >/dev/null 2>&1 || {
-    echo "✘ No Iceberg REST catalog in '${NAMESPACE}'. Run 'make lake-up'." >&2; exit 1; }
+    echo "✘ No Iceberg REST catalog in '${NAMESPACE}'. Run 'make lakehouse-up'." >&2; exit 1; }
 
 PIDS=()
 cleanup() { for p in ${PIDS[@]+"${PIDS[@]}"}; do kill "${p}" 2>/dev/null || true; done; }
@@ -42,13 +42,13 @@ kubectl port-forward -n "${NAMESPACE}" svc/iceberg-rest "${REST_PORT}:8181" >/de
 kubectl port-forward -n "${NAMESPACE}" svc/rustfs "${S3_PORT}:9000" >/dev/null 2>&1 & PIDS+=($!)
 for _ in $(seq 1 20); do curl -sf -o /dev/null "http://localhost:${REST_PORT}/v1/config" && break; sleep 1; done
 
-# The catalog hands back s3://isotope-lake/... data-file paths; the secret points
+# The catalog hands back s3://isotope-lakehouse/... data-file paths; the secret points
 # DuckDB's S3 client at the RustFS port-forward, path-style, like Flink's side.
 INIT=$(cat <<SQL
 INSTALL iceberg; LOAD iceberg; INSTALL httpfs; LOAD httpfs;
 CREATE SECRET rustfs (TYPE s3, KEY_ID '${RUSTFS_ACCESS_KEY}', SECRET '${RUSTFS_SECRET_KEY}',
     ENDPOINT 'localhost:${S3_PORT}', URL_STYLE 'path', USE_SSL false, REGION 'us-east-1');
-ATTACH 's3://isotope-lake/warehouse' AS lake
+ATTACH 's3://isotope-lakehouse/warehouse' AS lakehouse
     (TYPE iceberg, ENDPOINT 'http://localhost:${REST_PORT}', AUTHORIZATION_TYPE 'none');
 SQL
 )
@@ -61,7 +61,7 @@ chains)
     # each leaf and follows `parents` until a version has none.
     QUERY=$(cat <<'SQL'
 WITH RECURSIVE
-v AS (SELECT DISTINCT * FROM lake.isotope.state_provenance),
+v AS (SELECT DISTINCT * FROM lakehouse.isotope.state_provenance),
 leaf AS (
     SELECT * FROM v
     WHERE NOT EXISTS (SELECT 1 FROM v c WHERE list_contains(c.parents, v.version_id))),
@@ -83,12 +83,12 @@ SQL
 );;
 hops)
     if [ -n "${2:-}" ]; then
-        QUERY="SELECT * FROM lake.isotope.hops WHERE trace_id = '${2//\'/}' ORDER BY hop_count, event_time;"
+        QUERY="SELECT * FROM lakehouse.isotope.hops WHERE trace_id = '${2//\'/}' ORDER BY hop_count, event_time;"
     else
-        QUERY="SELECT * FROM lake.isotope.hops ORDER BY event_time DESC LIMIT 20;"
+        QUERY="SELECT * FROM lakehouse.isotope.hops ORDER BY event_time DESC LIMIT 20;"
     fi;;
 latency)
-    # The 1-minute latency_percentiles report answers this per window; the lake
+    # The 1-minute latency_percentiles report answers this per window; the lakehouse
     # answers it over everything ever recorded, in one query.
     QUERY=$(cat <<'SQL'
 SELECT this_topic,
@@ -98,14 +98,14 @@ SELECT this_topic,
        quantile_cont(latency_ms, 0.99)::INT       AS p99_ms,
        min(event_time)                            AS first_seen,
        max(event_time)                            AS last_seen
-FROM lake.isotope.hops
+FROM lakehouse.isotope.hops
 GROUP BY this_topic
 ORDER BY min(hop_count);
 SQL
 );;
 shell)
     INITFILE=$(mktemp); printf '%s\n' "${INIT}" > "${INITFILE}"
-    echo "→ Lake attached as 'lake' (tables: lake.isotope.hops, lake.isotope.state_provenance). Ctrl-D to exit."
+    echo "→ Lakehouse attached as 'lakehouse' (tables: lakehouse.isotope.hops, lakehouse.isotope.state_provenance). Ctrl-D to exit."
     duckdb -init "${INITFILE}"; rm -f "${INITFILE}"; exit 0;;
 *)
     echo "Usage: $0 [chains|hops [TRACE_ID]|latency|shell]" >&2; exit 2;;

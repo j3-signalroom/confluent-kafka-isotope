@@ -17,7 +17,7 @@
     + [**3.5.1 [ALWAYS ON] 1:1 Collector Provenance: Flink as a Hop**](#351-always-on-11-collector-provenance-flink-as-a-hop)
     + [**3.5.2 [OPTIONAL] Fan-in Provenance: Windowed Merges**](#352-optional-fan-in-provenance-windowed-merges)
     + [**3.5.3 [OPTIONAL] State-Level Provenance: Upsert and CDC Sources**](#353-optional-state-level-provenance-upsert-and-cdc-sources)
-    + [**3.5.4 [OPTIONAL] Iceberg Lake: Trace History and Traversable Provenance**](#354-optional-iceberg-lake-trace-history-and-traversable-provenance)
+    + [**3.5.4 [OPTIONAL] Iceberg Lakehouse: Trace History and Traversable Provenance**](#354-optional-iceberg-lakehouse-trace-history-and-traversable-provenance)
 - [**Resources**](#resources)
   + [**Companion Articles**](#companion-articles)
   + [**Confluent Platform (locally self-hosted)**](#confluent-platform-locally-self-hosted)
@@ -736,25 +736,25 @@ make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=tr
 
 > For more information, refer to **[docs/state-provenance.md](docs/state-provenance.md)**.
 
-### **3.5.4 [OPTIONAL] Iceberg Lake: Trace History and Traversable Provenance**
-The reports keep 1-minute aggregates, and the raw isotope lives only as long as Kafka retention. The lake keeps the rows, in Apache Iceberg tables on the RustFS instance CMF already uses:
+### **3.5.4 [OPTIONAL] Iceberg Lakehouse: Trace History and Traversable Provenance**
+The reports keep 1-minute aggregates, and the raw isotope lives only as long as Kafka retention. The lakehouse keeps the rows, in Apache Iceberg tables on the RustFS instance CMF already uses:
 
-- **`lake.isotope.hops`:** one row per produced hop, so any trace can be pulled back at any age, and a new question is a SQL query rather than a new Flink job.
-- **`lake.isotope.state_provenance`:** the state-provenance stream (with `ENABLE_STATE_PROVENANCE=true`). Flink SQL has no recursive CTEs, so version chains are *queryable, not traversable* there; in the lake, `WITH RECURSIVE` walks every chain end to end.
-- **Separate failure domain:** the lake is a second CMF Application (`IsotopeLakeJob`, same JAR), so a catalog or storage fault can't stop the seven reports.
-- **CP only:** the lake runs as a CMF Application, so it is CP only. State provenance itself runs on both runtimes.
+- **`lakehouse.isotope.hops`:** one row per produced hop, so any trace can be pulled back at any age, and a new question is a SQL query rather than a new Flink job.
+- **`lakehouse.isotope.state_provenance`:** the state-provenance stream (with `ENABLE_STATE_PROVENANCE=true`). Flink SQL has no recursive CTEs, so version chains are *queryable, not traversable* there; in the lakehouse, `WITH RECURSIVE` walks every chain end to end.
+- **Separate failure domain:** the lakehouse is a second CMF Application (`IsotopeLakehouseJob`, same JAR), so a catalog or storage fault can't stop the seven reports.
+- **CP only:** the lakehouse runs as a CMF Application, so it is CP only. State provenance itself runs on both runtimes.
 
-To enable the lake, use the following `make` commands, then query it from the host with [DuckDB](https://duckdb.org/) (`brew install duckdb`):
+To enable the lakehouse, use the following `make` commands, then query it from the host with [DuckDB](https://duckdb.org/) (`brew install duckdb`):
 
 ```bash
-make cp-flink-reports-up ENABLE_LAKE=true ENABLE_STATE_PROVENANCE=true
+make cp-flink-reports-up ENABLE_LAKEHOUSE=true ENABLE_STATE_PROVENANCE=true
 
-scripts/lake-query.sh            # every entity's version chain, walked recursively
-scripts/lake-query.sh latency    # per-topic p50/p95/p99 over the lake's whole history
-scripts/lake-query.sh shell      # interactive DuckDB with the lake attached
+scripts/lakehouse-query.sh            # every entity's version chain, walked recursively
+scripts/lakehouse-query.sh latency    # per-topic p50/p95/p99 over the lakehouse's whole history
+scripts/lakehouse-query.sh shell      # interactive DuckDB with the lakehouse attached
 ```
 
-> For more information, refer to **[docs/lake.md](docs/lake.md)**.
+> For more information, refer to **[docs/lakehouse.md](docs/lakehouse.md)**.
 
 ## **Resources**
 

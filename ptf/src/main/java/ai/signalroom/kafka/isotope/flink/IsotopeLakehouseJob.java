@@ -9,8 +9,8 @@ import org.apache.flink.table.api.StatementSet;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
 /**
- * Entry point for the opt-in <b>lake</b>: a second CMF Application that copies
- * the isotope lineage streams into Apache Iceberg (see {@code docs/lake.md}).
+ * Entry point for the opt-in <b>lakehouse</b>: a second CMF Application that copies
+ * the isotope lineage streams into Apache Iceberg (see {@code docs/lakehouse.md}).
  *
  * <p>Why a separate application rather than more INSERTs in
  * {@link IsotopeReportsJob}: the reports share one StatementSet, which is one
@@ -19,42 +19,42 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
  * so the two share nothing at runtime. It ships in the same shadow JAR and is
  * selected by the application's {@code entryClass}.
  *
- * <p>Always writes {@code lake.isotope.hops} (one row per produced hop). With
+ * <p>Always writes {@code lakehouse.isotope.hops} (one row per produced hop). With
  * {@value #STATE_PROVENANCE_FLAG} it also copies the {@code isotope_state_provenance}
- * topic into {@code lake.isotope.state_provenance} — where, unlike in Flink SQL,
+ * topic into {@code lakehouse.isotope.state_provenance} — where, unlike in Flink SQL,
  * a recursive query can walk the {@code parents} chain end to end.
  */
-public final class IsotopeLakeJob {
+public final class IsotopeLakehouseJob {
 
     /** DDL files, applied in dependency order. */
     private static final List<String> DDL_FILES = List.of(
             "00_source_table.fql",   // source tables + isotope_raw view
             "05_isotope_view.fql",   // isotope (produced-record) view
-            "90_lake_catalog.fql");  // lake group id, Iceberg catalog, hops table
+            "90_lakehouse_catalog.fql");  // lakehouse group id, Iceberg catalog, hops table
 
-    /** Lake INSERT files — each contributes exactly one INSERT to the StatementSet. */
-    private static final List<String> LAKE_FILES = List.of(
-            "95_lake_hops.fql");
+    /** Lakehouse INSERT files — each contributes exactly one INSERT to the StatementSet. */
+    private static final List<String> LAKEHOUSE_FILES = List.of(
+            "95_lakehouse_hops.fql");
 
     /** Adds the state-provenance copy; the deploy script passes it when both features are on. */
     private static final String STATE_PROVENANCE_FLAG = "--state-provenance";
 
     private static final List<String> STATE_PROVENANCE_DDL_FILES = List.of(
             "09_state_provenance_sinks.fql",       // isotope_state_provenance (Kafka)
-            "91_lake_state_provenance_sink.fql");  // lake.isotope.state_provenance
+            "91_lakehouse_state_provenance_sink.fql");  // lakehouse.isotope.state_provenance
 
     private static final List<String> STATE_PROVENANCE_FILES = List.of(
-            "96_lake_state_provenance.fql");
+            "96_lakehouse_state_provenance.fql");
 
     /**
-     * Iceberg commits on each checkpoint, so this interval is both the lake's
+     * Iceberg commits on each checkpoint, so this interval is both the lakehouse's
      * freshness and its file size. Slower than the reports' 30s: every commit
      * writes a data file per table, and at demo volume a longer interval is
      * what keeps those files from being tiny.
      */
     private static final long CHECKPOINT_INTERVAL_MS = 60_000L;
 
-    private IsotopeLakeJob() {
+    private IsotopeLakehouseJob() {
     }
 
     public static void main(String[] args) throws Exception {
@@ -64,12 +64,12 @@ public final class IsotopeLakeJob {
         env.enableCheckpointing(CHECKPOINT_INTERVAL_MS);
 
         StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
-        // Same pin as IsotopeReportsJob, so event_time lands in the lake as the
+        // Same pin as IsotopeReportsJob, so event_time lands in the lakehouse as the
         // same instant the reports saw.
         tableEnv.getConfig().setLocalTimeZone(ZoneId.of("UTC"));
 
         List<String> ddlFiles = new ArrayList<>(DDL_FILES);
-        List<String> insertFiles = new ArrayList<>(LAKE_FILES);
+        List<String> insertFiles = new ArrayList<>(LAKEHOUSE_FILES);
         if (stateProvenance) {
             ddlFiles.addAll(STATE_PROVENANCE_DDL_FILES);
             insertFiles.addAll(STATE_PROVENANCE_FILES);
@@ -81,11 +81,11 @@ public final class IsotopeLakeJob {
             }
         }
 
-        StatementSet lake = tableEnv.createStatementSet();
+        StatementSet lakehouse = tableEnv.createStatementSet();
         for (String file : insertFiles) {
             List<String> stmts = IsotopeReportsJob.statements(IsotopeReportsJob.readResource("sql/" + file));
-            lake.addInsertSql(stmts.get(stmts.size() - 1));
+            lakehouse.addInsertSql(stmts.get(stmts.size() - 1));
         }
-        lake.execute();
+        lakehouse.execute();
     }
 }
