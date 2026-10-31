@@ -1,20 +1,20 @@
 -- =====================================================================
--- Lake: per-hop trace history — OPTIONAL (see docs/lake.md).
+-- Lakehouse: per-hop trace history — OPTIONAL (see docs/lakehouse.md).
 --
 -- Copies the `isotope` view (05_isotope_view.fql) into Iceberg row for
 -- row. No window, no aggregation: the point is to keep what the 1-minute
 -- reports fold away.
 --
 -- Rows become visible when Iceberg commits, which happens on each Flink
--- checkpoint (IsotopeLakeJob sets the interval), not per record.
+-- checkpoint (IsotopeLakehouseJob sets the interval), not per record.
 --
 -- Depends on:
 --   - `isotope` view (05_isotope_view.fql)
---   - `lake`.`isotope`.`hops` (90_lake_catalog.fql)
+--   - `lakehouse`.`isotope`.`hops` (90_lakehouse_catalog.fql)
 -- =====================================================================
-SET 'pipeline.name' = 'isotope_lake_hops';
+SET 'pipeline.name' = 'isotope_lakehouse_hops';
 
-INSERT INTO `lake`.`isotope`.`hops`
+INSERT INTO `lakehouse`.`isotope`.`hops`
 SELECT
     `trace_id`,
     `origin_ts_ms`,
