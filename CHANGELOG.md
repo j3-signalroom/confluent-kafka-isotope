@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.32.00.000] - TBD
+## [0.32.00.000] - 2026-11-05
 ### Added
 - Issues[`#362`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/362)
 - Issues[`#396`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/396)
@@ -17,6 +17,7 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 - Issues[`#417`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/417)
 - Issues[`#419`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/419)
 - Issues[`#422`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/422)
+- Issues[`#427`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/427)
 - Issues[`#428`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/428)
 - Issues[`#430`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/430)
 - Issues[`#440`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/440)
