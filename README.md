@@ -500,7 +500,7 @@ docs/                                   extracted long-form docs (linked from th
   metrics.md                            Micrometer/Prometheus meter + PromQL reference (§3.4)
   terraform.png                         rendered resource graph (embedded in §3.3)
   qrcode_github.com.png                 QR code to this repo
-  visualize-out-of-band-propagation.png     out-of-band propagation — the producer interceptor
+  visualize-out-of-band-propagation.png out-of-band propagation — the producer interceptor
                                         stamps context on send; consume-side capture
                                         records the edge (§intro)
   visualize-in-band-propagation.png     in-band propagation — the isotope rides inside the
@@ -520,9 +520,6 @@ KNOWN_ISSUES.md                         open issues + upstream bugs worth knowin
 LICENSE.md                              MIT license
 .java-version                           JDK pin for the Gradle build (companion to
                                         docs/image_generators/.python-version)
-.github/                                repo-level agent instructions
-  copilot-instructions.md               house style + conventions for code assistants
-  instructions/mermaid.instructions.md  how the README's mermaid diagrams are written
 .vscode/                                launch.json / tasks.json — run + debug the demo CLI
 .idea/runConfigurations/                attach a debugger to, and port-forward, the Flink
                                         TaskManager (companions to scripts/port-forward-*.sh)
