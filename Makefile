@@ -120,16 +120,16 @@ ENABLE_MERGE_PROVENANCE ?= $(MERGE_PROVENANCE)
 # Falls back to STATE_PROVENANCE, the env var the CP deploy script reads.
 ENABLE_STATE_PROVENANCE ?= $(STATE_PROVENANCE)
 
-# Optional Iceberg lake — see docs/lake.md. CP only, off by default; on, it
-# deploys an Iceberg REST catalog ('make lake-up') and a second CMF Application
-# (IsotopeLakeJob) that copies per-hop history — plus the state-provenance
+# Optional Iceberg lakehouse — see docs/lakehouse.md. CP only, off by default; on, it
+# deploys an Iceberg REST catalog ('make lakehouse-up') and a second CMF Application
+# (IsotopeLakehouseJob) that copies per-hop history — plus the state-provenance
 # stream when ENABLE_STATE_PROVENANCE=true — into Iceberg on RustFS.
-#   make cp-flink-reports-up ENABLE_LAKE=true [ENABLE_STATE_PROVENANCE=true]
-# Falls back to LAKE, the env var the CP deploy script reads directly.
-ENABLE_LAKE         ?= $(LAKE)
-LAKE_MANIFEST       ?= k8s/base/iceberg-rest.yaml
-LAKE_APP_NAME       ?= isotope-lake
-LAKE_APP_MANIFEST   ?= k8s/base/cmf-flink-lake-application.json
+#   make cp-flink-reports-up ENABLE_LAKEHOUSE=true [ENABLE_STATE_PROVENANCE=true]
+# Falls back to LAKEHOUSE, the env var the CP deploy script reads directly.
+ENABLE_LAKEHOUSE         ?= $(LAKEHOUSE)
+LAKEHOUSE_MANIFEST       ?= k8s/base/iceberg-rest.yaml
+LAKEHOUSE_APP_NAME       ?= isotope-lakehouse
+LAKEHOUSE_APP_MANIFEST   ?= k8s/base/cmf-flink-lakehouse-application.json
 
 # Optional metrics showcase (Prometheus + Grafana) — see k8s/monitoring/README.md
 MONITORING_MANIFEST ?= k8s/monitoring
@@ -708,30 +708,30 @@ rustfs-down: ## Delete RustFS and its data (safe to run even if not deployed)
 	@echo "✔ RustFS removed."
 
 # ------------------------------------------------------------------------------
-# Iceberg lake (optional) — REST catalog over a RustFS bucket. See docs/lake.md.
+# Iceberg lakehouse (optional) — REST catalog over a RustFS bucket. See docs/lakehouse.md.
 # ------------------------------------------------------------------------------
-.PHONY: lake-up
-lake-up: rustfs-up ## Deploy the Iceberg REST catalog and create the isotope-lake bucket on RustFS
-	@echo "→ Deploying the Iceberg REST catalog from $(LAKE_MANIFEST)..."
-	@test -f $(LAKE_MANIFEST) || (echo "✘ $(LAKE_MANIFEST) not found." && exit 1)
-	kubectl apply -f $(LAKE_MANIFEST)
+.PHONY: lakehouse-up
+lakehouse-up: rustfs-up ## Deploy the Iceberg REST catalog and create the isotope-lakehouse bucket on RustFS
+	@echo "→ Deploying the Iceberg REST catalog from $(LAKEHOUSE_MANIFEST)..."
+	@test -f $(LAKEHOUSE_MANIFEST) || (echo "✘ $(LAKEHOUSE_MANIFEST) not found." && exit 1)
+	kubectl apply -f $(LAKEHOUSE_MANIFEST)
 	@kubectl rollout status deployment/iceberg-rest -n $(NAMESPACE) --timeout=180s
-	@kubectl wait --for=condition=complete job/iceberg-lake-make-bucket -n $(NAMESPACE) --timeout=120s
-	@echo "✔ Iceberg REST catalog ready at http://iceberg-rest.$(NAMESPACE).svc:8181 (warehouse: s3://isotope-lake/warehouse)."
+	@kubectl wait --for=condition=complete job/iceberg-lakehouse-make-bucket -n $(NAMESPACE) --timeout=120s
+	@echo "✔ Iceberg REST catalog ready at http://iceberg-rest.$(NAMESPACE).svc:8181 (warehouse: s3://isotope-lakehouse/warehouse)."
 
-.PHONY: lake-down
-lake-down: ## Delete the Iceberg REST catalog and the lake's data (safe to run even if not deployed)
+.PHONY: lakehouse-down
+lakehouse-down: ## Delete the Iceberg REST catalog and the lakehouse's data (safe to run even if not deployed)
 	@echo "→ Deleting the Iceberg REST catalog..."
-	@kubectl delete -f $(LAKE_MANIFEST) --ignore-not-found
+	@kubectl delete -f $(LAKEHOUSE_MANIFEST) --ignore-not-found
 	@kubectl delete pvc iceberg-rest-data -n $(NAMESPACE) --ignore-not-found
 	@# The bucket lives on RustFS, which outlives the catalog; without this a
 	@# fresh catalog would sit over orphaned table files from the last one.
-	@kubectl run lake-rm-bucket -n $(NAMESPACE) --rm -i --restart=Never --quiet \
+	@kubectl run lakehouse-rm-bucket -n $(NAMESPACE) --rm -i --restart=Never --quiet \
 		--image=amazon/aws-cli:2.37.1 \
 		--env=AWS_ACCESS_KEY_ID=$(RUSTFS_ACCESS_KEY) --env=AWS_SECRET_ACCESS_KEY=$(RUSTFS_SECRET_KEY) \
 		--env=AWS_DEFAULT_REGION=us-east-1 --env=AWS_ENDPOINT_URL=$(RUSTFS_S3_ENDPOINT) \
-		-- s3 rb s3://isotope-lake --force >/dev/null 2>&1 || true
-	@echo "✔ Iceberg lake removed."
+		-- s3 rb s3://isotope-lakehouse --force >/dev/null 2>&1 || true
+	@echo "✔ Iceberg lakehouse removed."
 
 # ------------------------------------------------------------------------------
 # Phase 6: Apache Flink
@@ -755,7 +755,7 @@ flink-operator-install: namespace ## Install the Confluent Flink Kubernetes Oper
 	# NOT the Apache OSS operator. watchNamespaces scopes it to the confluent namespace.
 	# The chart requests 2 full CPUs for the operator — a third of the minikube
 	# node, idle between reconciles. Requesting 500m (limit left at 2, so it can
-	# still burst) is what leaves room to schedule the optional lake application.
+	# still burst) is what leaves room to schedule the optional lakehouse application.
 	helm upgrade --install cp-flink-kubernetes-operator confluentinc/flink-kubernetes-operator \
 		--version "~$(FLINK_OPERATOR_VER)" \
 		--namespace $(NAMESPACE) \
@@ -853,21 +853,21 @@ reports-jar: ## Build the reports application shadow JAR (IsotopeReportsJob + 3 
 	./gradlew :ptf:shadowJar -q
 
 .PHONY: cp-flink-reports-up
-cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication; +lake app with ENABLE_LAKE)
-	@if [ "$(ENABLE_LAKE)" = "true" ]; then $(MAKE) --no-print-directory lake-up; fi
+cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication; +lakehouse app with ENABLE_LAKEHOUSE)
+	@if [ "$(ENABLE_LAKEHOUSE)" = "true" ]; then $(MAKE) --no-print-directory lakehouse-up; fi
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
 		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' APP_MANIFEST='$(APP_MANIFEST)' APP_JAR='$(APP_JAR)' \
 		POOL_IMAGE='$(POOL_IMAGE)' APP_FLINK_VERSION='$(APP_FLINK_VERSION)' \
 		RUSTFS_S3_ENDPOINT='$(RUSTFS_S3_ENDPOINT)' RUSTFS_ACCESS_KEY='$(RUSTFS_ACCESS_KEY)' RUSTFS_SECRET_KEY='$(RUSTFS_SECRET_KEY)' \
 		MERGE_PROVENANCE='$(ENABLE_MERGE_PROVENANCE)' \
 		STATE_PROVENANCE='$(ENABLE_STATE_PROVENANCE)' \
-		LAKE='$(ENABLE_LAKE)' LAKE_APP_NAME='$(LAKE_APP_NAME)' LAKE_MANIFEST='$(LAKE_APP_MANIFEST)' \
+		LAKEHOUSE='$(ENABLE_LAKEHOUSE)' LAKEHOUSE_APP_NAME='$(LAKEHOUSE_APP_NAME)' LAKEHOUSE_MANIFEST='$(LAKEHOUSE_APP_MANIFEST)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh up
 
 .PHONY: cp-flink-reports-down
 cp-flink-reports-down: ## Tear down the reports CMF Application + artifact + sink topics (safe to run repeatedly)
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
-		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' LAKE_APP_NAME='$(LAKE_APP_NAME)' \
+		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' LAKEHOUSE_APP_NAME='$(LAKEHOUSE_APP_NAME)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh down
 
 # ------------------------------------------------------------------------------
@@ -1154,7 +1154,7 @@ cp-flink-down: ## Tear down the reports application, CMF, RustFS, operator, and 
 	-@$(MAKE) cp-flink-reports-down    	# delete the CMF Application + artifact while CMF is still up
 	-@$(MAKE) flink-delete         		# remove any leftover raw FlinkDeployment (legacy)
 	$(MAKE) cmf-uninstall
-	$(MAKE) lake-down                   # before rustfs-down: it empties the lake bucket through RustFS
+	$(MAKE) lakehouse-down                   # before rustfs-down: it empties the lakehouse bucket through RustFS
 	$(MAKE) rustfs-down
 	$(MAKE) flink-operator-uninstall
 	$(MAKE) cert-manager-uninstall

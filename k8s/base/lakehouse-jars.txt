@@ -1,22 +1,22 @@
-# Maven Central paths of the JARs the opt-in Iceberg lake adds to /opt/flink/lib
-# (docs/lake.md), fetched one per line by flink-sql-isotope.containerfile.
+# Maven Central paths of the JARs the opt-in Iceberg lakehouse adds to /opt/flink/lib
+# (docs/lakehouse.md), fetched one per line by flink-sql-isotope.containerfile.
 #
 # WHY A PINNED LIST (not iceberg-aws-bundle + hadoop-client-runtime)
 # The two convenience bundles carried every AWS service client plus Netty, and
 # Hadoop's whole shaded dependency tree (Jackson 2.12, Jetty 9.4, JLine 3.9) —
-# 1 critical and ~24 high CVEs in libraries the lake never calls. This list is
+# 1 critical and ~24 high CVEs in libraries the lakehouse never calls. This list is
 # only what it does call, and scans clean (Trivy, CRITICAL/HIGH):
 #
 #   * AWS SDK v2 — the transitive closure of `s3` + `url-connection-client`,
 #     minus netty-nio-client and apache5-client (Iceberg 1.11 supports only
-#     the `apache` v4 and `urlconnection` clients; 90_lake_catalog.fql selects
+#     the `apache` v4 and `urlconnection` clients; 90_lakehouse_catalog.fql selects
 #     urlconnection, the JDK's own HTTP stack, so no third-party HTTP library
 #     ships at all) and minus slf4j (Flink provides it). Plus `kms` (and its
 #     aws-json-protocol) and `sts`: Iceberg's AwsProperties holds KMS enum
 #     defaults in static fields and STS model types the verifier loads, so
 #     the catalog cannot be created without them even though nothing here
 #     calls KMS or STS. Glue and DynamoDB appear only in signatures the JVM
-#     never resolves. Found by running the lake's catalog path against this
+#     never resolves. Found by running the lakehouse's catalog path against this
 #     exact set, not by reading dependency trees.
 #   * Hadoop — Iceberg's Flink catalog factory builds a Hadoop Configuration
 #     even for a REST catalog, and once Hadoop is on the classpath Flink itself

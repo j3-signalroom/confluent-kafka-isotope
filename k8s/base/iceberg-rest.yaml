@@ -1,15 +1,15 @@
-# Iceberg REST catalog — the opt-in lake for state provenance and per-hop trace
-# history (docs/lake.md, issue #362).
+# Iceberg REST catalog — the opt-in lakehouse for state provenance and per-hop trace
+# history (docs/lakehouse.md, issue #362).
 #
 # WHY THIS EXISTS
 # `docs/state-provenance.md` 5.0 leaves ancestry "queryable, not traversable":
 # Flink SQL has no recursive CTEs, so walking more than one generation of
 # `parents` belongs in a store fed by the provenance topic. This is that store.
-# The lake application (IsotopeLakeJob) writes Iceberg tables through this
-# catalog; DuckDB on the host reads them back (scripts/lake-query.sh).
+# The lakehouse application (IsotopeLakehouseJob) writes Iceberg tables through this
+# catalog; DuckDB on the host reads them back (scripts/lakehouse-query.sh).
 #
 # WHY THE REST FIXTURE (not Polaris / Lakekeeper / Nessie)
-# The lake has one writer and one reader on a single-node demo cluster. The
+# The lakehouse has one writer and one reader on a single-node demo cluster. The
 # Apache Iceberg REST fixture is the reference REST server — one pod, a JDBC
 # catalog underneath — and needs no auth server, no database pod, and no
 # bootstrap step. The REST protocol is versioned independently of the Iceberg
@@ -18,7 +18,7 @@
 # WHERE THE DATA LIVES
 # Table metadata is a SQLite file on a PVC (so the catalog survives a pod
 # restart and keeps pointing at the right metadata files). Table data and
-# metadata files live in the `isotope-lake` bucket on the RustFS instance
+# metadata files live in the `isotope-lakehouse` bucket on the RustFS instance
 # CMF already uses (k8s/base/rustfs.yaml) — no second object store.
 #
 # Credentials are the demo-grade RustFS ones, same as rustfs.yaml.
@@ -70,13 +70,13 @@ spec:
             - name: CATALOG_JDBC_PASSWORD
               value: "password"
             - name: CATALOG_WAREHOUSE
-              value: "s3://isotope-lake/warehouse"
+              value: "s3://isotope-lakehouse/warehouse"
             - name: CATALOG_IO__IMPL
               value: "org.apache.iceberg.aws.s3.S3FileIO"
             - name: CATALOG_S3_ENDPOINT
               value: "http://rustfs.confluent.svc:9000"
             # RustFS serves buckets path-style; virtual-host style would try
-            # to resolve isotope-lake.rustfs.confluent.svc.
+            # to resolve isotope-lakehouse.rustfs.confluent.svc.
             - name: CATALOG_S3_PATH__STYLE__ACCESS
               value: "true"
             - name: AWS_ACCESS_KEY_ID
@@ -123,13 +123,13 @@ spec:
       port: 8181
       targetPort: 8181
 ---
-# One-shot bucket creation for the lake, mirroring rustfs-make-bucket. Kept in
-# this manifest rather than rustfs.yaml so the lake stays fully opt-in: without
-# `make lake-up`, RustFS holds only cmf-artifacts, exactly as before.
+# One-shot bucket creation for the lakehouse, mirroring rustfs-make-bucket. Kept in
+# this manifest rather than rustfs.yaml so the lakehouse stays fully opt-in: without
+# `make lakehouse-up`, RustFS holds only cmf-artifacts, exactly as before.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: iceberg-lake-make-bucket
+  name: iceberg-lakehouse-make-bucket
   namespace: confluent
 spec:
   backoffLimit: 10
@@ -155,6 +155,6 @@ spec:
               until aws s3api list-buckets >/dev/null 2>&1; do
                 echo "waiting for rustfs..."; sleep 3;
               done
-              aws s3api head-bucket --bucket isotope-lake 2>/dev/null \
-                || aws s3api create-bucket --bucket isotope-lake
-              echo "bucket isotope-lake ready"
+              aws s3api head-bucket --bucket isotope-lakehouse 2>/dev/null \
+                || aws s3api create-bucket --bucket isotope-lakehouse
+              echo "bucket isotope-lakehouse ready"
