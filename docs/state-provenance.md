@@ -1,6 +1,6 @@
 # State-Level Provenance over Upsert Sources
 
-> **Implemented and wired into the demo** as [root README §3.5.3](../README.md#353-optional-state-level-provenance-upsert-and-cdc-sources) — `make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true`. Off by default, **CP only** ([§5.0](#50-cp-vs-ccaf-where-the-divergence-actually-lands) explains why CCAF cannot run the statement verbatim). Code: [`StateProvenancePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTF.java), [`StateVersion`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateVersion.java), [`09_state_provenance_sinks.fql`](../scripts/flink/sql/cp/09_state_provenance_sinks.fql), [`85_state_provenance.fql`](../scripts/flink/sql/cp/85_state_provenance.fql).
+> **Implemented and wired into the demo** as [root README §3.5.3](../README.md#353-optional-state-level-provenance-upsert-and-cdc-sources) — `make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true` on CP, `make cc-flink-reports-up ENABLE_STATE_PROVENANCE=true` on CCAF. Off by default on both, and both derive **identical version IDs** for the same record ([§5.0](#50-cp-vs-ccaf-where-the-divergence-actually-lands)). Code: [`StateProvenancePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTF.java), [`StateVersion`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateVersion.java), [`09_state_provenance_sinks.fql`](../scripts/flink/sql/cp/09_state_provenance_sinks.fql), [`85_state_provenance.fql`](../scripts/flink/sql/cp/85_state_provenance.fql), [`setup-ccaf-state-provenance.tf`](../terraform/setup-ccaf-state-provenance.tf).
 
 **Table of Contents**
 <!-- toc -->
@@ -41,12 +41,14 @@ version_id  = event_time_ms (48 bits) || digest[0:10]   →  patched to a valid 
 
 `SEP` is the same NUL field separator [`MergeTrace`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/MergeTrace.java) already uses, with the same null marker discipline. The high 48 bits carry event time exactly as `Isotope.uuidV7Bytes` and `MergeTrace` lay them out, so version IDs sort chronologically and interleave with interceptor-minted trace IDs rather than being 16 opaque hashed bytes.
 
-That makes identity **(event time, content)**, not content alone — worth stating plainly. Two byte-identical states at the same event time are the same version, which is the idempotence that actually matters under at-least-once delivery; a row that revisits an earlier value *later* is a distinct version, which is what a version chain should say. The preimage is a wire contract: [`StateVersionTest`](../ptf/src/test/java/ai/signalroom/kafka/isotope/flink/StateVersionTest.java) pins field order, separator forgery, null-vs-empty, tombstones, and the UUIDv7 layout, so changing any of them is a build failure rather than silently renumbered history.
+`content` is the raw value **without its Schema Registry header**. A registry serializer starts every value with a magic byte `0x00` and a 4-byte schema ID, and that ID is assigned by whichever registry the producer used. CP's registry and Confluent Cloud's give the same schema different IDs, so hashing those four bytes would give the same record a different version on each runtime. `StateVersion.canonicalContent` drops the first five bytes whenever a value starts with `0x00` and is at least five bytes long, and hashes the rest. Protobuf's message-index byte comes after the schema ID and stays in the hash, because it comes from the schema, not from the registry. A value written with the schema ID in a Kafka header has no prefix to strip, so it hashes to the same version as the prefixed form. The rule checks only the byte layout, because nothing in a `BYTES` column says which serializer wrote it. So for a non-registry payload that happens to start with `0x00`, two values that differ only in bytes 1–4 would share a version. Every source in this project is registry-framed.
+
+That makes identity **(event time, content)**, not content alone — worth stating plainly. Two byte-identical states at the same event time are the same version, which is the idempotence that actually matters under at-least-once delivery; a row that revisits an earlier value *later* is a distinct version, which is what a version chain should say. The preimage is a wire contract: [`StateVersionTest`](../ptf/src/test/java/ai/signalroom/kafka/isotope/flink/StateVersionTest.java) pins field order, separator forgery, null-vs-empty, tombstones, the Schema Registry strip, and the UUIDv7 layout, so changing any of them is a build failure rather than silently renumbered history.
 
 Content addressing buys four properties that matter more here than they did for the windowed merge:
 
 - **No window required.** Identity comes from the value, so unbounded `GROUP BY`, regular joins, and dedup all have something to key on — the thing the window was standing in for.
-- **Deterministic across runtimes and across reprocessing.** CP and CCAF derive the same ID from the same content; so does a replay six months later.
+- **Deterministic across runtimes and across reprocessing.** CP and CCAF derive the same ID from the same content, because the one part of the value that differs between their registries is stripped first; a replay six months later derives it again.
 - **Idempotent under duplicate emission.** A retract stream revises the same logical row repeatedly, and at-least-once delivery repeats records. Recomputing a version you already published yields the same ID, so the provenance topic tolerates duplicates by construction.
 - **Retraction becomes append.** You never mutate a version; you publish a new one. The provenance stream is therefore **append-only even though its subject is an updating table** — which is what lets every operator in the pipeline stay append-only.
 
@@ -126,7 +128,7 @@ FROM TABLE(
 );
 ```
 
-`entity_log` ([`09_state_provenance_sinks.fql`](../scripts/flink/sql/cp/09_state_provenance_sinks.fql)) is the append-mode change log over the order topics, which are already declared `value.format = 'raw'` with headers as `VIRTUAL` columns — indifferent to value format, and tolerant of tombstones.
+`entity_log` ([`09_state_provenance_sinks.fql`](../scripts/flink/sql/cp/09_state_provenance_sinks.fql)) is the append-mode change log over the order topics, which are already declared `value.format = 'raw'` with headers as `VIRTUAL` columns — indifferent to value format, and tolerant of tombstones. On CCAF the same view lives in [`setup-ccaf-state-provenance.tf`](../terraform/setup-ccaf-state-provenance.tf), with two substitutions that come from the Topic Catalog rather than from the design: the raw value column is `val` rather than `value`, and event time is `$rowtime` rather than a declared `event_time`.
 
 **The demo's entity key.** A real deployment keys on the upsert PK. This demo has none to offer: `App.java` sets the record key to the producing *service* name and `hop` forwards the DemoEvent value verbatim, so neither identifies an entity. The isotope trace ID does — stamped once at the origin, surviving every hop — so the demo treats one traced order as the entity and its three stage records as three versions of it. Because `source_name` is in the preimage, those are three distinct versions even though the payload bytes never change:
 
@@ -137,13 +139,16 @@ orders.placed → orders.enriched → orders.fulfilled
 each naming its predecessor in `parents`. That is the same shape a real upsert entity produces.
 
 ### **4.4 Sinks**
-- **`isotope_state_provenance`** — append-only. Plain `kafka` sink on CP (`avro-confluent`), append mode on CCAF. This is the durable lineage record.
+- **`isotope_state_provenance`** — append-only. Plain `kafka` sink on CP (`avro-confluent`), append mode with `proto-registry` on CCAF. Retention is unlimited on both: the CP deploy script sets `retention.ms=-1`, and the CCAF `CREATE TABLE` sets `'kafka.retention.time' = '0'` (CCAF's way of saying unlimited, since Flink durations don't accept `-1`). This is the durable lineage record.
 - **`state_provenance_edges`** — append-only, the §2.3 `UNNEST` projection. Not created by the demo; derive it if you want flat edges.
 - **`current_state`** — the only upsert table in the design, and it is a *convenience view* for "what is order 42 now," keyed by `entity_key`. Nothing in the provenance path reads it, so its changelog mode infects nothing.
 
 ### **4.5 Running it**
 ```bash
 make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true
+
+make cc-flink-reports-up ENABLE_STATE_PROVENANCE=true \
+    CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET
 
 # both collectors — they answer different questions, and neither implies the other
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=true
@@ -153,20 +158,26 @@ Off, nothing is created: no view, no topic, no statement, and the deployment is 
 
 ## **5.0 CP vs CCAF: where the divergence actually lands**
 
-**The feature ships CP-only, and the reason is narrow: canonicalization, not capability.**
+**The feature runs on both runtimes and gives the same version IDs on both.** Getting there took two facts and one rule.
 
-The version preimage needs bytes that are stable for a given state. CP's source tables are declared `'value.format' = 'raw'`, so the raw value is available as a `BYTES` column and the PTF hashes it directly. CCAF's Topic Catalog imports each topic with typed Protobuf columns and does not hand back the raw value, so the identical statement cannot be written there — it would hash a canonical rendering of the typed columns instead. That is a perfectly good design, and arguably a better one, but it yields different IDs for identical data, so shipping both would mean two incompatible identity schemes behind one feature flag. There is deliberately no `ENABLE_STATE_PROVENANCE` on `make cc-flink-reports-up`.
+- **Both runtimes can read the raw value.** CP's source tables are declared `'value.format' = 'raw'`, so the value is a `BYTES` column called `value`. On CCAF, Terraform creates the order topics before any producer registers a schema, so the Topic Catalog imports them as `(key BYTES, val BYTES)` ([flink-collector.md §2.2](flink-collector.md#22-ccaf-table-shape) records the `DESCRIBE`). That is the same bytes under a different column name, so the PTF hashes the same input on both.
+- **The bytes still differ in one place: the registry's schema ID.** The services write `KafkaProtobufSerializer` values, which start with a magic byte and a 4-byte schema ID. Each runtime has its own registry, so the same `DemoEvent` carries a different ID on CP and on Confluent Cloud.
+- **So `StateVersion` strips that header before hashing** (§2.1). What's left is the Protobuf message index and the payload, and both come from the schema and the record alone. `StateVersionTest` checks this directly: the same payload under two different schema IDs is the same version.
 
-Everything else is portable. [`StateProvenancePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTF.java)'s state is plain `String`/`List` fields precisely so CCAF would accept it, and the shadow JAR CCAF already uploads contains the class — it is simply never registered there. **No capability divergence:** the design avoids the one place the runtimes genuinely differ — CCAF exposes `changelog.mode = retract` and stock open-source Flink has no retract-capable Kafka sink — by never needing retract semantics at all. Content-addressed immutable versions turn what would have been a retract stream into an append stream.
+An earlier draft of this section assumed CCAF exposed only typed Protobuf columns, and proposed hashing a shared rendering of those columns. That would have worked, but it adds a second definition of "content" to keep stable. It also isn't needed while the order topics are imported as bytes.
 
-To close the gap, pick one canonicalization both runtimes can compute — typed columns rendered by a shared UDF is the obvious candidate — and the CCAF side becomes the same three statements the merge feature already has there.
+**One condition to keep:** the order topics must stay byte-imported on CCAF. If one of them is created *after* its value schema is registered, the Topic Catalog derives typed columns, there's no `val` column, and the `entity_log` view stops planning. It fails loudly rather than computing different IDs. `setup-cc-kafka.tf` already pre-creates those topics for the always-on collector, which reads `val` too.
 
-What remains is the declaration-layer asymmetry this project already documents for headers in [flink-collector.md §2.2](flink-collector.md#22-ccaf-table-shape):
+Nothing else differs at the capability level. [`StateProvenancePTF`](../ptf/src/main/java/ai/signalroom/kafka/isotope/flink/StateProvenancePTF.java)'s state uses plain `String`/`List`/`Map` fields so that CCAF accepts it, and on CCAF it's registered from the same shadow JAR with `CREATE FUNCTION … USING JAR`. The design also avoids the one place the runtimes really do differ: CCAF has `changelog.mode = retract`, and stock open-source Flink has no Kafka sink that supports retractions. Because versions are content-addressed and never changed, what would have been a retract stream is an append-only stream, so retract semantics are never needed.
+
+On CCAF, `STATE_PROVENANCE` is registered only when the feature is on, unlike the merge UDFs. CCAF checks a PTF's state type at `CREATE FUNCTION` time. If that check ever rejected this class, an always-on registration would break the default deploy, including the seven reports, even with the feature off.
+
+The remaining differences are in how tables are declared, the same split this project already documents for headers in [flink-collector.md §2.2](flink-collector.md#22-ccaf-table-shape):
 
 | | CP / open-source Flink | CCAF |
 |---|---|---|
-| Source table in append mode | own the DDL: `'connector' = 'kafka'` | Topic Catalog auto-imports; set `changelog.mode` via `ALTER TABLE` |
-| Provenance sink | `kafka` + `avro-confluent` | append mode + Protobuf/SR, as the seven reports already differ |
+| Source table in append mode | own the DDL: `'connector' = 'kafka'`, raw `value` | Topic Catalog auto-imports `(key, val)` BYTES in append mode; no `ALTER` needed |
+| Provenance sink | `kafka` + `avro-confluent`, `retention.ms=-1` set by the deploy script | append mode + `proto-registry`, `'kafka.retention.time' = '0'` in the DDL |
 | `current_state` table | `upsert-kafka` + PK | `changelog.mode = upsert` + `PRIMARY KEY … NOT ENFORCED` |
 | The PTF | same shadow JAR, registered programmatically | same shadow JAR, `CREATE FUNCTION … USING JAR` |
 | PTF state | `MapView`/`ListView` allowed | plain `Map`/`List` only; no `byte[]` map values |
@@ -177,14 +188,14 @@ The last row is a coding constraint, not a behavioral difference: write the stat
 
 **Verify before building:**
 
-1. **Flipping `changelog.mode` on a shared CCAF catalog table** affects every consumer of that table. If that is not acceptable, a second append-mode table over the same topic is needed — confirm CCAF permits that shape in their environment.
+1. **Flipping `changelog.mode` on a shared CCAF catalog table** affects every consumer of that table. The demo doesn't need to, because its order topics are imported in append mode. A real upsert source on CCAF would be imported in upsert mode, and then either flipping it or a second append-mode table over the same topic is needed. Confirm that CCAF allows that in your environment.
 2. **Writable `headers` metadata on an upsert-mode sink**, if they ever want the collector writing to one. Not needed for this design; needed if message-level tracing is layered on top.
-3. **Canonicalization stability** across the language boundary if anything outside Flink computes a `version_id`. Two implementations of "canonical content" is two chances to disagree.
+3. **Canonicalization stability** across the language boundary if anything outside Flink computes a `version_id`. Two implementations of "canonical content" is two chances to disagree, and that includes the Schema Registry strip in §2.1: any other implementation must drop the same five bytes under the same condition.
 
 **Accepted limits:**
 
 - **Ancestry is queryable, not traversable — in Flink.** Flink SQL has no recursive CTEs, so walking more than one generation belongs in a relational or graph store fed by the provenance topic — the same boundary [flink-collector.md §3.1](flink-collector.md#31-11-statements-only) already sets for merge edges. The opt-in [Iceberg lake](lake.md) is that store: `ENABLE_LAKE=true` copies this topic into `lake.isotope.state_provenance`, and `scripts/lake-query.sh` walks every chain with `WITH RECURSIVE`.
 - **Compaction bounds re-derivation, not lineage.** Compacting the source topic removes superseded messages, but every version already emitted keeps its place in the graph. It lives in `isotope_state_provenance`, with its parents inline. What compaction does remove is the *content* of old versions, since the provenance record holds IDs and no payload. That costs three things: seeing what an old version's value was, recomputing a `version_id` from its bytes to verify it, and rebuilding the provenance from `earliest-offset` after the PTF logic changes. Only the last is operational, and only if you ever need to rebuild the graph rather than read it. If you do, archive the raw source log somewhere that is not compacted, such as an Iceberg table.
-- **The provenance topic's retention is the real bound on lineage.** On a broker with default settings, a topic created without explicit configs uses `cleanup.policy=delete` and about 7 days of retention, so the whole graph would expire. The CP deploy script pins `isotope_state_provenance` to `retention.ms=-1`, `retention.bytes=-1` and `cleanup.policy=delete`, which means infinite retention and no compaction. Compaction would be wrong here as well: it keeps one record per key, and a version chain needs all of them. For history that you can query, and traverse with recursive CTEs, land the topic in Iceberg.
+- **The provenance topic's retention is the real bound on lineage.** On a broker with default settings, a topic created without explicit configs uses `cleanup.policy=delete` and about 7 days of retention, so the whole graph would expire. The CP deploy script pins `isotope_state_provenance` to `retention.ms=-1`, `retention.bytes=-1` and `cleanup.policy=delete`, which means infinite retention and no compaction. CCAF's `CREATE TABLE` sets the same thing with `'kafka.retention.time' = '0'` and `'kafka.cleanup-policy' = 'delete'`. Compaction would be wrong here as well: it keeps one record per key, and a version chain needs all of them. For history that you can query, and traverse with recursive CTEs, land the topic in Iceberg.
 - **Global aggregates do not fit.** The inline parent set is right for entity-scoped derivation and wrong for a `SUM` over everything. That case wants a count plus a sketch, and loses the ability to name the parents.
 - **Idle partitions stall event time.** Upsert topics are frequently bursty and partially idle; the 5s watermark delay tuned for the demo is not a starting point for their volumes.

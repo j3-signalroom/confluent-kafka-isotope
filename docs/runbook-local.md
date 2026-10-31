@@ -112,7 +112,7 @@ make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=true
 ```
 
-That adds one topic (`isotope_state_provenance`) and one `INSERT` to the same `StatementSet`. Each traced order becomes an entity whose three stage records are three versions of it, chained by a `parents` array — `orders.placed` → `orders.enriched` → `orders.fulfilled`. Unlike the merge collector this needs no window: identity is content-addressed, so it works on the updating sources (unbounded `GROUP BY`, joins, dedup) where the windowed path has nothing to key on. **CP only** — see [docs/state-provenance.md §5.0](./state-provenance.md) for why CCAF cannot run this statement verbatim. Teardown removes the topic either way.
+That adds one topic (`isotope_state_provenance`) and one `INSERT` to the same `StatementSet`. Each traced order becomes an entity whose three stage records are three versions of it, chained by a `parents` array — `orders.placed` → `orders.enriched` → `orders.fulfilled`. Unlike the merge collector this needs no window: identity is content-addressed, so it works on the updating sources (unbounded `GROUP BY`, joins, dedup) where the windowed path has nothing to key on. CCAF runs the same statement with `make cc-flink-reports-up ENABLE_STATE_PROVENANCE=true` and derives the same version IDs. See [docs/state-provenance.md §5.0](./state-provenance.md#50-cp-vs-ccaf-where-the-divergence-actually-lands). Teardown removes the topic either way.
 
 Watch it fill. The topic is `avro-confluent`, and `kafka-0` ships no Avro-aware consumer — `kafka-avro-console-consumer` lives in the Schema Registry pod, so run it there:
 

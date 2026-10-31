@@ -204,10 +204,17 @@ resource "confluent_flink_artifact" "isotope_udf" {
 # replacing these statement resources — re-creating one against a table that
 # already has `headers` fails with "Column `headers` already exists in the
 # table." and taints the resource, blocking every downstream statement on the
-# next apply. scripts/deploy-cc-flink-reports.sh untaints these four before
-# `terraform apply` for exactly that reason; if you run terraform by hand,
-# do the same:
-#     terraform state list | grep _add_headers$ | xargs -n1 terraform untaint
+# next apply. scripts/deploy-cc-flink-reports.sh untaints every *_add_headers
+# statement before `terraform apply` for exactly that reason; if you run
+# terraform by hand, do the same:
+#     terraform state list | grep -E '_add_headers(\[[0-9]+\])?$' | xargs -n1 terraform untaint
+#
+# `credentials` is ignored too, on every *_add_headers resource. A Flink API key
+# rotation changes the credentials block on every statement, and the deploy
+# script turns any such change into a -replace (tf-statement-updates.py),
+# which re-runs this ALTER and fails as above. A one-shot DDL statement that
+# has already run never needs fresh credentials; if the recorded key is later
+# deleted, tf-repair-flink-credentials.py swaps a live one into state.
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "alter_orders_placed_add_headers" {
@@ -230,7 +237,7 @@ resource "confluent_flink_statement" "alter_orders_placed_add_headers" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [statement, compute_pool]
+    ignore_changes = [statement, compute_pool, credentials]
   }
 
   depends_on = [
@@ -259,7 +266,7 @@ resource "confluent_flink_statement" "alter_orders_enriched_add_headers" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [statement, compute_pool]
+    ignore_changes = [statement, compute_pool, credentials]
   }
 
   depends_on = [
@@ -288,7 +295,7 @@ resource "confluent_flink_statement" "alter_orders_fulfilled_add_headers" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [statement, compute_pool]
+    ignore_changes = [statement, compute_pool, credentials]
   }
 
   depends_on = [
@@ -317,7 +324,7 @@ resource "confluent_flink_statement" "alter_consume_events_add_headers" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [statement, compute_pool]
+    ignore_changes = [statement, compute_pool, credentials]
   }
 
   depends_on = [
@@ -1341,7 +1348,7 @@ resource "confluent_flink_statement" "flink_collector_add_headers" {
   compute_pool { id = confluent_flink_compute_pool.isotope.id }
 
   lifecycle {
-    ignore_changes = [statement, compute_pool]
+    ignore_changes = [statement, compute_pool, credentials]
   }
 
   depends_on = [confluent_flink_statement.flink_collector_sink]

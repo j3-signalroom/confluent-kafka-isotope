@@ -45,7 +45,7 @@ This project demonstrates how **Kafka Interceptors become collectors** — inser
 
 ![visualize-in-band-propagation](docs/visualize-in-band-propagation.png)
 
-**A third collector records state, not messages.** The first two both record *message* lineage, and an isotope is an itinerary — one identity and its ordered hops — which is a truthful derivation record only while every step is 1:1. A row in an upsert table has no itinerary: its current value is the fold of every change that ever touched it, a DAG over versions rather than a path over messages. Asking whether a `-U`/`+U` pair is one hop or two has no good answer, because the question is wrong. So the third collector stamps **no hops at all**. `STATE_PROVENANCE` publishes one record per emitted state, identified by its *content* rather than by a window, carrying the versions it was derived from inline — which is what lets a lineage stream describing an *updating* table stay append-only end to end. Opt-in and CP-only; see [docs/state-provenance.md](docs/state-provenance.md).
+**A third collector records state, not messages.** The first two both record *message* lineage, and an isotope is an itinerary — one identity and its ordered hops — which is a truthful derivation record only while every step is 1:1. A row in an upsert table has no itinerary: its current value is the fold of every change that ever touched it, a DAG over versions rather than a path over messages. Asking whether a `-U`/`+U` pair is one hop or two has no good answer, because the question is wrong. So the third collector stamps **no hops at all**. `STATE_PROVENANCE` publishes one record per emitted state, identified by its *content* rather than by a window, carrying the versions it was derived from inline — which is what lets a lineage stream describing an *updating* table stay append-only end to end. Opt-in on both runtimes, and the version IDs are identical across them; see [docs/state-provenance.md](docs/state-provenance.md).
 
 That makes three collectors, distinguished by what they can truthfully record:
 
@@ -53,7 +53,7 @@ That makes three collectors, distinguished by what they can truthfully record:
 |---|---|---|---|
 | `IsotopeProducerInterceptor` | message lineage — one hop per `send()` | out-of-band (`ThreadLocal`) | always on |
 | `ISOTOPE_APPEND_HOP` | message lineage — Flink's own hop, 1:1 statements only | in-band (record headers) | always on; opt-in fan-in variant for windowed merges mints a fresh trace rather than forwarding one ([§3.5.2](#352-optional-fan-in-provenance-windowed-merges)) |
-| `STATE_PROVENANCE` | state lineage — a content-addressed version chain per entity | neither: a parallel record keyed by version | opt-in, CP only ([§3.5.3](#353-optional-state-level-provenance-upsert-and-cdc-sources)) |
+| `STATE_PROVENANCE` | state lineage — a content-addressed version chain per entity | neither: a parallel record keyed by version | opt-in, CP + CCAF ([§3.5.3](#353-optional-state-level-provenance-upsert-and-cdc-sources)) |
 
 The first two share one wire format, so no report can tell them apart. The third deliberately does not participate in it — which is the point: overloading the hop list to mean "revision" would fabricate movement that never happened.
 
@@ -241,7 +241,7 @@ flowchart TB
         Stuck["StuckTracePTF<br/>per-trace state + event-time timer"]
         Hop["IsotopeAppendHop (ScalarFunction)<br/>collector, not interpreter —<br/>appends a Flink hop to the headers"]
         MergeFn["IsotopeMergeTrace + IsotopeMergeTraceId<br/>(ScalarFunctions) fan-in collector —<br/>mints a fresh trace, ID derived from<br/>the window so both statements agree"]
-        StateFn["StateProvenancePTF (§3.5.3, CP only)<br/>state collector — per-entity version chain,<br/>content-addressed ID, parents inline<br/>(no window, no hops, no changelog)"]
+        StateFn["StateProvenancePTF (§3.5.3)<br/>state collector — per-entity version chain,<br/>content-addressed ID, parents inline<br/>(no window, no hops, no changelog)"]
     end
 
     subgraph Flink["Flink SQL reports — identical source/view DDL; sink format differs by runtime"]
@@ -252,8 +252,8 @@ flowchart TB
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-ccaf.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf<br/>(+3 with trace_rca, +5 with merge_provenance)"]
-            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>no state-provenance on CCAF (§3.5.3)<br/>Protobuf+SR sinks"]
+            TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-ccaf.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf<br/>(+3 with trace_rca, +5 with merge_provenance,<br/>+5 with state_provenance)"]
+            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>+1 separate INSERT with state_provenance (§3.5.3)<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
     end
@@ -272,7 +272,8 @@ flowchart TB
     T5 -. "JOIN ON merge_trace_id<br/>recovers a merged record's full parent set" .- TM
 
     SP[("isotope_state_provenance<br/>one record per emitted state —<br/>version_id + parents[]")]
-    JCP -. "optional (§3.5.3) — STATE_PROVENANCE<br/>CP only, see §3.5.3" .-> SP
+    JCP -. "optional (§3.5.3) — STATE_PROVENANCE" .-> SP
+    JCC -. "optional (§3.5.3) — STATE_PROVENANCE" .-> SP
 
     R["report sink topics<br/>latency · topology · bipartite_topology ·<br/>hop_distribution · coverage · stuck_trace ·<br/>latency_percentiles"]
     JCP --> R
@@ -293,7 +294,7 @@ flowchart TB
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator + CMF 2.4 + RustFS<br/>Makefile: cp-up · cp-flink-up · cp-flink-reports-up"]
-        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 28 statements (+3 optional AI, +5 optional merge)<br/>Makefile: cc-flink-reports-up"]
+        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 28 statements (+3 optional AI, +5 optional merge,<br/>+5 optional state provenance)<br/>Makefile: cc-flink-reports-up"]
         MON["k8s/monitoring/<br/>Prometheus + Grafana pods; scrape host<br/>stages via host.minikube.internal<br/>Makefile: metrics-up"]
     end
 
@@ -305,6 +306,7 @@ flowchart TB
     MON -. provisions .-> GRAF
     TF -. "var.enable_trace_rca = true<br/>terraform/setup-ccaf-ai.tf" .-> AI
     TF -. "var.enable_merge_provenance = true<br/>terraform/setup-ccaf-merge-provenance.tf" .-> TM
+    TF -. "var.enable_state_provenance = true<br/>terraform/setup-ccaf-state-provenance.tf" .-> SP
 
     classDef optional stroke-dasharray: 5
     class AI,MODEL,RCAJ,RCA optional
@@ -444,7 +446,7 @@ scripts/
                                         per window, weighted by contributing_records;
                                         GROUP BY keeps its lateness in step with 80
     85_state_provenance.fql             OPTIONAL (§3.5.3) — one record per emitted state,
-                                        parents inline (CP only)
+                                        parents inline
     99_teardown.fql                     DROP TABLE / VIEW / FUNCTION
 terraform/                              CCAF infrastructure-as-code (`make cc-flink-reports-up`)
   providers.tf                          Confluent provider — cloud key/secret vars
@@ -474,6 +476,12 @@ terraform/                              CCAF infrastructure-as-code (`make cc-fl
                                         2 sink CREATE TABLE + 2 ALTER TABLE (writable
                                         headers) + its own EXECUTE STATEMENT SET with
                                         the 2 merge INSERTs
+  setup-ccaf-state-provenance.tf        OPTIONAL state-level provenance (§3.5.3) — 5
+                                        statements, all gated on
+                                        var.enable_state_provenance (default false):
+                                        sink CREATE TABLE (infinite retention) +
+                                        entity_log view + DROP/CREATE FUNCTION
+                                        STATE_PROVENANCE + its own INSERT
   outputs.tf                            environment_id, bootstrap, SR URL, rotating
                                         Kafka + SR API key/secret outputs (sensitive)
 docs/                                   extracted long-form docs (linked from the README) and images
@@ -675,7 +683,7 @@ The other four reports — `latency_percentiles`, `coverage`, `bipartite_topolog
 | **Carried** | Inside the record's headers | Alongside it, on its own topic | Alongside it, parents listed inline |
 | **Mechanism** | `ISOTOPE_APPEND_HOP` scalar UDF | `ISOTOPE_MERGE_TRACE` + `ISOTOPE_MERGE_TRACE_ID` UDFs, two INSERTs | `STATE_PROVENANCE` PTF, one statement |
 | **Output** | `orders.flink_enriched` | `orders.flink_batched` + `isotope_merge_edge_markers` | `isotope_state_provenance` |
-| **Runtimes** | CP + CCAF | CP + CCAF | CP only |
+| **Runtimes** | CP + CCAF | CP + CCAF | CP + CCAF |
 | **Default** | Always on | Off (`ENABLE_MERGE_PROVENANCE=true`) | Off (`ENABLE_STATE_PROVENANCE=true`) |
 
 ### **3.5.1 [ALWAYS ON] 1:1 Collector Provenance: Flink as a Hop**
@@ -712,12 +720,15 @@ make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
   - It reads the underlying log in append mode and rebuilds state itself, so no operator sees an update.
   - Revisions become new, immutable versions appended to the topic.
 - **Deletes count:** tombstones get provenance too.
-- **Why CP only:** the version hash needs the raw value bytes, and CCAF's Topic Catalog only exposes typed Protobuf columns. The PTF itself is portable; the missing piece is one byte encoding that both runtimes compute the same way.
+- **Same IDs on both runtimes:** both hash the raw value bytes — CP's `'value.format' = 'raw'` `value` column, and the `val` column CCAF's Topic Catalog imports for the order topics. Before hashing, `StateVersion` strips the Schema Registry header (the magic byte and the 4-byte schema ID), because the schema ID is assigned by whichever registry the producer used. The same record therefore gets the same `version_id` on CP and CCAF.
 
 To enable state-level provenance, use the following `make` commands:
 
 ```bash
 make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true
+
+make cc-flink-reports-up ENABLE_STATE_PROVENANCE=true \
+    CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET
 
 # both collectors at once — they answer different questions
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=true
@@ -731,7 +742,7 @@ The reports keep 1-minute aggregates, and the raw isotope lives only as long as 
 - **`lake.isotope.hops`:** one row per produced hop, so any trace can be pulled back at any age, and a new question is a SQL query rather than a new Flink job.
 - **`lake.isotope.state_provenance`:** the state-provenance stream (with `ENABLE_STATE_PROVENANCE=true`). Flink SQL has no recursive CTEs, so version chains are *queryable, not traversable* there; in the lake, `WITH RECURSIVE` walks every chain end to end.
 - **Separate failure domain:** the lake is a second CMF Application (`IsotopeLakeJob`, same JAR), so a catalog or storage fault can't stop the seven reports.
-- **CP only:** state provenance is CP only, and so is the lake.
+- **CP only:** the lake runs as a CMF Application, so it is CP only. State provenance itself runs on both runtimes.
 
 To enable the lake, use the following `make` commands, then query it from the host with [DuckDB](https://duckdb.org/) (`brew install duckdb`):
 
