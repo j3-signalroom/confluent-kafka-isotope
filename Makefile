@@ -112,6 +112,14 @@ FLINK_SQL_CONTAINERFILE ?= k8s/base/flink-sql-isotope.containerfile
 # reads directly, so either spelling works through make.
 ENABLE_MERGE_PROVENANCE ?= $(MERGE_PROVENANCE)
 
+# Optional state-level provenance — see docs/state-provenance.md. Off by default
+# on both runtimes; on, it adds a per-entity version chain written to the
+# isotope_state_provenance topic. Both runtimes derive identical version IDs.
+#   make cp-flink-reports-up    ENABLE_STATE_PROVENANCE=true      (CP)
+#   make cc-flink-reports-up ENABLE_STATE_PROVENANCE=true ...  (CCAF)
+# Falls back to STATE_PROVENANCE, the env var the CP deploy script reads.
+ENABLE_STATE_PROVENANCE ?= $(STATE_PROVENANCE)
+
 # Optional Iceberg lake — see docs/lake.md. CP only, off by default; on, it
 # deploys an Iceberg REST catalog ('make lake-up') and a second CMF Application
 # (IsotopeLakeJob) that copies per-hop history — plus the state-provenance
@@ -875,7 +883,7 @@ cp-flink-reports-down: ## Tear down the reports CMF Application + artifact + sin
 #   make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
 #
 .PHONY: cc-flink-reports-up
-cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 28 Flink statements; +3 with ENABLE_TRACE_RCA, +5 with ENABLE_MERGE_PROVENANCE)
+cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 28 Flink statements; +3 with ENABLE_TRACE_RCA, +5 with ENABLE_MERGE_PROVENANCE, +5 with ENABLE_STATE_PROVENANCE)
 	@if [ -z "$(CONFLUENT_API_KEY)" ] || [ -z "$(CONFLUENT_API_SECRET)" ]; then \
 		echo "✘ CONFLUENT_API_KEY and CONFLUENT_API_SECRET must be set."; \
 		echo "  e.g. make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=..."; \
@@ -899,6 +907,9 @@ cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topic
 	fi; \
 	if [ "$(ENABLE_MERGE_PROVENANCE)" = "true" ]; then \
 		set -- "$$@" --enable-merge-provenance=true; \
+	fi; \
+	if [ "$(ENABLE_STATE_PROVENANCE)" = "true" ]; then \
+		set -- "$$@" --enable-state-provenance=true; \
 	fi; \
 	$(mkfile_dir)scripts/deploy-cc-flink-reports.sh create "$$@"
 

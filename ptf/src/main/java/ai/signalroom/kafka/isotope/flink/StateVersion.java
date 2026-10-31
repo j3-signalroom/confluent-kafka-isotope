@@ -12,6 +12,7 @@ import ai.signalroom.kafka.isotope.Isotope;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.HexFormat;
 
 /**
@@ -60,10 +61,29 @@ import java.util.HexFormat;
  * <h2>The preimage is the contract</h2>
  * {@code sourceName} is part of the preimage, so the same payload observed on
  * two different tables is two versions — one derived from the other — rather
- * than one version seen twice. Field order, the NUL separator, and the null
- * encoding below are pinned by {@code StateVersionTest}; changing any of them
- * renumbers every version ever issued, so treat it the way {@link MergeTrace}
- * treats its own preimage.
+ * than one version seen twice. Field order, the NUL separator, the null
+ * encoding, and the framing strip below are pinned by {@code StateVersionTest};
+ * changing any of them renumbers every version ever issued, so treat it the way
+ * {@link MergeTrace} treats its own preimage.
+ *
+ * <h2>Content is the payload, not the registry's framing</h2>
+ * A Schema Registry serializer prefixes every value with a magic byte
+ * ({@code 0x00}) and a 4-byte big-endian schema ID. That ID is assigned by
+ * <em>the registry the producer talked to</em>, so the same record written to
+ * CP and to Confluent Cloud carries different bytes 1..4 — and hashing them
+ * would make "deterministic across runtimes" false for the most ordinary
+ * reason there is. {@link #canonicalContent} drops those five bytes before
+ * hashing. Everything after them stays: Protobuf's message-index array is a
+ * property of the schema, not of the registry, so it is identical on both.
+ *
+ * <p>The strip keys on the shape alone — a leading {@code 0x00} and at least
+ * five bytes — because nothing in a {@code BYTES} column says which serializer
+ * wrote it. For a non-registry payload that happens to start with
+ * {@code 0x00}, two values differing only in bytes 1..4 would share a version;
+ * the rule is still deterministic, which is the property that matters, and
+ * every source this project hashes is registry-framed. A payload written with
+ * the schema ID in a <em>header</em> instead has no prefix, and passes through
+ * untouched — so it hashes to the same version as the framed form.
  */
 public final class StateVersion {
 
@@ -72,6 +92,12 @@ public final class StateVersion {
 
     /** Distinguishes a null field from an empty one in the preimage. */
     private static final String NULL_MARKER = "null";
+
+    /** Confluent wire-format magic byte, followed by a 4-byte schema ID. */
+    private static final byte SR_MAGIC_BYTE = 0x00;
+
+    /** Magic byte plus the 4-byte schema ID. */
+    private static final int SR_PREFIX_BYTES = 5;
 
     private StateVersion() {
     }
@@ -83,8 +109,10 @@ public final class StateVersion {
      *                    the preimage, so the same content on two tables is two
      *                    versions
      * @param entityKey   the upsert primary key this state is a value of
-     * @param content     canonical bytes of the state; {@code null} for a
-     *                    tombstone, which is a state ("deleted") like any other
+     * @param content     raw value bytes of the state, Schema Registry framing
+     *                    and all — {@link #canonicalContent} strips it;
+     *                    {@code null} for a tombstone, which is a state
+     *                    ("deleted") like any other
      * @param eventTimeMs event time of the change that produced this state
      */
     public static byte[] versionId(String sourceName,
@@ -95,13 +123,14 @@ public final class StateVersion {
         final String prefix = nullSafe(sourceName) + SEP
                             + nullSafe(entityKey)  + SEP;
 
-        final byte[] body = content == null
-                ? NULL_MARKER.getBytes(StandardCharsets.UTF_8)
-                : content;
-
         final MessageDigest md = sha256();
         md.update(prefix.getBytes(StandardCharsets.UTF_8));
-        md.update(body);
+        if (content == null) {
+            md.update(NULL_MARKER.getBytes(StandardCharsets.UTF_8));
+        } else {
+            final int offset = canonicalOffset(content);
+            md.update(content, offset, content.length - offset);
+        }
         final byte[] digest = md.digest();
 
         final byte[] id = new byte[Isotope.TRACE_ID_BYTES];
@@ -133,6 +162,25 @@ public final class StateVersion {
                                       long eventTimeMs) {
         return HexFormat.of().formatHex(
                 versionId(sourceName, entityKey, content, eventTimeMs));
+    }
+
+    /**
+     * The bytes a version is identified by: {@code content} without its Schema
+     * Registry prefix, if it has one. See the class javadoc for why, and for the
+     * one ambiguity the shape-only rule accepts.
+     */
+    public static byte[] canonicalContent(byte[] content) {
+        if (content == null) {
+            return null;
+        }
+        final int offset = canonicalOffset(content);
+        return offset == 0 ? content : Arrays.copyOfRange(content, offset, content.length);
+    }
+
+    private static int canonicalOffset(byte[] content) {
+        return content.length >= SR_PREFIX_BYTES && content[0] == SR_MAGIC_BYTE
+                ? SR_PREFIX_BYTES
+                : 0;
     }
 
     private static String nullSafe(String s) {

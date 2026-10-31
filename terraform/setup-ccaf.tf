@@ -204,10 +204,14 @@ resource "confluent_flink_artifact" "isotope_udf" {
 # replacing these statement resources — re-creating one against a table that
 # already has `headers` fails with "Column `headers` already exists in the
 # table." and taints the resource, blocking every downstream statement on the
-# next apply. scripts/deploy-cc-flink-reports.sh untaints these four before
-# `terraform apply` for exactly that reason; if you run terraform by hand,
-# do the same:
-#     terraform state list | grep _add_headers$ | xargs -n1 terraform untaint
+# next apply. scripts/deploy-cc-flink-reports.sh untaints every *_add_headers
+# statement before `terraform apply` for exactly that reason; if you run
+# terraform by hand, do the same:
+#     terraform state list | grep -E '_add_headers(\[[0-9]+\])?$' | xargs -n1 terraform untaint
+#
+# A Flink API key rotation changes the credentials block on every statement.
+# That is an in-place update (provider >= 2.84.0), and tf-statement-updates.py
+# leaves it alone, so a rotation does not re-run this ALTER.
 # ---------------------------------------------------------------------------
 
 resource "confluent_flink_statement" "alter_orders_placed_add_headers" {

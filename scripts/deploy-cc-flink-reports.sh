@@ -11,6 +11,7 @@
 #       [--day-count=<DAY_COUNT>]
 #       [--enable-trace-rca=<true|false>]
 #       [--enable-merge-provenance=<true|false>]
+#       [--enable-state-provenance=<true|false>]
 #       [--aws-access-key=<AWS_ACCESS_KEY>]
 #       [--aws-secret-key=<AWS_SECRET_KEY>]
 #       [--aws-session-token=<AWS_SESSION_TOKEN>]
@@ -44,7 +45,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TERRAFORM_DIR="${REPO_ROOT}/terraform"
 JAR_PATH="${REPO_ROOT}/ptf/build/libs/isotope-flink-udf.jar"
 
-argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--enable-merge-provenance=<true|false>] [--aws-access-key=<KEY>] [--aws-secret-key=<SECRET>] [--aws-session-token=<TOKEN>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
+argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--enable-merge-provenance=<true|false>] [--enable-state-provenance=<true|false>] [--aws-access-key=<KEY>] [--aws-secret-key=<SECRET>] [--aws-session-token=<TOKEN>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
 
 usage_and_exit() {
     echo
@@ -80,6 +81,7 @@ confluent_api_key=""
 confluent_api_secret=""
 enable_trace_rca=false
 enable_merge_provenance=false
+enable_state_provenance=false
 aws_access_key=""
 aws_secret_key=""
 aws_session_token=""
@@ -106,6 +108,9 @@ for arg in "$@"; do
             ;;
         --enable-merge-provenance=*)
             enable_merge_provenance="${arg#--enable-merge-provenance=}"
+            ;;
+        --enable-state-provenance=*)
+            enable_state_provenance="${arg#--enable-state-provenance=}"
             ;;
         --aws-access-key=*)
             aws_access_key="${arg#--aws-access-key=}"
@@ -184,6 +189,9 @@ export TF_VAR_enable_trace_rca="${enable_trace_rca}"
 # RCA vars below, this is a plain bool with a Terraform default of false, so
 # exporting it unconditionally is safe.
 export TF_VAR_enable_merge_provenance="${enable_merge_provenance}"
+# Optional state-level provenance — docs/state-provenance.md. Same plain-bool
+# reasoning as merge provenance above.
+export TF_VAR_enable_state_provenance="${enable_state_provenance}"
 
 # Only export the RCA model vars that were actually supplied. An exported but
 # empty TF_VAR_ does NOT fall through to the variable's Terraform default — it
@@ -261,7 +269,9 @@ if [ "${create_action}" = true ]; then
         if terraform untaint "${tf_addr}" >/dev/null 2>&1; then
             print_warn "Cleared taint on ${tf_addr} (ALTER TABLE ... ADD is a no-op once the column exists)"
         fi
-    done < <(terraform state list 2>/dev/null | grep '_add_headers$' || true)
+    # Count-gated resources carry an index (merge_batched_add_headers[0]), so
+    # the anchor has to allow one.
+    done < <(terraform state list 2>/dev/null | grep -E '_add_headers(\[[0-9]+\])?$' || true)
 
     # -----------------------------------------------------------------------
     # Preflight — turn illegal in-place statement updates into replacements.
