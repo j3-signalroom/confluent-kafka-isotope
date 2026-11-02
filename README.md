@@ -738,7 +738,7 @@ make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=tr
 > For more information, refer to **[docs/state-provenance.md](docs/state-provenance.md)**.
 
 ### **3.5.4 [OPTIONAL] Iceberg Lakehouse: Trace History and Traversable Provenance**
-The reports keep 1-minute aggregates, and the raw isotope lives only as long as Kafka retention. The lakehouse keeps the rows, in Apache Iceberg tables on the RustFS instance CMF already uses:
+The reports keep 1-minute aggregates, and the raw isotope lives only as long as Kafka retention. The lakehouse keeps the rows, in Apache Iceberg tables on the [RustFS](https://rustfs.com/) instance CMF already uses:
 
 - **`lakehouse.isotope.hops`:** one row per produced hop, so any trace can be pulled back at any age, and a new question is a SQL query rather than a new Flink job.
 - **`lakehouse.isotope.state_provenance`:** the state-provenance stream (with `ENABLE_STATE_PROVENANCE=true`). Flink SQL has no recursive CTEs, so version chains are *queryable, not traversable* there; in the lakehouse, `WITH RECURSIVE` walks every chain end to end.

@@ -34,6 +34,7 @@ The format is base on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 - Issues[`#442`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/442)
 - Issues[`#445`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/445)
 - Issues[`#451`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/451)
+- Issues[`#453`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/453)
 
 ### Fixed
 - Issues[`#434`](https://github.com/j3-signalroom/confluent-kafka-isotope/issues/434)
