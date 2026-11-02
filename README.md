@@ -20,7 +20,8 @@
     + [**3.5.4 [OPTIONAL] Iceberg Lakehouse: Trace History and Traversable Provenance**](#354-optional-iceberg-lakehouse-trace-history-and-traversable-provenance)
 - [**Resources**](#resources)
   + [**Companion Articles**](#companion-articles)
-  + [**Confluent Platform (locally self-hosted)**](#confluent-platform-locally-self-hosted)
+  + [**Companion Presentation**](#companion-presentation)
+  + [**Confluent Platform**](#confluent-platform)
   + [**Confluent Cloud**](#confluent-cloud)
   + [**Miscellaneous**](#miscellaneous)
 <!-- tocstop -->
@@ -737,7 +738,7 @@ make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true ENABLE_STATE_PROVENANCE=tr
 > For more information, refer to **[docs/state-provenance.md](docs/state-provenance.md)**.
 
 ### **3.5.4 [OPTIONAL] Iceberg Lakehouse: Trace History and Traversable Provenance**
-The reports keep 1-minute aggregates, and the raw isotope lives only as long as Kafka retention. The lakehouse keeps the rows, in Apache Iceberg tables on the RustFS instance CMF already uses:
+The reports keep 1-minute aggregates, and the raw isotope lives only as long as Kafka retention. The lakehouse keeps the rows, in Apache Iceberg tables on the [RustFS](https://rustfs.com/) instance CMF already uses:
 
 - **`lakehouse.isotope.hops`:** one row per produced hop, so any trace can be pulled back at any age, and a new question is a SQL query rather than a new Flink job.
 - **`lakehouse.isotope.state_provenance`:** the state-provenance stream (with `ENABLE_STATE_PROVENANCE=true`). Flink SQL has no recursive CTEs, so version chains are *queryable, not traversable* there; in the lakehouse, `WITH RECURSIVE` walks every chain end to end.
@@ -762,7 +763,10 @@ scripts/lakehouse-query.sh shell      # interactive DuckDB with the lakehouse at
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors](https://thej3.com/kafkas-quiet-observability-superpower-kafka-interceptors-aca88c33867e)
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors with assistance from AI](https://medium.com/@jeffrey.j.jennings/kafkas-quiet-observability-superpower-kafka-interceptors-with-assistance-from-ai-d3f83fc1b27e)
 
-### **Confluent Platform (locally self-hosted)**
+### **Companion Presentation**
+- [Confluent Current 26 Presentation: Kafka’s quiet observability superpower — Kafka Interceptors](docs/kafka_quiet_observability_superpower.pdf)
+
+### **Confluent Platform**
 - [Confluent Plaform Overview](https://docs.confluent.io/platform/current/get-started/platform.html)
 - [Deploy and Manage Confluent Platform Using Confluent for Kubernetes](https://docs.confluent.io/operator/current/overview.html#deploy-and-manage-cp-using-co-long)
 - [Stream Processing with Confluent Platform for Apache Flink](https://docs.confluent.io/cp-flink/current/overview.html#stream-processing-with-af-cp-long)
