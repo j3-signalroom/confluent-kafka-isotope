@@ -677,7 +677,7 @@ The other four reports — `latency_percentiles`, `coverage`, `bipartite_topolog
 > **Full details** — including the meter/PromQL reference, the produce- and consume-side signals, the two deliberate gaps (`distinct_traces`, windowed `min`), and why latency percentiles remain implemented as a PTF — are in **[docs/metrics.md](docs/metrics.md)**. The one-command Prometheus + Grafana showcase has its own runbook: **[k8s/monitoring/README.md](k8s/monitoring/README.md)** (`make metrics-up`).
 
 ### **3.5 Apache Flink Provenance**
-In this repo, **_Apache Flink provenance is the record of the data's origin and how it was derived_** — _the steps it traversed, the inputs that were combined into it, and the earlier versions it replaced_.
+In this repo, **_Apache Flink provenance is the record of the data's origin and how it was derived_** — _the hops it traversed, the records that were aggregated into it, and the updates and deletes that replaced its earlier versions_.
 
 | | 1:1 Collector | [OPTIONAL] Fan-in Provenance | [OPTIONAL] State-Level Provenance |
 |---|---|---|---|
