@@ -767,10 +767,10 @@ scripts/lakehouse-query.sh shell      # interactive DuckDB with the lakehouse at
 - [Medium Article: Kafka’s quiet observability superpower — Kafka Interceptors with assistance from AI](https://medium.com/@jeffrey.j.jennings/kafkas-quiet-observability-superpower-kafka-interceptors-with-assistance-from-ai-d3f83fc1b27e)
 
 ### **Companion Presentation**
-- [Confluent Current 26 Presentation: Kafka’s quiet observability superpower — Kafka Interceptors](docs/kafka_quiet_observability_superpower.pdf)
+- [Current 2026 San Francisco (Confluent) Presentation: Kafka’s quiet observability superpower — Kafka Interceptors](docs/kafka_quiet_observability_superpower.pdf)
 
 ### **Confluent Platform**
-- [Confluent Plaform Overview](https://docs.confluent.io/platform/current/get-started/platform.html)
+- [Confluent Platform Overview](https://docs.confluent.io/platform/current/get-started/platform.html)
 - [Deploy and Manage Confluent Platform Using Confluent for Kubernetes](https://docs.confluent.io/operator/current/overview.html#deploy-and-manage-cp-using-co-long)
 - [Stream Processing with Confluent Platform for Apache Flink](https://docs.confluent.io/cp-flink/current/overview.html#stream-processing-with-af-cp-long)
 - [minikube](https://minikube.sigs.k8s.io/docs/)
