@@ -724,6 +724,7 @@ make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
   - Revisions become new, immutable versions appended to the topic.
 - **Deletes count:** tombstones get provenance too.
 - **Same IDs on both runtimes:** both hash the raw value bytes — CP's `'value.format' = 'raw'` `value` column, and the `val` column CCAF's Topic Catalog imports for the order topics. Before hashing, `StateVersion` strips the Schema Registry header (the magic byte and the 4-byte schema ID), because the schema ID is assigned by whichever registry the producer used. The same record therefore gets the same `version_id` on CP and CCAF.
+- **Queryable, not traversable, in Flink:** Flink SQL has no recursive CTEs, so walking a version chain end to end needs the lakehouse ([§3.5.4](#354-optional-iceberg-lakehouse-trace-history-and-traversable-provenance)).
 
 To enable state-level provenance, use the following `make` commands:
 
