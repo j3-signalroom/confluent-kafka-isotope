@@ -46,7 +46,7 @@ This project demonstrates how **Kafka Interceptors become collectors** — inser
 
 ![visualize-in-band-propagation](docs/visualize-in-band-propagation.png)
 
-**A third collector records state, not messages.** The first two both record *message* lineage, and an isotope is an itinerary — one identity and its ordered hops — which is a truthful derivation record only while every step is 1:1. A row in an upsert table has no itinerary: its current value is the fold of every change that ever touched it, a DAG over versions rather than a path over messages. Asking whether a `-U`/`+U` pair is one hop or two has no good answer, because the question is wrong. So the third collector stamps **no hops at all**. `STATE_PROVENANCE` publishes one record per emitted state, identified by its *content* rather than by a window, carrying the versions it was derived from inline — which is what lets a lineage stream describing an *updating* table stay append-only end to end. Opt-in on both runtimes, and the version IDs are identical across them; see [docs/state-provenance.md](docs/state-provenance.md).
+**A third collector records state, not messages.** The first two both record *message* lineage, and an isotope is an itinerary — one identity and its ordered hops — which is a truthful derivation record only while every hop is 1:1. A row in an upsert table has no itinerary: its current value is the fold of every change that ever touched it, a DAG over versions rather than a path over messages. Asking whether a `-U`/`+U` pair is one hop or two has no good answer, because the question is wrong. So the third collector stamps **no hops at all**. `STATE_PROVENANCE` publishes one record per emitted state, identified by its *content and event time* rather than by a window, carrying the versions it was derived from inline — which is what lets a lineage stream describing an *updating* table stay append-only end to end. Deletes are included, as first-class versions. Opt-in on both runtimes, and the version IDs are identical across them; see [docs/state-provenance.md](docs/state-provenance.md).
 
 That makes three collectors, distinguished by what they can truthfully record:
 
@@ -677,13 +677,12 @@ The other four reports — `latency_percentiles`, `coverage`, `bipartite_topolog
 > **Full details** — including the meter/PromQL reference, the produce- and consume-side signals, the two deliberate gaps (`distinct_traces`, windowed `min`), and why latency percentiles remain implemented as a PTF — are in **[docs/metrics.md](docs/metrics.md)**. The one-command Prometheus + Grafana showcase has its own runbook: **[k8s/monitoring/README.md](k8s/monitoring/README.md)** (`make metrics-up`).
 
 ### **3.5 Apache Flink Provenance**
-
-In this repo, Apache Flink provenance is the record of the data's origin and how it was derived — the steps it traversed, the inputs that were combined into it, and the earlier versions it replaced.
+In this repo, **_Apache Flink provenance is the record of the data's origin and how it was derived_** — _the hops it traversed, the records that were aggregated into it, and the updates and deletes that replaced its earlier versions_.
 
 | | 1:1 Collector | [OPTIONAL] Fan-in Provenance | [OPTIONAL] State-Level Provenance |
 |---|---|---|---|
 | **Answers** | _"Where has this message been?"_ | _"Which inputs produced this merged output?"_ | _"How did this entity's state evolve?"_ |
-| **Relationship** | A path: one parent per step | Many parents to one output | A chain of versions per entity |
+| **Relationship** | A path: one parent per hop | Many parents to one output | A chain of versions per entity |
 | **Carried** | Inside the record's headers | Alongside it, on its own topic | Alongside it, parents listed inline |
 | **Mechanism** | `ISOTOPE_APPEND_HOP` scalar UDF | `ISOTOPE_MERGE_TRACE` + `ISOTOPE_MERGE_TRACE_ID` UDFs, two INSERTs | `STATE_PROVENANCE` PTF, one statement |
 | **Output** | `orders.flink_enriched` | `orders.flink_batched` + `isotope_merge_edge_markers` | `isotope_state_provenance` |
@@ -725,6 +724,7 @@ make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
   - Revisions become new, immutable versions appended to the topic.
 - **Deletes count:** tombstones get provenance too.
 - **Same IDs on both runtimes:** both hash the raw value bytes — CP's `'value.format' = 'raw'` `value` column, and the `val` column CCAF's Topic Catalog imports for the order topics. Before hashing, `StateVersion` strips the Schema Registry header (the magic byte and the 4-byte schema ID), because the schema ID is assigned by whichever registry the producer used. The same record therefore gets the same `version_id` on CP and CCAF.
+- **Queryable, not traversable, in Flink:** Flink SQL has no recursive CTEs, so walking a version chain end to end needs the lakehouse ([§3.5.4](#354-optional-iceberg-lakehouse-trace-history-and-traversable-provenance)).
 
 To enable state-level provenance, use the following `make` commands:
 
