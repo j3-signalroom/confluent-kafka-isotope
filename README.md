@@ -46,7 +46,7 @@ This project demonstrates how **Kafka Interceptors become collectors** — inser
 
 ![visualize-in-band-propagation](docs/visualize-in-band-propagation.png)
 
-**A third collector records state, not messages.** The first two both record *message* lineage, and an isotope is an itinerary — one identity and its ordered hops — which is a truthful derivation record only while every step is 1:1. A row in an upsert table has no itinerary: its current value is the fold of every change that ever touched it, a DAG over versions rather than a path over messages. Asking whether a `-U`/`+U` pair is one hop or two has no good answer, because the question is wrong. So the third collector stamps **no hops at all**. `STATE_PROVENANCE` publishes one record per emitted state, identified by its *content* rather than by a window, carrying the versions it was derived from inline — which is what lets a lineage stream describing an *updating* table stay append-only end to end. Opt-in on both runtimes, and the version IDs are identical across them; see [docs/state-provenance.md](docs/state-provenance.md).
+**A third collector records state, not messages.** The first two both record *message* lineage, and an isotope is an itinerary — one identity and its ordered hops — which is a truthful derivation record only while every hop is 1:1. A row in an upsert table has no itinerary: its current value is the fold of every change that ever touched it, a DAG over versions rather than a path over messages. Asking whether a `-U`/`+U` pair is one hop or two has no good answer, because the question is wrong. So the third collector stamps **no hops at all**. `STATE_PROVENANCE` publishes one record per emitted state, identified by its *content and event time* rather than by a window, carrying the versions it was derived from inline — which is what lets a lineage stream describing an *updating* table stay append-only end to end. Deletes are included, as first-class versions. Opt-in on both runtimes, and the version IDs are identical across them; see [docs/state-provenance.md](docs/state-provenance.md).
 
 That makes three collectors, distinguished by what they can truthfully record:
 
@@ -682,7 +682,7 @@ In this repo, **_Apache Flink provenance is the record of the data's origin and 
 | | 1:1 Collector | [OPTIONAL] Fan-in Provenance | [OPTIONAL] State-Level Provenance |
 |---|---|---|---|
 | **Answers** | _"Where has this message been?"_ | _"Which inputs produced this merged output?"_ | _"How did this entity's state evolve?"_ |
-| **Relationship** | A path: one parent per step | Many parents to one output | A chain of versions per entity |
+| **Relationship** | A path: one parent per hop | Many parents to one output | A chain of versions per entity |
 | **Carried** | Inside the record's headers | Alongside it, on its own topic | Alongside it, parents listed inline |
 | **Mechanism** | `ISOTOPE_APPEND_HOP` scalar UDF | `ISOTOPE_MERGE_TRACE` + `ISOTOPE_MERGE_TRACE_ID` UDFs, two INSERTs | `STATE_PROVENANCE` PTF, one statement |
 | **Output** | `orders.flink_enriched` | `orders.flink_batched` + `isotope_merge_edge_markers` | `isotope_state_provenance` |
