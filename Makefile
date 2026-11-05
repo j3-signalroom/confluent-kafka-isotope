@@ -62,7 +62,7 @@ FLINK_SQL_INIT_DDL  ?= 00_source_table.fql 01_register_functions.fql \
 CERT_MANAGER_VER    ?= v1.18.2
 # CMF 2.4.0+ is required for SQL UDFs (cmf:// artifacts) + the writable
 # environment catalog — both needed to run the reports as CMF Statements.
-CMF_VER             ?= 2.4.0
+CMF_VER             ?= 2.5.0
 CMF_ENV_NAME        ?= dev-local
 # Helm values enabling CMF artifacts (RustFS-backed) + environment catalog.
 CMF_VALUES          ?= k8s/base/cmf-values.yaml
@@ -1136,9 +1136,9 @@ cp-core-up: operator-install cp-deploy ## Phases 3-5: install CFK Operator → d
 	@echo "  Once all pods are Running, run 'make c3-open' to access Control Center."
 
 .PHONY: cp-flink-up
-cp-flink-up: flink-cert-manager flink-operator-install rustfs-up cmf-install cmf-env-create flink-rbac flink-image-build ## cert-manager → operator → RustFS → CMF 2.4 → env → RBAC → build app image (reports deploy via 'make cp-flink-reports-up')
+cp-flink-up: flink-cert-manager flink-operator-install rustfs-up cmf-install cmf-env-create flink-rbac flink-image-build ## cert-manager → operator → RustFS → CMF 2.5 → env → RBAC → build app image (reports deploy via 'make cp-flink-reports-up')
 	@echo ""
-	@echo "✔ Flink + CMF 2.4 are deploying (reports run as a CMF Application)."
+	@echo "✔ Flink + CMF 2.5 are deploying (reports run as a CMF Application)."
 	@echo "  The reports themselves deploy separately:"
 	@echo "    make kafka-pf-up && make cp-flink-reports-up"
 	@echo "  Run 'make cmf-status' to verify CMF and the Flink environment."

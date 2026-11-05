@@ -6,8 +6,8 @@ metadata:
 spec:
   dataVolumeCapacity: 10G
   image:
-    application: docker.io/confluentinc/cp-server:8.3.0
-    init: confluentinc/confluent-init-container:3.2.2
+    application: docker.io/confluentinc/cp-server:8.4.0
+    init: confluentinc/confluent-init-container:3.4.0
   replicas: 1
   # Removed metricsClient — circular dependency: C3 isn't up when KRaftController initializes
 ---
@@ -19,8 +19,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-server:8.3.0
-    init: confluentinc/confluent-init-container:3.2.2
+    application: confluentinc/cp-server:8.4.0
+    init: confluentinc/confluent-init-container:3.4.0
   dataVolumeCapacity: 100Gi
   configOverrides:
     server:
@@ -61,8 +61,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-schema-registry:8.3.0
-    init: confluentinc/confluent-init-container:3.2.2
+    application: confluentinc/cp-schema-registry:8.4.0
+    init: confluentinc/confluent-init-container:3.4.0
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: Connect
@@ -72,8 +72,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-server-connect:8.3.0
-    init: confluentinc/confluent-init-container:3.2.2
+    application: confluentinc/cp-server-connect:8.4.0
+    init: confluentinc/confluent-init-container:3.4.0
   configOverrides:
     server:
       # Single-broker dev: Connect internal topics must use rf=1
@@ -92,8 +92,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-ksqldb-server:8.3.0
-    init: confluentinc/confluent-init-container:3.2.2
+    application: confluentinc/cp-ksqldb-server:8.4.0
+    init: confluentinc/confluent-init-container:3.4.0
   dataVolumeCapacity: 10Gi
 ---
 apiVersion: platform.confluent.io/v1beta1
@@ -104,8 +104,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-kafka-rest:8.3.0
-    init: confluentinc/confluent-init-container:3.2.2
+    application: confluentinc/cp-kafka-rest:8.4.0
+    init: confluentinc/confluent-init-container:3.4.0
   dependencies:
     schemaRegistry:
       url: http://schemaregistry.confluent.svc.cluster.local:8081
@@ -118,8 +118,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-enterprise-control-center-next-gen:2.5.0
-    init: confluentinc/confluent-init-container:3.2.2
+    application: confluentinc/cp-enterprise-control-center-next-gen:2.7.0
+    init: confluentinc/confluent-init-container:3.4.0
   dataVolumeCapacity: 10Gi
   dependencies:
     schemaRegistry:
@@ -167,8 +167,8 @@ spec:
   # Re-verify on 2.5.0: if the Flink tab honors cmf.url, this is unnecessary.
   services:
     prometheus:
-      image: confluentinc/cp-enterprise-prometheus:2.5.0
+      image: confluentinc/cp-enterprise-prometheus:2.7.0
       pvc:
         dataVolumeCapacity: 10Gi
     alertmanager:
-      image: confluentinc/cp-enterprise-alertmanager:2.5.0
+      image: confluentinc/cp-enterprise-alertmanager:2.7.0

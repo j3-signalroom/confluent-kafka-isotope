@@ -294,7 +294,7 @@ flowchart TB
 
     subgraph Infra["Infrastructure"]
         direction LR
-        K8S["k8s/base/ + CFK Operator + CMF 2.4 + RustFS<br/>Makefile: cp-up · cp-flink-up · cp-flink-reports-up"]
+        K8S["k8s/base/ + CFK Operator + CMF 2.5 + RustFS<br/>Makefile: cp-up · cp-flink-up · cp-flink-reports-up"]
         TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 28 statements (+3 optional AI, +5 optional merge,<br/>+5 optional state provenance)<br/>Makefile: cc-flink-reports-up"]
         MON["k8s/monitoring/<br/>Prometheus + Grafana pods; scrape host<br/>stages via host.minikube.internal<br/>Makefile: metrics-up"]
     end
@@ -378,7 +378,7 @@ k8s/base/                               CFK / CMF manifests (applied by `make cp
   cp-c3-next-gen.yaml                   Kafka / SR / Connect / ksqlDB / Control Center
   rustfs.yaml                           in-cluster S3-compatible store backing CMF's
                                         cmf:// artifact (JAR) storage
-  cmf-values.yaml                       Helm values for CMF 2.4 — artifact storage
+  cmf-values.yaml                       Helm values for CMF 2.5 — artifact storage
                                         (points at RustFS) + writable environment catalog
   cmf-flink-application.json            FlinkApplication template (envsubst'd by
                                         deploy-cmf-flink-reports.sh) — the reports job
