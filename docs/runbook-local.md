@@ -61,11 +61,11 @@ make cp-watch            # watch pods come up (Ctrl+C to exit); or: make cp-stat
 
 ## **3.0 Flink**
 ```bash
-make cp-flink-up         # cert-manager → operator → RustFS → CMF 2.4 → env → RBAC → app image
+make cp-flink-up         # cert-manager → operator → RustFS → CMF 2.5 → env → RBAC → app image
 make cmf-status          # (~5 min the first time)
 ```
 
-This installs cert-manager, the Confluent Flink Kubernetes Operator, **RustFS** (S3-compatible store for CMF artifacts), **CMF 2.4** (with artifact management + the writable environment catalog enabled), creates the `dev-local` Flink environment, applies the Flink RBAC, and builds the custom `cp-flink` 2.1 image (`isotope-cp-flink-sql:local`) that bakes in the Kafka + Avro SQL connectors and the S3 filesystem plugin.
+This installs cert-manager, the Confluent Flink Kubernetes Operator, **RustFS** (S3-compatible store for CMF artifacts), **CMF 2.5** (with artifact management + the writable environment catalog enabled), creates the `dev-local` Flink environment, applies the Flink RBAC, and builds the custom `cp-flink` 2.1 image (`isotope-cp-flink-sql:local`) that bakes in the Kafka + Avro SQL connectors and the S3 filesystem plugin.
 
 > **The reports run as a CMF _Application_, not SQL statements.** CMF's SQL-statement runtime (`io.confluent.flink.FlinkCompiledPlanExecutor`) ships only in the `cp-flink-sql` image, which exists only at **Flink 1.19** — and two reports are `ProcessTableFunction`s, a **Flink 2.x** feature. So all seven reports deploy as a single Flink 2.1 CMF **Application** (entry point `IsotopeReportsJob`), which runs the same `.fql` and surfaces in CMF / Control Center as a managed application. No raw session cluster is created — if you want one for ad-hoc SQL, deploy it separately with `make flink-deploy` (see [§7.0 Observe](#70-observe)).
 

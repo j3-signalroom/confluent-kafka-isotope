@@ -127,7 +127,7 @@ All five register on both runtimes; only the `CREATE FUNCTION … USING JAR …`
 
 ### **6.1 CP Flink on minikube**
 ```bash
-make cp-flink-up               # cert-manager → CFK Flink Operator → RustFS → CMF 2.4 → env → app image
+make cp-flink-up               # cert-manager → CFK Flink Operator → RustFS → CMF 2.5 → env → app image
 make kafka-pf-up            # localhost:30092 → Kafka, localhost:8081 → SR
 make cp-flink-reports-up    # build app JAR → upload as cmf:// artifact → deploy the CMF Application
 make cp-flink-reports-down  # delete the CMF Application + artifact + sink topics

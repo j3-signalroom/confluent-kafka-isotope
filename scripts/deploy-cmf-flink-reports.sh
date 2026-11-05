@@ -28,7 +28,7 @@
 #   3. delete the sink topics
 #
 # Usage: scripts/deploy-cmf-flink-reports.sh {up|down}
-# Prereqs: make rustfs-up, cmf-install (2.4.x), cmf-env-create, flink-image-build,
+# Prereqs: make rustfs-up, cmf-install (2.5.x), cmf-env-create, flink-image-build,
 #          and the app jar built (./gradlew :ptf:shadowJar).
 set -euo pipefail
 
