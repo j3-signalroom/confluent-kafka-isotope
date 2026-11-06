@@ -19,16 +19,22 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * Detects traces that stop progressing.
+ * Detects traces that stop progressing before reaching the end of the pipeline.
  *
  * Behavior:
  *   - For each {@code trace_id} (partition key — supplied by SQL via the
  *     {@code PARTITION BY} clause on the input table argument), remembers
- *     the most-recent hop's event-time and producer/topic for triage.
+ *     the latest hop's event-time and producer/topic for triage. Latest in
+ *     <em>event time</em>, not arrival: {@code isotope_raw} is a
+ *     {@code UNION ALL} of one table per topic, so a trace's hops reach this
+ *     operator in arbitrary order. A hop behind the latest one is ignored.
  *   - Registers a named event-time timer at
  *     {@code lastSeen + STALENESS}. Re-registering the same timer
  *     name on every fresh hop replaces the previous one — Flink handles
  *     the dedup for us.
+ *   - A hop on {@link #TERMINAL_TOPIC} finishes the trace: its timer is
+ *     cleared and every later row for it is ignored. Going quiet is what a
+ *     finished trace does, so it must not read as stuck.
  *   - When the timer fires, emits one {@link Row} matching the
  *     {@link FunctionHint} output schema below.
  *
@@ -75,6 +81,14 @@ public class StuckTracePTF extends ProcessTableFunction<Row> {
     private static final Duration STALENESS = Duration.ofSeconds(60);
 
     /**
+     * The last topic of the demo's {@code orders.*} pipeline. A compile-time
+     * constant for the same reason as {@link #STALENESS}: the framework cannot
+     * currently take it as a named scalar arg. Update it if the pipeline grows
+     * another stage, or a trace that stalls past this topic will go undetected.
+     */
+    private static final String TERMINAL_TOPIC = "orders.fulfilled";
+
+    /**
      * Per-partition (per-trace) state. Mutated in place during
      * {@link #eval}; the framework persists it across invocations.
      */
@@ -97,14 +111,31 @@ public class StuckTracePTF extends ProcessTableFunction<Row> {
                 Row input) {
 
         Instant eventTime = ctx.timeContext(Instant.class).time();
+        long eventMs = eventTime.toEpochMilli();
+        String thisTopic = input.getFieldAs("this_topic");
+        boolean finishes = TERMINAL_TOPIC.equals(thisTopic);
+
+        // Finished is final: an earlier hop read after the terminal one, or a
+        // retried hop, must not rearm a trace that already reached the end.
+        if (TERMINAL_TOPIC.equals(state.lastTopic)) return;
+
+        // Behind the latest hop, so not where the trace stopped, and following it
+        // would pull the timer back. The terminal hop is exempt: it finishes the
+        // trace even when a retried hop carries a later timestamp.
+        if (!finishes && state.lastSeenTsMs != null && eventMs < state.lastSeenTsMs) return;
 
         state.traceId        = input.getFieldAs("trace_id");
         state.originService  = input.getFieldAs("origin_service");
         state.pipeline       = input.getFieldAs("pipeline");
         state.lastService    = input.getFieldAs("this_service");
-        state.lastTopic      = input.getFieldAs("this_topic");
+        state.lastTopic      = thisTopic;
         state.lastHopCount   = input.getFieldAs("hop_count");
-        state.lastSeenTsMs   = eventTime.toEpochMilli();
+        state.lastSeenTsMs   = eventMs;
+
+        if (finishes) {
+            ctx.timeContext(Instant.class).clearTimer(TIMER_NAME);
+            return;
+        }
 
         Instant fireAt = eventTime.plus(STALENESS);
         state.firingAtMs = fireAt.toEpochMilli();
@@ -116,6 +147,10 @@ public class StuckTracePTF extends ProcessTableFunction<Row> {
 
     public void onTimer(TraceState state) {
         if (state == null || state.lastSeenTsMs == null) return;
+
+        // eval() clears the timer on the terminal hop, but state restored from
+        // before that existed can hold a finished trace with its timer still armed.
+        if (TERMINAL_TOPIC.equals(state.lastTopic)) return;
 
         collect(Row.of(
             state.traceId,

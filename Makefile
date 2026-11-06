@@ -55,10 +55,12 @@ FLINK_RBAC_MANIFEST ?= k8s/base/flink-rbac.yaml
 # The report files (10_…70_) and 99_teardown.fql are deliberately excluded: the
 # SQL Client rejects anything but DDL/SET in an -i init file, and those contain
 # INSERT INTO. Run them by hand from the client if you want the jobs.
+# 08_ only declares the merge tables for this session's catalog, so
+# 82_merge_impact_query.fql can read them; it creates no topic.
 FLINK_SQL_DDL_DIR   ?= $(mkfile_dir)scripts/flink/sql/cp
 FLINK_SQL_INIT_DDL  ?= 00_source_table.fql 01_register_functions.fql \
                        05_isotope_view.fql 05_report_sinks.fql \
-                       06_consume_events_view.fql
+                       06_consume_events_view.fql 08_merge_provenance_sinks.fql
 CERT_MANAGER_VER    ?= v1.18.2
 # CMF 2.4.0+ is required for SQL UDFs (cmf:// artifacts) + the writable
 # environment catalog — both needed to run the reports as CMF Statements.

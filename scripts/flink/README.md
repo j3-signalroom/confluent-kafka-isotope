@@ -41,7 +41,7 @@ Every report also carries a **`pipeline`** column (decoded from the `x-isotope-p
 | `bipartite_topology` | `isotope` and `consume_events` | full bipartite graph: produce edges plus consume edges per minute | CP, CCAF |
 | `hop_distribution`   | `isotope`                 | record counts bucketed by `hop_count` per topic per minute | CP, CCAF |
 | `coverage`           | `isotope`                 | distinct traces per topic per minute | CP, CCAF |
-| `stuck_trace`        | `isotope`                 | alerts (via `STUCK_TRACE_PTF`) for traces idle ≥60s of event time | CP, CCAF |
+| `stuck_trace`        | `isotope`                 | alerts (via `STUCK_TRACE_PTF`) for traces idle ≥60s of event time before reaching `orders.fulfilled` | CP, CCAF |
 | `latency_percentiles`| `isotope`                 | p50 / p95 / p99 (via `LATENCY_PERCENTILES` PTF, T-Digest) | CP, CCAF |
 
 **Plus one non-report INSERT.** `75_flink_collector.fql` is not an aggregation and has no window — it forwards `orders.placed` to `orders.flink_enriched` 1:1, appending a Flink hop via the `ISOTOPE_APPEND_HOP` UDF. It rides in the same job as the seven reports on both runtimes. See [docs/flink-collector.md](../../docs/flink-collector.md).
@@ -88,6 +88,8 @@ scripts/flink/sql/cp/                   CP Flink — session-cluster SQL
                                         ISOTOPE_MERGE_TRACE (fan-in, so it cannot continue a trace)
   81_merge_edge_markers.fql             OPTIONAL — one merge edge per contributing trace (+ record count),
                                         labelled with the same derived ID via ISOTOPE_MERGE_TRACE_ID
+  82_merge_impact_query.fql             Ad-hoc SELECTs, never deployed: stuck-trace alerts joined to
+                                        the merge edges (run from `make flink-sql`)
   09_state_provenance_sinks.fql         OPTIONAL — CREATE VIEW entity_log (append-mode change log)
                                         + isotope_state_provenance (version chain, parents inline)
   85_state_provenance.fql               OPTIONAL — INSERT INTO: one record per emitted state via

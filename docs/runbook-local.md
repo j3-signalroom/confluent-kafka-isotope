@@ -143,7 +143,7 @@ Then, in a fourth terminal, drive the traffic through them:
 for i in {1..30}; do ./gradlew :app:run --args="place burst-$i" -q; sleep 5; done
 ```
 
-Wait ~90s after the **last** record before checking results — that's the watermark catching up. `stuck_trace_alerts_1m` only fires for a trace that goes ≥60s of event time without a fresh hop; to exercise it, **stop the enrich/fulfill stages**, send one record to `orders.placed`, and keep sending unrelated records so the watermark crosses `event_time + 60s`.
+Wait ~90s after the **last** record before checking results — that's the watermark catching up. `stuck_trace_alerts_1m` only fires for a trace that goes ≥60s of event time without a fresh hop and has not reached `orders.fulfilled`; to exercise it, **stop the enrich/fulfill stages**, send one record to `orders.placed`, and keep sending unrelated records so the watermark crosses `event_time + 60s`.
 
 ## **7.0 Observe**
 ```bash
@@ -165,7 +165,7 @@ make flink-sql           # interactive SQL Client on it, report DDL preloaded
 `flink-deploy` applies [k8s/base/flink-cluster-deployment.yaml](../k8s/base/flink-cluster-deployment.yaml) — a `cp-flink` 2.1 session cluster with 8 task slots, whose init containers fetch the Kafka and Avro-SR connector JARs. `flink-sql` then installs the PTF JAR into the JobManager's `/opt/flink/lib` and preloads the DDL from [scripts/flink/sql/cp/](../scripts/flink/sql/cp/), so the session opens ready to query:
 
 ```
-Flink SQL> SHOW TABLES;          -- 4 source tables + 7 report sinks + views
+Flink SQL> SHOW TABLES;          -- 4 source tables + 7 report sinks + 2 merge tables + views
 Flink SQL> SHOW USER FUNCTIONS;  -- latency_percentiles, stuck_trace_ptf
 ```
 
@@ -287,6 +287,8 @@ done < /tmp/batched.txt
 `COUNT(*) == distinct_traces` and `SUM(contributing_records) == event_count`. Both hold because the two statements sit behind the same window operator — a late record is dropped by both or by neither.
 
 > **What this demo cannot show.** Every trace touches `orders.placed` exactly once, so `contributing_records` is always `1` and `event_count` always equals `distinct_traces`. The weighted-edge column is exercised in shape, not in value; a source where one trace contributes several records to a window is what makes the two reconciliations differ.
+
+> **Which merged records did a stuck trace feed?** With merge provenance on and a stuck trace [exercised](#60-drive-traffic-required-to-see-report-rows), paste the two queries from [`82_merge_impact_query.fql`](../scripts/flink/sql/cp/82_merge_impact_query.fql) into `make flink-sql`. Both run until you cancel them, so stop them once you have your answer. The session preloads the merge table definitions, but those topics only have data if the reports are running with `ENABLE_MERGE_PROVENANCE=true`.
 
 #### **7.1.2 State Provenance — Three things to point at**
 

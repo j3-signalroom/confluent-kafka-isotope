@@ -1,0 +1,68 @@
+-- =====================================================================
+-- Merge impact — OPTIONAL, ad-hoc (see docs/flink-collector.md 2.4).
+--
+-- Which merged records did a stuck trace feed? A merge reads the origin
+-- stream, so a trace is counted in orders.flink_batched as soon as it is
+-- placed, whether or not it ever finishes. This joins the stuck-trace
+-- alerts to the merge edges on the one identity they share.
+--
+-- These are SELECTs for the session-cluster SQL Client, not a report:
+-- IsotopeReportsJob does not run this file, and nothing here writes to a
+-- topic. Paste them into `make flink-sql`, and stop them once you have your
+-- answer: both are unbounded streaming joins, whose state grows until they
+-- stop. Persisting either one would need its own sink, and the second emits
+-- updates, so that sink could not be a plain append topic.
+--
+-- On CCAF, replace `stuck_trace_alerts_1m` with
+-- `isotope_report_stuck_trace_1m`. The rest is the same on both runtimes.
+--
+-- Depends on:
+--   - `stuck_trace_alerts_1m` (05_report_sinks.fql)
+--   - `isotope_merge_edge_markers` (08_merge_provenance_sinks.fql), so the
+--     reports must be running with merge provenance on
+--
+-- Reading the results:
+--   - Impact means a merged record counted a trace that did not finish. The
+--     order was still placed, so the merged record's figures are not wrong.
+--   - An alert says the trace was stuck when its timer fired, not that it
+--     still is. A trace can resume after alerting.
+--   - The first query returns one row per alert, so a trace that alerts twice
+--     appears twice. An alert with no row has no recorded edge: its origin hop
+--     was dropped as late, or merge provenance was off during that window.
+--   - The alert topic is read from the earliest offset, so it includes any
+--     alerts written before StuckTracePTF stopped flagging finished traces.
+-- =====================================================================
+
+-- Per stuck trace: where it stopped, and the merged records it fed.
+SELECT
+    a.`trace_id`,
+    a.`last_service`,
+    a.`last_topic`,
+    a.`last_seen_ts_ms`,
+    e.`merge_trace_id`,
+    e.`window_start`,
+    e.`window_end`,
+    e.`contributing_records`
+FROM `stuck_trace_alerts_1m` AS a
+JOIN `isotope_merge_edge_markers` AS e
+    ON a.`trace_id` = e.`contributing_trace_id`;
+
+-- Per merged record: how many of its traces have alerted.
+--
+-- COUNT(DISTINCT ...) on both sides, so repeat alerts and replayed edges cannot
+-- inflate either figure. `contributing_traces` should equal the merged record's
+-- distinct_traces. Keep the LEFT JOIN: without it, unaffected merged records
+-- disappear and the total counts only the stuck traces.
+SELECT
+    e.`merge_trace_id`,
+    e.`window_start`,
+    e.`window_end`,
+    COUNT(DISTINCT e.`contributing_trace_id`) AS `contributing_traces`,
+    COUNT(DISTINCT a.`trace_id`)              AS `stuck_traces`
+FROM `isotope_merge_edge_markers` AS e
+LEFT JOIN `stuck_trace_alerts_1m` AS a
+    ON e.`contributing_trace_id` = a.`trace_id`
+GROUP BY
+    e.`merge_trace_id`,
+    e.`window_start`,
+    e.`window_end`;
