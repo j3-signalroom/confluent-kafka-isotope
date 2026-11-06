@@ -98,7 +98,7 @@ To skip the backlog, pass `--latest` (shorthand for `-Disotope.consume.from=late
 for i in {1..30}; do scripts/cc-app-run.sh place "burst-$i"; sleep 5; done
 ```
 
-Wait ~90s after the **last** record before checking results — that's the watermark catching up. `stuck_trace_alerts_1m` only fires for a trace that goes ≥60s of event time without a fresh hop; to exercise it, send one record to `orders.placed`, skip the `enrich`/`fulfill` hops, and keep sending unrelated records so the watermark crosses `event_time + 60s`.
+Wait ~90s after the **last** record before checking results — that's the watermark catching up. `stuck_trace_alerts_1m` only fires for a trace that goes ≥60s of event time without a fresh hop and has not reached `orders.fulfilled`; to exercise it, send one record to `orders.placed`, skip the `enrich`/`fulfill` hops, and keep sending unrelated records so the watermark crosses `event_time + 60s`.
 
 ## **6.0 Observe**
 In the Cloud Console **Flink SQL workspace**, query the report tables:
@@ -111,6 +111,8 @@ SELECT * FROM isotope_report_hop_distribution_1m;
 ```
 
 Terminal D prints the same `trace_id` across all three hops. CCAF report topics ride **Protobuf+SR** (`proto-registry`), versus Avro+SR on the CP path.
+
+With `ENABLE_MERGE_PROVENANCE=true`, you can see which merged records a stuck trace fed. Paste the two queries from [`82_merge_impact_query.fql`](../scripts/flink/sql/cp/82_merge_impact_query.fql) into the workspace, replacing `stuck_trace_alerts_1m` with `isotope_report_stuck_trace_1m`. Both run until you stop them, so stop them once you have your answer.
 
 ## **7.0 Teardown**
 ```bash

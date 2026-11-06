@@ -147,6 +147,8 @@ Both statements are window aggregates, and that is deliberate: a windowing TVF u
 
 Two costs, stated plainly. The edge stream writes one record per contributing trace per window, a material fraction of that stage's write volume — inherent to materializing an edge list. And `orders.flink_batched` is deliberately **not** added to the `isotope_raw` union, exactly as `orders.flink_enriched` is not: the union is typed `MAP<STRING, BYTES>` and the collector sinks are `MAP<STRING, STRING>`, and keeping them out is what lets this feature be optional without the seven reports changing shape.
 
+**Which merged records did a stuck trace feed?** The edges answer this, because `contributing_trace_id` and a stuck-trace alert's `trace_id` are the same identity. [`82_merge_impact_query.fql`](../scripts/flink/sql/cp/82_merge_impact_query.fql) holds two read-only queries: one lists the merged records each stuck trace fed and where the trace stopped, and the other reports how many of each merged record's traces have alerted. Neither is deployed or writes to a topic. A merge reads the origin stream, so it counts a trace as soon as it is placed. Impact therefore means a merged record counted a trace that did not finish, not that its figures are wrong.
+
 ## **3.0 Constraints**
 
 ### **3.1 1:1 Statements Only**

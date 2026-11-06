@@ -446,6 +446,8 @@ scripts/
     81_merge_edge_markers.fql           OPTIONAL (§3.5.2) — one row per contributing trace
                                         per window, weighted by contributing_records;
                                         GROUP BY keeps its lateness in step with 80
+    82_merge_impact_query.fql           OPTIONAL (§3.5.2) — ad-hoc SELECTs, not deployed:
+                                        stuck-trace alerts joined to the merge edges
     85_state_provenance.fql             OPTIONAL (§3.5.3) — one record per emitted state,
                                         parents inline
     99_teardown.fql                     DROP TABLE / VIEW / FUNCTION

@@ -1,7 +1,8 @@
 -- =====================================================================
 -- Stuck-trace report — fires an alert for any trace that has not had a
 -- new hop within `staleness_seconds` of its last-observed hop, measured
--- in event time.
+-- in event time. A trace that reached `orders.fulfilled`, the end of the
+-- pipeline, is finished and never alerts (StuckTracePTF.TERMINAL_TOPIC).
 --
 -- Reads from the `isotope` view (typed projection of `isotope_raw`,
 -- with `x-isotope-*` headers decoded). Writes to the
