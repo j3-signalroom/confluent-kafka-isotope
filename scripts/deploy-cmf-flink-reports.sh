@@ -20,6 +20,8 @@
 #   4. wait for the application job to reach RUNNING
 #   5. with LAKEHOUSE=true, repeat 3–4 for the lakehouse application (same artifact,
 #      entryClass IsotopeLakehouseJob — see docs/lakehouse.md)
+#   6. with HEALTH_MONITOR=true, repeat 3–4 for the health monitor (same artifact,
+#      entryClass IsotopeHealthJob)
 #
 # Flow (down):
 #   1. delete the application(s) + their shared cmf:// artifact
@@ -72,6 +74,15 @@ LAKEHOUSE="${LAKEHOUSE:-false}"
 LAKEHOUSE_APP_NAME="${LAKEHOUSE_APP_NAME:-isotope-lakehouse}"
 LAKEHOUSE_MANIFEST="${LAKEHOUSE_MANIFEST:-k8s/base/cmf-flink-lakehouse-application.json}"
 
+# Opt-in health monitor. Off by default: it runs another application from the same
+# artifact (entryClass IsotopeHealthJob) that alerts when traffic keeps flowing but
+# the reports stop publishing. A separate application, because Stuck Trace can't
+# report on the job it runs inside.
+#   HEALTH_MONITOR=true scripts/deploy-cmf-flink-reports.sh up
+HEALTH_MONITOR="${HEALTH_MONITOR:-false}"
+HEALTH_APP_NAME="${HEALTH_APP_NAME:-isotope-reports-health}"
+HEALTH_MANIFEST="${HEALTH_MANIFEST:-k8s/base/cmf-flink-health-application.json}"
+
 # Renders a flag list as the JSON array the manifests' "args" expects.
 json_args() { if [ $# -eq 0 ]; then echo '[]'; else echo "[$(printf '"%s",' "$@" | sed 's/,$//')]"; fi; }
 
@@ -120,6 +131,11 @@ fi
 STATE_TOPICS=(isotope_state_provenance)
 if [ "${STATE_PROVENANCE}" = "true" ]; then
     SINK_TOPICS+=("${STATE_TOPICS[@]}")
+fi
+# Health-monitor topic, pre-created and torn down on the same terms.
+HEALTH_TOPICS=(isotope_reports_health)
+if [ "${HEALTH_MONITOR}" = "true" ]; then
+    SINK_TOPICS+=("${HEALTH_TOPICS[@]}")
 fi
 
 KAFKA_POD=$(kubectl get pods -n "${NAMESPACE}" --no-headers -o custom-columns=":metadata.name" 2>/dev/null \
@@ -199,7 +215,7 @@ purge_statements() {
 #   deploy_application <name> <manifest> <description>
 deploy_application() {
     local name="$1" manifest="$2" what="$3" code state=""
-    APP_NAME="${APP_NAME}" LAKEHOUSE_APP_NAME="${LAKEHOUSE_APP_NAME}" POOL_IMAGE="${POOL_IMAGE}" APP_FLINK_VERSION="${APP_FLINK_VERSION}" \
+    APP_NAME="${APP_NAME}" LAKEHOUSE_APP_NAME="${LAKEHOUSE_APP_NAME}" HEALTH_APP_NAME="${HEALTH_APP_NAME}" POOL_IMAGE="${POOL_IMAGE}" APP_FLINK_VERSION="${APP_FLINK_VERSION}" \
         CMF_ENV_NAME="${CMF_ENV}" APP_ARTIFACT_NAME="${ARTIFACT_NAME}" APP_ARTIFACT_VERSION="${VERSION}" \
         RUSTFS_S3_ENDPOINT="${RUSTFS_S3_ENDPOINT}" RUSTFS_ACCESS_KEY="${RUSTFS_ACCESS_KEY}" RUSTFS_SECRET_KEY="${RUSTFS_SECRET_KEY}" \
         APP_JOB_ARGS="${APP_JOB_ARGS}" LAKEHOUSE_JOB_ARGS="${LAKEHOUSE_JOB_ARGS}" \
@@ -255,13 +271,19 @@ if [ "${ACTION}" = "up" ]; then
         echo "→ Deploying FlinkApplication '${LAKEHOUSE_APP_NAME}' (entryClass IsotopeLakehouseJob, args=${LAKEHOUSE_JOB_ARGS})..."
         deploy_application "${LAKEHOUSE_APP_NAME}" "${LAKEHOUSE_MANIFEST}" "Iceberg lakehouse"
     fi
+
+    if [ "${HEALTH_MONITOR}" = "true" ]; then
+        echo "→ Deploying FlinkApplication '${HEALTH_APP_NAME}' (entryClass IsotopeHealthJob)..."
+        deploy_application "${HEALTH_APP_NAME}" "${HEALTH_MANIFEST}" "reports health monitor"
+    fi
     echo "  Inspect: Control Center → Flink, or the CMF applications API."
 else
     cmf_pf_start
-    # The lakehouse application is deleted unconditionally, like the optional
-    # topics below: a `down` without LAKEHOUSE=true must not strand one an earlier
-    # `up` created — and it must go before the artifact both reference.
-    echo "→ Deleting FlinkApplications '${LAKEHOUSE_APP_NAME}' and '${APP_NAME}'..."
+    # The optional applications are deleted unconditionally, like the optional
+    # topics below: a `down` without their flag must not strand one an earlier `up`
+    # created — and they must go before the artifact they all reference.
+    echo "→ Deleting FlinkApplications '${HEALTH_APP_NAME}', '${LAKEHOUSE_APP_NAME}' and '${APP_NAME}'..."
+    curl -s -o /dev/null -w "  delete health app: HTTP %{http_code}\n" -X DELETE "${ENV_API}/applications/${HEALTH_APP_NAME}"
     curl -s -o /dev/null -w "  delete lakehouse app: HTTP %{http_code}\n" -X DELETE "${ENV_API}/applications/${LAKEHOUSE_APP_NAME}"
     curl -s -o /dev/null -w "  delete app: HTTP %{http_code}\n" -X DELETE "${ENV_API}/applications/${APP_NAME}"
     echo "→ Deleting artifact '${ARTIFACT_NAME}'..."
@@ -271,6 +293,7 @@ else
     DOWN_TOPICS=("${SINK_TOPICS[@]}")
     [ "${MERGE_PROVENANCE}" = "true" ] || DOWN_TOPICS+=("${MERGE_TOPICS[@]}")
     [ "${STATE_PROVENANCE}" = "true" ] || DOWN_TOPICS+=("${STATE_TOPICS[@]}")
+    [ "${HEALTH_MONITOR}" = "true" ] || DOWN_TOPICS+=("${HEALTH_TOPICS[@]}")
     echo "→ Deleting ${#DOWN_TOPICS[@]} sink topics..."
     for t in "${DOWN_TOPICS[@]}"; do echo "  ↳ ${t}"; delete_topic "${t}"; done
     echo "✔ Reports application torn down."

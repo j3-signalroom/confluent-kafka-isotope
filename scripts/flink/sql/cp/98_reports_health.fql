@@ -1,0 +1,28 @@
+-- =====================================================================
+-- Reports health monitor: alerts when traffic keeps flowing but the reports job
+-- stops publishing (ReportsHealthPTF). Run by IsotopeHealthJob, which is a separate
+-- application so that it outlives the job it watches.
+--
+-- The PTF call lives in an INSERT and not a CREATE VIEW for the reason given in
+-- 60_stuck_trace_report.fql. Bump the uid suffix if the PTF state schema changes
+-- incompatibly.
+-- =====================================================================
+
+SET 'pipeline.name' = 'isotope_reports_health';
+
+INSERT INTO reports_health_alerts
+SELECT
+    monitored_job,
+    status,
+    overdue_window_end,
+    last_reported_window_end,
+    last_traffic_ts_ms,
+    event_ts_ms,
+    stalled_for_ms
+FROM TABLE(
+    REPORTS_HEALTH(
+        input   => TABLE health_signals PARTITION BY monitored_job,
+        on_time => DESCRIPTOR(event_time),
+        uid     => 'reports-health-v1'
+    )
+);
