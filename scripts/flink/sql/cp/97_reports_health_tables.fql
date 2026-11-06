@@ -1,0 +1,88 @@
+-- =====================================================================
+-- Health monitor tables, read and written by IsotopeHealthJob only.
+--
+-- Declared here rather than reusing 00_source_table.fql and
+-- 05_report_sinks.fql, because this job needs what those leave out: a Kafka
+-- write-time watermark on the report topic, and a start at the latest offset.
+-- Starting from the end means a redeploy judges the reports job from now on,
+-- not by replaying traffic from before it existed.
+-- =====================================================================
+
+-- Traffic: the first topic of the pipeline. The other stages can be legitimately
+-- down, and that's Stuck Trace's job to report, not this monitor's.
+CREATE TABLE IF NOT EXISTS health_traffic (
+    `value`      BYTES,
+    `headers`    MAP<STRING, BYTES> METADATA FROM 'headers'   VIRTUAL,
+    `event_time` TIMESTAMP_LTZ(3)   METADATA FROM 'timestamp' VIRTUAL,
+    WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'orders.placed',
+    'properties.bootstrap.servers' = 'kafka:9071',
+    'properties.group.id'          = 'isotope-health',
+    'scan.startup.mode'            = 'latest-offset',
+    'value.format'                 = 'raw'
+);
+
+-- What the reports job published. Columns match topology_report_1m in
+-- 05_report_sinks.fql, since they derive the reader's Avro schema.
+CREATE TABLE IF NOT EXISTS health_topology_report (
+    `window_start`     BIGINT,
+    `window_end`       BIGINT,
+    `pipeline`         STRING,
+    `origin_service`   STRING,
+    `producer_service` STRING,
+    `topic`            STRING,
+    `records`          BIGINT,
+    `distinct_traces`  BIGINT,
+    `event_time` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp' VIRTUAL,
+    WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'isotope_report_topology_1m',
+    'properties.bootstrap.servers' = 'kafka:9071',
+    'properties.group.id'          = 'isotope-health',
+    'scan.startup.mode'            = 'latest-offset',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schemaregistry.confluent.svc.cluster.local:8081'
+);
+
+-- The same filter as the `isotope` view: a record with no isotope never reaches
+-- the topology report, so it can't count as traffic the report owes a window for.
+CREATE VIEW IF NOT EXISTS health_signals AS
+SELECT
+    'isotope-reports'   AS `monitored_job`,
+    'traffic'           AS `kind`,
+    CAST(NULL AS BIGINT) AS `window_end`,
+    `event_time`
+FROM health_traffic
+WHERE `headers`['x-isotope-trace-id']         IS NOT NULL
+  AND `headers`['x-isotope-consumer-service'] IS NULL
+UNION ALL
+SELECT
+    'isotope-reports'   AS `monitored_job`,
+    'report'            AS `kind`,
+    `window_end`,
+    `event_time`
+FROM health_topology_report;
+
+-- One row per STALLED or RECOVERED transition. Times are epoch millis, like the
+-- report sinks, because avro-confluent can't derive a schema for TIMESTAMP_LTZ(3).
+CREATE TABLE IF NOT EXISTS reports_health_alerts (
+    `monitored_job`            STRING,
+    `status`                   STRING,
+    `overdue_window_end`       BIGINT,
+    `last_reported_window_end` BIGINT,
+    `last_traffic_ts_ms`       BIGINT,
+    `event_ts_ms`              BIGINT,
+    `stalled_for_ms`           BIGINT
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'isotope_reports_health',
+    'properties.bootstrap.servers' = 'kafka:9071',
+    'value.format'                 = 'avro-confluent',
+    'value.avro-confluent.url'     = 'http://schemaregistry.confluent.svc.cluster.local:8081',
+    'sink.partitioner'             = 'fixed',
+    'scan.startup.mode'            = 'earliest-offset',
+    'properties.group.id'          = 'isotope-report-reader'
+);

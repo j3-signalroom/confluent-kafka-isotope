@@ -133,6 +133,15 @@ LAKEHOUSE_MANIFEST       ?= k8s/base/iceberg-rest.yaml
 LAKEHOUSE_APP_NAME       ?= isotope-lakehouse
 LAKEHOUSE_APP_MANIFEST   ?= k8s/base/cmf-flink-lakehouse-application.json
 
+# Optional reports health monitor. CP only, off by default; on, it deploys another
+# CMF Application (IsotopeHealthJob) that alerts when traffic keeps flowing but the
+# reports stop publishing.
+#   make cp-flink-reports-up ENABLE_HEALTH_MONITOR=true
+# Falls back to HEALTH_MONITOR, the env var the CP deploy script reads directly.
+ENABLE_HEALTH_MONITOR    ?= $(HEALTH_MONITOR)
+HEALTH_APP_NAME          ?= isotope-reports-health
+HEALTH_APP_MANIFEST      ?= k8s/base/cmf-flink-health-application.json
+
 # Optional metrics showcase (Prometheus + Grafana) — see k8s/monitoring/README.md
 MONITORING_MANIFEST ?= k8s/monitoring
 
@@ -855,7 +864,7 @@ reports-jar: ## Build the reports application shadow JAR (IsotopeReportsJob + 3 
 	./gradlew :ptf:shadowJar -q
 
 .PHONY: cp-flink-reports-up
-cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication; +lakehouse app with ENABLE_LAKEHOUSE)
+cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Application (artifact upload → FlinkApplication; +lakehouse app with ENABLE_LAKEHOUSE; +health monitor app with ENABLE_HEALTH_MONITOR)
 	@if [ "$(ENABLE_LAKEHOUSE)" = "true" ]; then $(MAKE) --no-print-directory lakehouse-up; fi
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
 		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' APP_MANIFEST='$(APP_MANIFEST)' APP_JAR='$(APP_JAR)' \
@@ -864,12 +873,13 @@ cp-flink-reports-up: reports-jar ## Deploy the 7 reports as a Flink 2.1 CMF Appl
 		MERGE_PROVENANCE='$(ENABLE_MERGE_PROVENANCE)' \
 		STATE_PROVENANCE='$(ENABLE_STATE_PROVENANCE)' \
 		LAKEHOUSE='$(ENABLE_LAKEHOUSE)' LAKEHOUSE_APP_NAME='$(LAKEHOUSE_APP_NAME)' LAKEHOUSE_MANIFEST='$(LAKEHOUSE_APP_MANIFEST)' \
+		HEALTH_MONITOR='$(ENABLE_HEALTH_MONITOR)' HEALTH_APP_NAME='$(HEALTH_APP_NAME)' HEALTH_MANIFEST='$(HEALTH_APP_MANIFEST)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh up
 
 .PHONY: cp-flink-reports-down
 cp-flink-reports-down: ## Tear down the reports CMF Application + artifact + sink topics (safe to run repeatedly)
 	@NAMESPACE='$(NAMESPACE)' CMF_ENV_NAME='$(CMF_ENV_NAME)' APP_NAME='$(APP_NAME)' \
-		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' LAKEHOUSE_APP_NAME='$(LAKEHOUSE_APP_NAME)' \
+		APP_ARTIFACT_NAME='$(APP_ARTIFACT_NAME)' LAKEHOUSE_APP_NAME='$(LAKEHOUSE_APP_NAME)' HEALTH_APP_NAME='$(HEALTH_APP_NAME)' \
 		$(mkfile_dir)scripts/deploy-cmf-flink-reports.sh down
 
 # ------------------------------------------------------------------------------
