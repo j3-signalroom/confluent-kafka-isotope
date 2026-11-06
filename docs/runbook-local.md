@@ -143,7 +143,7 @@ Then, in a fourth terminal, drive the traffic through them:
 for i in {1..30}; do ./gradlew :app:run --args="place burst-$i" -q; sleep 5; done
 ```
 
-Wait ~90s after the **last** record before checking results — that's the watermark catching up. `stuck_trace_alerts_1m` only fires for a trace that goes ≥60s of event time without a fresh hop and has not reached `orders.fulfilled`; to exercise it, **stop the enrich/fulfill stages**, send one record to `orders.placed`, and keep sending unrelated records so the watermark crosses `event_time + 60s`.
+Event time only advances when records arrive, so waiting alone won't close the newest window or alert on the newest traces: keep some traffic flowing until the watermark passes them. A topic that goes quiet stops holding the watermark back after 30s (`table.exec.source.idle-timeout`), so one stopped stage doesn't freeze the reports. `stuck_trace_alerts_1m` only fires for a trace that goes ≥60s of event time without a fresh hop and has not reached `orders.fulfilled`; to exercise it, **stop the enrich/fulfill stages**, send one record to `orders.placed`, and keep sending unrelated records so the watermark crosses `event_time + 60s`.
 
 ## **7.0 Observe**
 ```bash
