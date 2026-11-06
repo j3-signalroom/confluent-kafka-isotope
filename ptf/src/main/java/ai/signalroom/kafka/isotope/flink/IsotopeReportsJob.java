@@ -44,6 +44,23 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
  */
 public final class IsotopeReportsJob {
 
+    /**
+     * How long a source can go without a record before it stops holding back the
+     * watermark. {@code isotope_raw} is a union, so its watermark is the minimum
+     * across its topics, and Flink's default is to wait for a quiet topic forever.
+     * Without this, one stopped pipeline stage freezes event time for the whole
+     * union: no window closes and no stuck-trace alert fires, at the very moment a
+     * stage is down.
+     *
+     * <p>Keep it above the normal gap between records on the quietest topic. A
+     * record arriving behind a watermark that moved on without its topic is late,
+     * and the window reports drop it. It does not help when every topic is quiet:
+     * event time still needs some record to advance it.
+     *
+     * <p>The SQL-Client path sets the same value in {@code 00_source_table.fql}.
+     */
+    static final String SOURCE_IDLE_TIMEOUT = "30 s";
+
     /** DDL files, applied in dependency order. */
     private static final List<String> DDL_FILES = List.of(
             "00_source_table.fql",        // 4 source tables + isotope_raw view
@@ -134,6 +151,7 @@ public final class IsotopeReportsJob {
         // UTC removes both. CCAF's twin is sql.local-time-zone in
         // terraform/setup-ccaf.tf.
         tableEnv.getConfig().setLocalTimeZone(ZoneId.of("UTC"));
+        tableEnv.getConfig().set("table.exec.source.idle-timeout", SOURCE_IDLE_TIMEOUT);
 
         // Register the two JAR-backed PTFs from their on-classpath classes (this
         // jar bundles them), so the report SQL can call STUCK_TRACE_PTF /

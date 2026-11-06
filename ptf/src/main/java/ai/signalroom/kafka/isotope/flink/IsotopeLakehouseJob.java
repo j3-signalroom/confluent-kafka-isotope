@@ -67,6 +67,8 @@ public final class IsotopeLakehouseJob {
         // Same pin as IsotopeReportsJob, so event_time lands in the lakehouse as the
         // same instant the reports saw.
         tableEnv.getConfig().setLocalTimeZone(ZoneId.of("UTC"));
+        // Reads the same union, so a quiet topic would stall event time here too.
+        tableEnv.getConfig().set("table.exec.source.idle-timeout", IsotopeReportsJob.SOURCE_IDLE_TIMEOUT);
 
         List<String> ddlFiles = new ArrayList<>(DDL_FILES);
         List<String> insertFiles = new ArrayList<>(LAKEHOUSE_FILES);
