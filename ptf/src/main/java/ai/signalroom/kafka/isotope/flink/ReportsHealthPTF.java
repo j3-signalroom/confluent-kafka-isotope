@@ -47,7 +47,11 @@ public class ReportsHealthPTF extends ProcessTableFunction<Row> {
     /** The tumbling window of {@code 20_topology_report.fql}, the report being watched. */
     private static final long WINDOW_MS = Duration.ofMinutes(1).toMillis();
 
-    /** The watermark allowance the reports' source tables declare. */
+    /**
+     * The watermark allowance the reports' source tables declare on CP. CCAF's default
+     * is far smaller (180 ms), so there a window can close before this says it has,
+     * which only makes this check start slightly late.
+     */
     private static final long WATERMARK_ALLOWANCE_MS = Duration.ofSeconds(5).toMillis();
 
     /**
@@ -55,7 +59,9 @@ public class ReportsHealthPTF extends ProcessTableFunction<Row> {
      * for the same reason as {@code StuckTracePTF.STALENESS}. It has to outlast a
      * quiet topic holding the reports' watermark back for
      * {@link IsotopeReportsJob#SOURCE_IDLE_TIMEOUT}, plus a task restart, so it would
-     * not read as an outage.
+     * not read as an outage. On CCAF, whose idleness detection can grow to 5 minutes,
+     * a stopped stage can hold the reports back for longer than this. That alerts,
+     * correctly, since the reports really have stopped publishing.
      */
     private static final long GRACE_MS = Duration.ofMinutes(2).toMillis();
 

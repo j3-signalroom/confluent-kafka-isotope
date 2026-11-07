@@ -12,6 +12,7 @@
 #       [--enable-trace-rca=<true|false>]
 #       [--enable-merge-provenance=<true|false>]
 #       [--enable-state-provenance=<true|false>]
+#       [--enable-health-monitor=<true|false>]
 #       [--aws-access-key=<AWS_ACCESS_KEY>]
 #       [--aws-secret-key=<AWS_SECRET_KEY>]
 #       [--aws-session-token=<AWS_SESSION_TOKEN>]
@@ -45,7 +46,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TERRAFORM_DIR="${REPO_ROOT}/terraform"
 JAR_PATH="${REPO_ROOT}/ptf/build/libs/isotope-flink-udf.jar"
 
-argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--enable-merge-provenance=<true|false>] [--enable-state-provenance=<true|false>] [--aws-access-key=<KEY>] [--aws-secret-key=<SECRET>] [--aws-session-token=<TOKEN>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
+argument_list="--confluent-api-key=<KEY> --confluent-api-secret=<SECRET> [--day-count=<DAYS>] [--enable-trace-rca=<true|false>] [--enable-merge-provenance=<true|false>] [--enable-state-provenance=<true|false>] [--enable-health-monitor=<true|false>] [--aws-access-key=<KEY>] [--aws-secret-key=<SECRET>] [--aws-session-token=<TOKEN>] [--rca-model-provider=<PROVIDER>] [--rca-model-version=<VERSION>] [--rca-model-endpoint=<ENDPOINT>] [--rca-model-api-key=<KEY>] [--rca-model-system-prompt=<PROMPT>]"
 
 usage_and_exit() {
     echo
@@ -82,6 +83,7 @@ confluent_api_secret=""
 enable_trace_rca=false
 enable_merge_provenance=false
 enable_state_provenance=false
+enable_health_monitor=false
 aws_access_key=""
 aws_secret_key=""
 aws_session_token=""
@@ -108,6 +110,9 @@ for arg in "$@"; do
             ;;
         --enable-merge-provenance=*)
             enable_merge_provenance="${arg#--enable-merge-provenance=}"
+            ;;
+        --enable-health-monitor=*)
+            enable_health_monitor="${arg#--enable-health-monitor=}"
             ;;
         --enable-state-provenance=*)
             enable_state_provenance="${arg#--enable-state-provenance=}"
@@ -192,6 +197,8 @@ export TF_VAR_enable_merge_provenance="${enable_merge_provenance}"
 # Optional state-level provenance — docs/state-provenance.md. Same plain-bool
 # reasoning as merge provenance above.
 export TF_VAR_enable_state_provenance="${enable_state_provenance}"
+# Optional reports health monitor. Same plain-bool reasoning as merge provenance.
+export TF_VAR_enable_health_monitor="${enable_health_monitor}"
 
 # Only export the RCA model vars that were actually supplied. An exported but
 # empty TF_VAR_ does NOT fall through to the variable's Terraform default — it
