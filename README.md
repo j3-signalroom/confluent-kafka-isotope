@@ -18,6 +18,7 @@
     + [**3.5.2 [OPTIONAL] Fan-in Provenance: Windowed Merges**](#352-optional-fan-in-provenance-windowed-merges)
     + [**3.5.3 [OPTIONAL] State-Level Provenance: Upsert and CDC Sources**](#353-optional-state-level-provenance-upsert-and-cdc-sources)
     + [**3.5.4 [OPTIONAL] Iceberg Lakehouse: Trace History and Traversable Provenance**](#354-optional-iceberg-lakehouse-trace-history-and-traversable-provenance)
+  - [**3.6 [OPTIONAL] Reports Health Monitor**](#36-optional-reports-health-monitor)
 - [**Resources**](#resources)
   + [**Companion Articles**](#companion-articles)
   + [**Companion Presentation**](#companion-presentation)
@@ -761,6 +762,20 @@ scripts/lakehouse-query.sh shell      # interactive DuckDB with the lakehouse at
 ```
 
 > For more information, refer to **[docs/lakehouse.md](docs/lakehouse.md)**.
+
+### **3.6 [OPTIONAL] Reports Health Monitor**
+Stuck Trace runs inside the reports job, so when that job stops, its alerts stop too, and the silence looks like nothing being stuck. The health monitor runs separately (a second CMF Application on CP, its own statement on CCAF, same JAR) and watches the reports job through its topics: once traffic on `orders.placed` has moved past a one-minute window, `isotope_report_topology_1m` should publish that window. If it doesn't within 2 minutes, the monitor writes a `STALLED` row to `isotope_reports_health`, then a `RECOVERED` row when the report appears.
+
+```bash
+make cp-flink-reports-up ENABLE_HEALTH_MONITOR=true
+make cc-flink-reports-up ENABLE_HEALTH_MONITOR=true CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
+```
+
+- **When it alerts:** expect `STALLED` about 2 to 3 minutes after the reports stop. That covers a dead reports job and a frozen reports watermark, because both stop windows from closing.
+- **What `RECOVERED` means:** the reports job has published the overdue window, not that it has caught up. A restarted job replays its backlog, so it can still be behind.
+- **Traffic has to keep flowing:** the monitor runs on event time, so if `orders.placed` goes quiet it can't alert, even if the reports job is dead too.
+- **Shared dependencies:** it publishes to Kafka, so it can't report a Kafka outage. On CP it has its own pods but shares CMF and the Flink operator with the reports job. On CCAF it shares the compute pool and Confluent Cloud.
+- **A stopped stage on CCAF:** CCAF's idleness detection can grow to 5 minutes, so a stopped stage can hold the reports back for longer than the 2-minute grace period and raise `STALLED`. The reports really have stopped publishing, but the cause is the stage, not the job.
 
 ## **Resources**
 

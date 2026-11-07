@@ -133,10 +133,11 @@ LAKEHOUSE_MANIFEST       ?= k8s/base/iceberg-rest.yaml
 LAKEHOUSE_APP_NAME       ?= isotope-lakehouse
 LAKEHOUSE_APP_MANIFEST   ?= k8s/base/cmf-flink-lakehouse-application.json
 
-# Optional reports health monitor. CP only, off by default; on, it deploys another
-# CMF Application (IsotopeHealthJob) that alerts when traffic keeps flowing but the
-# reports stop publishing.
+# Optional reports health monitor, off by default. It alerts when traffic keeps
+# flowing but the reports stop publishing. On CP it deploys another CMF Application
+# (IsotopeHealthJob), and on CCAF five more statements.
 #   make cp-flink-reports-up ENABLE_HEALTH_MONITOR=true
+#   make cc-flink-reports-up ENABLE_HEALTH_MONITOR=true ...
 # Falls back to HEALTH_MONITOR, the env var the CP deploy script reads directly.
 ENABLE_HEALTH_MONITOR    ?= $(HEALTH_MONITOR)
 HEALTH_APP_NAME          ?= isotope-reports-health
@@ -895,7 +896,7 @@ cp-flink-reports-down: ## Tear down the reports CMF Application + artifact + sin
 #   make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
 #
 .PHONY: cc-flink-reports-up
-cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 28 Flink statements; +3 with ENABLE_TRACE_RCA, +5 with ENABLE_MERGE_PROVENANCE, +5 with ENABLE_STATE_PROVENANCE)
+cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topics + compute pool + artifact + 28 Flink statements; +3 with ENABLE_TRACE_RCA, +5 with ENABLE_MERGE_PROVENANCE, +5 with ENABLE_STATE_PROVENANCE, +5 with ENABLE_HEALTH_MONITOR)
 	@if [ -z "$(CONFLUENT_API_KEY)" ] || [ -z "$(CONFLUENT_API_SECRET)" ]; then \
 		echo "✘ CONFLUENT_API_KEY and CONFLUENT_API_SECRET must be set."; \
 		echo "  e.g. make cc-flink-reports-up CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=..."; \
@@ -922,6 +923,9 @@ cc-flink-reports-up: ## Deploy CCAF reports via Terraform (env + cluster + topic
 	fi; \
 	if [ "$(ENABLE_STATE_PROVENANCE)" = "true" ]; then \
 		set -- "$$@" --enable-state-provenance=true; \
+	fi; \
+	if [ "$(ENABLE_HEALTH_MONITOR)" = "true" ]; then \
+		set -- "$$@" --enable-health-monitor=true; \
 	fi; \
 	$(mkfile_dir)scripts/deploy-cc-flink-reports.sh create "$$@"
 
