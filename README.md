@@ -711,8 +711,10 @@ In this repo, **_Apache Flink provenance is the record of the data's origin and 
 Both runtimes use the same switch, off by default:
 
 ```bash
+# CP runtime
 make cp-flink-reports-up ENABLE_MERGE_PROVENANCE=true
 
+# CC runtime
 make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
     CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET
 ```
@@ -732,8 +734,10 @@ make cc-flink-reports-up ENABLE_MERGE_PROVENANCE=true \
 To enable state-level provenance, use the following `make` commands:
 
 ```bash
+# CP runtime
 make cp-flink-reports-up ENABLE_STATE_PROVENANCE=true
 
+# CC runtime
 make cc-flink-reports-up ENABLE_STATE_PROVENANCE=true \
     CONFLUENT_API_KEY=$CONFLUENT_API_KEY CONFLUENT_API_SECRET=$CONFLUENT_API_SECRET
 
@@ -767,7 +771,10 @@ scripts/lakehouse-query.sh shell      # interactive DuckDB with the lakehouse at
 Stuck Trace runs inside the reports job, so when that job stops, its alerts stop too, and the silence looks like nothing being stuck. The health monitor runs separately (a second CMF Application on CP, its own statement on CCAF, same JAR) and watches the reports job through its topics: once traffic on `orders.placed` has moved past a one-minute window, `isotope_report_topology_1m` should publish that window. If it doesn't within 2 minutes, the monitor writes a `STALLED` row to `isotope_reports_health`, then a `RECOVERED` row when the report appears.
 
 ```bash
+# CP runtime
 make cp-flink-reports-up ENABLE_HEALTH_MONITOR=true
+
+# CC runtime
 make cc-flink-reports-up ENABLE_HEALTH_MONITOR=true CONFLUENT_API_KEY=... CONFLUENT_API_SECRET=...
 ```
 
