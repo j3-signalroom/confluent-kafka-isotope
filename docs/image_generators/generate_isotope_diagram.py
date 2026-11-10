@@ -73,11 +73,10 @@ MERGE_BOX = {
     "foot": "off by default",
     "y": 1300,
 }
-# Set to None to drop the opt-in state-provenance path from the chart. CP only:
-# the version preimage needs raw value bytes, which CCAF's catalog tables do not
-# expose (docs/state-provenance.md 5.0).
+# Set to None to drop the opt-in state-provenance path from the chart. Runs on
+# both CP and CCAF, with the same version IDs (docs/state-provenance.md 5.0).
 STATE_BOX = {
-    "title": "State Provenance \u00b7 CP only",
+    "title": "State Provenance",
     "mono": ["isotope_state_provenance", "version chain \u00b7 parents[]"],
     "foot": "off by default",
     "y": 1600,
@@ -85,9 +84,21 @@ STATE_BOX = {
 # Set to None to drop the opt-in AI path from the chart entirely.
 OPTIONAL_BOX = {
     "title": "AI Root-Cause Analysis",
-    "mono": ["CREATE MODEL + ML_PREDICT", "rca_findings_1m"],
+    "mono": ["CREATE MODEL + ML_PREDICT", "trace_rca_1m"],
     "foot": "off by default",
     "feeds_from_sink": 6,          # 1-based index into SINKS
+}
+
+# Set to None to drop the opt-in health monitor from the chart. It runs apart from
+# the reports (its own CMF Application on CP, its own statement on CCAF) and
+# watches them through their topics, so its inputs are named rather than drawn:
+# an arrow from topology_1m would cross every report box below it.
+HEALTH_BOX = {
+    "title": "Reports Health Monitor",
+    "mono": ["orders.placed + topology_1m", "isotope_reports_health",
+             "STALLED \u00b7 RECOVERED"],
+    "foot": "off by default",
+    "y": 1420,
 }
 
 # Wrapped narrow (<= ~34 chars) so the block clears the AI box on its right.
@@ -106,13 +117,13 @@ NOTE_LEFT = [
     "",
     "A windowed merge cannot forward a",
     "trace \u2014 many parents \u2014 so",
-    "ISOTOPE_MERGE_TRACE mints a fresh one",
-    "and the parent edges go to their own",
-    "topic. Opt-in, like AI root-cause",
-    "analysis (which is CCAF-only).",
+    "ISOTOPE_MERGE_TRACE mints a",
+    "fresh one and the parent edges go",
+    "to their own topic. Opt-in, like AI",
+    "root-cause analysis (CCAF-only).",
     "",
-    "State provenance (CP only) versions",
-    "each entity by content instead \u2014 no",
+    "State provenance versions each",
+    "entity by content instead \u2014 no",
     "window to key on, and no hops: a",
     "revision is not a movement.",
 ]
@@ -158,11 +169,12 @@ def build():
     add('<title>Confluent Kafka Isotope \u2014 collectors and interpreter</title>')
     add('<desc>Four-stage order workflow stamps isotope headers; Flink SQL reads them '
         'to emit seven one-minute reports and also acts as a second collector, appending '
-        'its own hop onto orders.flink_enriched. Three opt-in paths are off by default: '
+        'its own hop onto orders.flink_enriched. Four opt-in paths are off by default: '
         'fan-in (merge) provenance, where a windowed merge mints a fresh trace and writes '
-        'its parent edges to their own topic; CP-only state-level provenance, which '
+        'its parent edges to their own topic; state-level provenance, which '
         'publishes a content-addressed version chain per entity instead of stamping hops; '
-        'and a CCAF-only AI root-cause report.</desc>')
+        'a CCAF-only AI root-cause report; and a reports health monitor, which alerts '
+        'when traffic keeps flowing but the reports stop publishing.</desc>')
     add(f'<rect x="0" y="0" width="{W}" height="{H}" fill="{PALETTE["bg"]}"/>')
 
     text(20, 75, "Collector", 44, PALETTE["ink"], "start")
@@ -255,7 +267,7 @@ def build():
     box(MID_X, 795, MID_W, 155, "jar", rx=20)
     _, _, t, s = PALETTE["jar"]
     text(MID_X + MID_W // 2, 858, "isotope-flink-udf.jar", 34, t, mono=True)
-    text(MID_X + MID_W // 2, 910, "3 PTFs + 3 UDFs", 34, s)
+    text(MID_X + MID_W // 2, 910, "4 PTFs + 3 UDFs", 34, s)
     text(MID_X + MID_W // 2, 1000, "1 JAR \u00b7 same DDL \u00b7 CP/CCAF", 34, PALETTE["muted"])
 
     # report sinks
@@ -282,6 +294,17 @@ def build():
         for j, m in enumerate(OPTIONAL_BOX["mono"]):
             text(cx, top + 110 + j * 45, m, 26, s, mono=True)
         text(cx, top + 204, OPTIONAL_BOX["foot"], 28, s)
+
+    # optional reports health monitor
+    if HEALTH_BOX:
+        fill, stroke, t, s = PALETTE["optional"]
+        hy = HEALTH_BOX["y"]
+        box(SNK_X, hy, SNK_W, 285, "optional", rx=20, dashed=True)
+        cx = SNK_X + SNK_W // 2
+        text(cx, hy + 59, HEALTH_BOX["title"], 34, t)
+        for j, m in enumerate(HEALTH_BOX["mono"]):
+            text(cx, hy + 110 + j * 45, m, 26, s, mono=True)
+        text(cx, hy + 249, HEALTH_BOX["foot"], 28, s)
 
     # notes
     for i, ln in enumerate(NOTE_LEFT):

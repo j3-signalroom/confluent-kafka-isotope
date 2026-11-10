@@ -201,11 +201,13 @@ Alongside the seven reports, both runtimes run one **collector** INSERT that for
 
 Alongside that—**additive, opt-in, and disabled by default**—the interceptor can also emit **Micrometer** metrics for **Prometheus**, with **Grafana** providing visualization ([§3.4 Prometheus Metrics Reporting with Grafana Visualization](#34-optional-prometheus-metrics-reporting-with-grafana-visualization)). This path produces the three **stateless** reports (`latency_1m`, `topology_1m`, and `hop_distribution_1m`) without requiring a stream processor. The remaining four reports continue to run in Flink because they depend on per-`trace_id` state or absence-of-event analysis, which falls outside Prometheus's query model.
 
-*(Kafka is drawn once below for brevity; each runtime provisions its own Kafka cluster.)*
+*(Kafka is drawn once in each diagram for brevity; each runtime provisions its own Kafka cluster.)*
+
+**Core: what always runs.** The optional features are drawn separately, in the second diagram.
 
 ```mermaid
 flowchart TB
-    subgraph App["app/ demo CLI + kafka-isotope-core (external tracing library)"]
+    subgraph App["app/ demo CLI + kafka-isotope-core"]
         Svc["app/App.java<br/>place · enrich · fulfill · ship verbs<br/>+ generic send · hop · consume · sink modes<br/>(or your real services)"]
         IPI["IsotopeProducerInterceptor<br/>(kafka-isotope-core)<br/>stamps UUIDv7 trace ID<br/>+ appends hop on every send()"]
         Adopt["IsotopeContext.adoptFromRecord()<br/>(kafka-isotope-core)<br/>explicit per-record adoption<br/>between consume and produce"]
@@ -215,47 +217,32 @@ flowchart TB
         Svc -- "calls per record (for bipartite)" --> Mark
     end
 
-    subgraph Kafka["Kafka event topics — Protobuf+SR DemoEvent values + isotope_consume_edge_markers markers; isotope rides in record headers"]
+    subgraph Kafka["Kafka event topics (isotope in headers)"]
         T1[("orders.placed")] --> T2[("orders.enriched")] --> T3[("orders.fulfilled")]
         TC[("isotope_consume_edge_markers<br/>value-less consume markers")]
         T4[("orders.flink_enriched<br/>produced by Flink, not a service")]
-        T5[("orders.flink_batched<br/>merged event — FRESH trace, 1 hop")]
-        TM[("isotope_merge_edge_markers<br/>one edge row per contributing trace")]
     end
 
-    IPI -- "produce (x-isotope JSON + 7 scalar headers)" --> Kafka
-    Kafka -- "consume + adopt" --> Adopt
+    IPI -- "produce (x-isotope JSON + 7 scalar headers)" --> T1
+    Adopt -. "consume + adopt" .- T1
     Mark -- "produce (forwarded headers + x-isotope-consumer-service)" --> TC
 
-    subgraph Metrics["Optional metrics path (§3.4) — 3 of the 7 reports"]
-        direction LR
-        PIM["PrometheusIsotopeMetrics<br/>(kafka-isotope-metrics)<br/>Micrometer meters · GET /metrics<br/>:9404 default; 9410/9411/9412 per stage"]
-        PROM["Prometheus<br/>windows at read time — no watermark wait"]
-        GRAF["Grafana<br/>latency · topology · hop_distribution"]
-        PIM --> PROM --> GRAF
-    end
-
-    IPI -. "opt-in flag<br/>produce-side meters" .-> PIM
-    Mark -. "consume-side meters" .-> PIM
-
-    subgraph PTF["ptf/ — isotope-flink-udf shadow JAR · 3 PTFs + 3 UDFs"]
+    subgraph PTF["ptf/ shadow JAR (core: 2 PTFs + 1 UDF)"]
         Pcts["LatencyPercentilesPTF<br/>T-Digest p50/p95/p99"]
         Stuck["StuckTracePTF<br/>per-trace state + event-time timer"]
         Hop["IsotopeAppendHop (ScalarFunction)<br/>collector, not interpreter —<br/>appends a Flink hop to the headers"]
-        MergeFn["IsotopeMergeTrace + IsotopeMergeTraceId<br/>(ScalarFunctions) fan-in collector —<br/>mints a fresh trace, ID derived from<br/>the window so both statements agree"]
-        StateFn["StateProvenancePTF (§3.5.3)<br/>state collector — per-entity version chain,<br/>content-addressed ID, parents inline<br/>(no window, no hops, no changelog)"]
     end
 
-    subgraph Flink["Flink SQL reports — identical source/view DDL; sink format differs by runtime"]
+    subgraph Flink["Flink SQL reports"]
         direction LR
         subgraph CP["minikube · Flink 2.1 CMF Application"]
             SQLCP["scripts/flink/sql/cp/*.fql<br/>(bundled in the app JAR)"]
-            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+2 with --merge-provenance<br/>+1 with --state-provenance (§3.5.3)<br/>Avro+SR sinks"]
+            JCP["IsotopeReportsJob<br/>1 StatementSet · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>Avro+SR sinks"]
             SQLCP --> JCP
         end
         subgraph CC["Confluent Cloud · CCAF"]
-            TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-ccaf.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf<br/>(+3 with trace_rca, +5 with merge_provenance,<br/>+5 with state_provenance)"]
-            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>+1 more set of 2 with merge_provenance<br/>+1 separate INSERT with state_provenance (§3.5.3)<br/>Protobuf+SR sinks"]
+            TFSQL["terraform/*.tf — 28 × confluent_flink_statement<br/>24 in setup-ccaf.tf + 4 ungated merge-UDF<br/>registrations in setup-ccaf-merge-provenance.tf"]
+            JCC["1 EXECUTE STATEMENT SET · 8 × INSERT INTO<br/>5 reports TUMBLE(1 MIN) + 2 PTF-windowed<br/>+ 1 collector (1:1)<br/>Protobuf+SR sinks"]
             TFSQL --> JCC
         end
     end
@@ -264,56 +251,85 @@ flowchart TB
     Kafka -- "read headers" --> CC
     JCP -- "write headers — ISOTOPE_APPEND_HOP<br/>appends a Flink hop" --> T4
     JCC -- "write headers — ISOTOPE_APPEND_HOP<br/>appends a Flink hop" --> T4
-    JCP -. "optional (§3.5.2) — ISOTOPE_MERGE_TRACE<br/>windowed merge, fresh trace" .-> T5
-    JCC -. "optional (§3.5.2) — ISOTOPE_MERGE_TRACE<br/>windowed merge, fresh trace" .-> T5
-    JCP -. "ISOTOPE_MERGE_TRACE_ID<br/>one row per parent" .-> TM
-    JCC -. "ISOTOPE_MERGE_TRACE_ID<br/>one row per parent" .-> TM
     PTF -- "bundled in app JAR<br/>registered programmatically" --> CP
     PTF -. "CREATE FUNCTION USING JAR" .-> CC
-
-    T5 -. "JOIN ON merge_trace_id<br/>recovers a merged record's full parent set" .- TM
-
-    SP[("isotope_state_provenance<br/>one record per emitted state —<br/>version_id + parents[]")]
-    JCP -. "optional (§3.5.3) — STATE_PROVENANCE" .-> SP
-    JCC -. "optional (§3.5.3) — STATE_PROVENANCE" .-> SP
 
     R["report sink topics<br/>latency · topology · bipartite_topology ·<br/>hop_distribution · coverage · stuck_trace ·<br/>latency_percentiles"]
     JCP --> R
     JCC --> R
 
-    subgraph AI["Optional AI trace-RCA (§3.3.2) — CCAF only, off by default"]
-        direction LR
-        MODEL["CREATE MODEL trace_rca<br/>remote text-generation model<br/>(openai default · bedrock · vertexai ·<br/>azureopenai · googleai · sagemaker · azureml)"]
-        RCAJ["INSERT … LATERAL TABLE(ML_PREDICT('trace_rca', …))<br/>one call per stuck-trace alert, never per record"]
-        MODEL --> RCAJ
-    end
-
-    RCA[("isotope_report_trace_rca_1m<br/>Protobuf+SR · root-cause hypothesis<br/>+ one-line remediation")]
-
-    R -. "stuck_trace alerts only" .-> RCAJ
-    RCAJ -. "own topic — deterministic reports untouched" .-> RCA
-
     subgraph Infra["Infrastructure"]
         direction LR
         K8S["k8s/base/ + CFK Operator + CMF 2.5 + RustFS<br/>Makefile: cp-up · cp-flink-up · cp-flink-reports-up"]
-        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 28 statements (+3 optional AI, +5 optional merge,<br/>+5 optional state provenance)<br/>Makefile: cc-flink-reports-up"]
-        MON["k8s/monitoring/<br/>Prometheus + Grafana pods; scrape host<br/>stages via host.minikube.internal<br/>Makefile: metrics-up"]
+        TF["terraform/<br/>environment + cluster + compute pool +<br/>JAR artifact + 28 statements<br/>Makefile: cc-flink-reports-up"]
     end
 
     K8S -. provisions .-> Kafka
     K8S -. provisions .-> CP
     TF -. provisions .-> Kafka
     TF -. provisions .-> CC
-    MON -. provisions .-> PROM
-    MON -. provisions .-> GRAF
-    TF -. "var.enable_trace_rca = true<br/>terraform/setup-ccaf-ai.tf" .-> AI
-    TF -. "var.enable_merge_provenance = true<br/>terraform/setup-ccaf-merge-provenance.tf" .-> TM
-    TF -. "var.enable_state_provenance = true<br/>terraform/setup-ccaf-state-provenance.tf" .-> SP
+```
 
-    classDef optional stroke-dasharray: 5
-    class AI,MODEL,RCAJ,RCA optional
-    class T5,TM,MergeFn optional
-    class SP,StateFn optional
+**Optional features: each off by default.** Every group names the section that explains it and how to turn it on. The boxes outside the groups are the core parts from the first diagram that each feature attaches to.
+
+```mermaid
+flowchart TB
+    IPI["IsotopeProducerInterceptor +<br/>IsotopeContext.recordConsume()"]
+    EV[("orders.* event topics")]
+    JCP["IsotopeReportsJob (CP)"]
+    JCC["reports statement set (CCAF)"]
+    R["report sink topics"]
+
+    subgraph Metrics["§3.4 Prometheus metrics"]
+        direction LR
+        PIM["PrometheusIsotopeMetrics<br/>(kafka-isotope-metrics)<br/>Micrometer meters · GET /metrics<br/>:9404 default; 9410/9411/9412 per stage"]
+        PROM["Prometheus<br/>windows at read time — no watermark wait"]
+        GRAF["Grafana<br/>latency · topology · hop_distribution"]
+        PIM --> PROM --> GRAF
+    end
+    IPI -. "produce- and consume-side meters" .-> PIM
+
+    subgraph Merge["§3.5.2 Fan-in provenance"]
+        MergeFn["IsotopeMergeTrace + IsotopeMergeTraceId<br/>(ScalarFunctions) — mints a fresh trace,<br/>ID derived from the window"]
+        T5[("orders.flink_batched<br/>merged event — FRESH trace, 1 hop")]
+        TM[("isotope_merge_edge_markers<br/>one edge row per contributing trace")]
+        MergeFn --> T5
+        T5 -. "JOIN ON merge_trace_id<br/>recovers the full parent set" .- TM
+    end
+    JCP -. "+2 INSERTs in the same StatementSet" .-> T5
+    JCC -. "its own statement set of 2" .-> T5
+
+    subgraph State["§3.5.3 State provenance"]
+        StateFn["StateProvenancePTF<br/>per-entity version chain,<br/>content-addressed ID, parents inline<br/>(no window, no hops, no changelog)"]
+        SP[("isotope_state_provenance<br/>one record per emitted state —<br/>version_id + parents[]")]
+        StateFn --> SP
+    end
+    EV -. "+1 INSERT (CP) · its own statement (CCAF)" .-> StateFn
+
+    subgraph Lake["§3.5.4 Lakehouse (CP only)"]
+        JLCP["IsotopeLakehouseJob<br/>separate CMF Application"]
+        ICE[("Iceberg on RustFS<br/>lakehouse.isotope.hops<br/>+ state_provenance")]
+        JLCP --> ICE
+    end
+    EV -. "every produced hop" .-> JLCP
+    SP -. "copied when state provenance is on" .-> JLCP
+
+    subgraph Health["§3.6 Reports health monitor"]
+        HealthFn["ReportsHealthPTF<br/>alerts when traffic keeps flowing<br/>but the reports stop publishing"]
+        JH["IsotopeHealthJob (CP, separate CMF Application)<br/>its own INSERT (CCAF)"]
+        HT[("isotope_reports_health<br/>STALLED · RECOVERED")]
+        HealthFn --> JH --> HT
+    end
+    EV -. "orders.placed" .-> JH
+    R -. "topology_1m" .-> JH
+
+    subgraph AI["§3.3.2 AI trace-RCA (CCAF only)"]
+        MODEL["CREATE MODEL trace_rca<br/>remote text-generation model<br/>(openai default · bedrock · vertexai ·<br/>azureopenai · googleai · sagemaker · azureml)"]
+        RCAJ["INSERT … LATERAL TABLE(ML_PREDICT('trace_rca', …))<br/>one call per stuck-trace alert, never per record"]
+        RCA[("isotope_report_trace_rca_1m<br/>Protobuf+SR · root-cause hypothesis<br/>+ one-line remediation")]
+        MODEL --> RCAJ --> RCA
+    end
+    R -. "stuck_trace alerts only" .-> RCAJ
 ```
 
 <details>
