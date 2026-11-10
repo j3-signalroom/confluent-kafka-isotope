@@ -58,11 +58,7 @@ Both scripts accept:
 
 ## **4.0 Output location**
 
-Both scripts default `--out-dir` to the **current working directory**, so a bare run from here leaves the files here — while the root README embeds `docs/image_generators/isotope-diagram.png` and `docs/image_generators/tier-ladder-diagram.png`. To regenerate the images the documentation actually displays, target the parent directory:
-
-```sh
-DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib uv run python generate_isotope_diagram.py --out-dir ..
-```
+Both scripts default `--out-dir` to the **current working directory**, and the root README embeds `docs/image_generators/isotope-diagram.png` and `docs/image_generators/tier-ladder-diagram.png`. So a bare run from this directory, which is what `make generate_isotope_diagram` does, regenerates the images the documentation actually displays. Don't pass `--out-dir ..`: that writes them to `docs/`, where nothing reads them.
 
 > Only the PNGs are committed; the SVGs are intermediates.
 
